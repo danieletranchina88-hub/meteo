@@ -18,11 +18,14 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--new", required=True)
     parser.add_argument("--old", required=True)
+    # Il volume ICON-EU pesa ~1,4 MB per ora: bastano meno ore passate.
+    parser.add_argument("--keep-hours", type=int, default=None)
     args = parser.parse_args(argv)
     if not os.path.exists(os.path.join(args.new, "index.json")):
         print("Ambiente nubi del nuovo run assente: niente da unire.")
         return 0
-    index = merge_previous(args.new, args.old)
+    index = (merge_previous(args.new, args.old) if args.keep_hours is None
+             else merge_previous(args.new, args.old, keep_past_hours=args.keep_hours))
     print(f"Ambiente nubi: {len(index['hours'])} ore disponibili "
           f"({index['hours'][0]['valid']} - {index['hours'][-1]['valid']}).")
     return 0

@@ -97,6 +97,10 @@ FIELDS = (
     # del modello, strato per strato, anche sotto una coltre alta.
     (f"c{level}", 1.0, 0.0) for level in (1000, 950, 925, 900, 875, 850, 825, 800, 775,
                                           700, 600, 500, 400, 300, 250, 200)
+) + (
+    # Base e cima delle nubi convettive di ICON-EU (HBAS_CON, HTOP_CON), m.
+    ("hbas", 1.0, 0.0),
+    ("htop", 1.0, 0.0),
 )
 # Come si riduce ogni campo facoltativo sulla griglia larga: il massimo per
 # cio' che e' piccolo e intenso (una cella convettiva), la media per il resto.
@@ -475,6 +479,22 @@ def _write_atomic(path, data: bytes) -> None:
     os.replace(partial, path)
 
 
+def _valid_tile(data: bytes, valid) -> bool:
+    """Una piastrella leggibile: ambiente/livelli (NUBA) o volume (NUBV)."""
+    try:
+        Tile.from_bytes(data, valid)
+        return True
+    except Exception:
+        pass
+    try:
+        from .icon_eu import volume_from_bytes
+
+        volume_from_bytes(data)
+        return True
+    except Exception:
+        return False
+
+
 def merge_previous(new_dir, old_dir, keep_past_hours: int = KEEP_PAST_HOURS) -> dict:
     """Porta nel nuovo ambiente le ore passate che il nuovo run non copre.
 
@@ -501,9 +521,7 @@ def merge_previous(new_dir, old_dir, keep_past_hours: int = KEEP_PAST_HOURS) -> 
             continue
         with open(source, "rb") as handle:
             data = handle.read()
-        try:
-            Tile.from_bytes(data, entry["valid"])
-        except Exception:
+        if not _valid_tile(data, entry["valid"]):
             continue
         _write_atomic(os.path.join(new_dir, entry["file"]), data)
         index["hours"].append(entry)

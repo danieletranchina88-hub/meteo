@@ -23,7 +23,7 @@ from meteo_analysis.clouds.environment import CloudEnvironmentWriter
 from meteo_analysis.clouds.environment import MAX_LEAD_HOURS as CLOUD_ENV_MAX_LEAD
 from meteo_analysis.clouds.icon_eu import COARSEN as ICON_EU_COARSEN
 from meteo_analysis.clouds.icon_eu import EU_DOMAIN as ICON_EU_DOMAIN
-from meteo_analysis.clouds.icon_eu import IconEuCloudProfile
+from meteo_analysis.clouds.icon_eu import IconEuCloudProfile, IconEuCloudVolume
 from meteo_analysis.hazards.storms import (
     bowen_ratio,
     coarsen,
@@ -1805,6 +1805,22 @@ def process_data():
     except Exception as icon_eu_error:
         print(f"2d. ICON-EU non disponibile: {icon_eu_error}", flush=True)
         icon_eu_clouds = None
+    # I livelli NATIVI di ICON-EU (una sessantina sotto i 15 km): copertura e
+    # acqua+ghiaccio di nube, ricampionati ogni 250 m. Le prime 20 ore (quelle
+    # che la timeline del satellite usa prima del run successivo).
+    icon_eu_volume = None
+    try:
+        icon_eu_volume = IconEuCloudVolume(
+            (ICON_EU_DOMAIN["south"], ICON_EU_DOMAIN["north"]),
+            (ICON_EU_DOMAIN["west"], ICON_EU_DOMAIN["east"]), factor=3)
+        ore_volume = icon_eu_volume.download(run_dt, range(0, 21))
+        print(f"2e. ICON-EU livelli nativi: {ore_volume} ore di volume dal run {icon_eu_volume.run}",
+              flush=True)
+        if not ore_volume:
+            icon_eu_volume = None
+    except Exception as icon_eu_error:
+        print(f"2e. ICON-EU livelli nativi non disponibili: {icon_eu_error}", flush=True)
+        icon_eu_volume = None
     icon_front_analyzer = prepare_icon_front_analyzer(
         run_dt, source_inventory=source_inventory, raw_archive=raw_archive
     )
@@ -3056,6 +3072,12 @@ def process_data():
                 print(f"   Nubi ICON-EU per livello: {len(indice_eu['hours'])} ore.", flush=True)
             except Exception as icon_eu_error:
                 print(f"   Nubi ICON-EU non salvate: {icon_eu_error}", flush=True)
+        if icon_eu_volume is not None:
+            try:
+                indice_vol = icon_eu_volume.write(os.path.join(TEMP_DIR, "cloud_eu_vol"), run_dt)
+                print(f"   Volume nubi ICON-EU (livelli nativi): {len(indice_vol['hours'])} ore.", flush=True)
+            except Exception as icon_eu_error:
+                print(f"   Volume nubi ICON-EU non salvato: {icon_eu_error}", flush=True)
 
         if cloud_environment is not None and cloud_environment.hours:
             try:

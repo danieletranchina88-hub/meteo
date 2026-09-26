@@ -215,6 +215,51 @@ def test_icon_eu_levels_are_interpolated_and_written():
     assert np.isnan(back["c500"][0, 0]), "il valore mancante resta mancante"
 
 
+def test_native_volume_resampling_format_and_merge():
+    """I livelli nativi di ICON-EU (quote decrescenti, seguono il terreno)
+    finiscono su quote regolari ogni 250 m; la piastrella NUBV si rilegge e
+    l'unione delle ore passate la conserva."""
+    import tempfile
+    from datetime import timedelta
+    from meteo_analysis.clouds.environment import merge_previous
+    from meteo_analysis.clouds.icon_eu import (
+        encode_condensate, resample_columns, volume_from_bytes, volume_to_bytes)
+
+    # Tre livelli nativi a 6, 3 e 0,5 km; copertura 0, 80, 20 %.
+    heights = np.array([6.0, 3.0, 0.5])[:, None, None] * np.ones((3, 2, 2))
+    values = np.array([0.0, 80.0, 20.0])[:, None, None] * np.ones((3, 2, 2))
+    zs, out = resample_columns(values, heights, dz_km=0.25, top_km=7.0)
+    at = lambda z: float(out[int(round(z / 0.25)), 0, 0])
+    assert abs(at(3.0) - 80.0) < 1e-4 and abs(at(0.5) - 20.0) < 1e-4
+    assert abs(at(1.75) - 50.0) < 1e-4, "interpolazione lineare in quota"
+    assert abs(at(4.5) - 40.0) < 1e-4
+    assert at(0.25) == 0.0 and at(6.5) == 0.0, "sotto il suolo e sopra l'ultimo livello: niente"
+    # Il condensato: 0,4 g/kg in 8 bit, quadratico.
+    code = encode_condensate(np.array([0.0, 0.0004, 0.002, 0.01]))
+    assert code[0] == 0 and code[3] == 254 and 100 < code[1] < 130
+    clc = np.clip(np.round(out), 0, 100).astype(np.uint8)
+    cond = encode_condensate(out / 1e5)
+    lats, lons = np.array([40.0, 41.0]), np.array([10.0, 11.0])
+    data = volume_to_bytes(RUN, lats, lons, zs, {"clc": (0, clc, 1.0, 0.0), "qcqi": (1, cond, 2.0, 0.0)})
+    back = volume_from_bytes(data)
+    assert back["fields"]["clc"].shape == (zs.size, 2, 2) and abs(back["dz"] - 0.25) < 1e-6
+    assert float(back["fields"]["clc"][12, 0, 0]) == 80.0
+    assert abs(float(back["fields"]["qcqi"][12, 0, 0]) - 0.8) < 0.02, "80e-5 kg/kg = 0,8 g/kg"
+    # L'unione delle ore passate accetta le piastrelle di volume.
+    with tempfile.TemporaryDirectory() as nuovo, tempfile.TemporaryDirectory() as vecchio:
+        prima = RUN - timedelta(hours=6)
+        for cartella, valid, run in ((nuovo, RUN, RUN), (vecchio, prima, prima)):
+            name = valid.strftime("%Y%m%d%H") + ".vol.gz"
+            with open(os.path.join(cartella, name), "wb") as handle:
+                handle.write(data)
+            with open(os.path.join(cartella, "index.json"), "w", encoding="utf-8") as handle:
+                json.dump({"method": "icon-eu-cloud-volume-v1", "latestRun": run.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                           "hours": [{"valid": valid.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                      "run": run.strftime("%Y-%m-%dT%H:%M:%SZ"), "lead": 0, "file": name}]}, handle)
+        index = merge_previous(nuovo, vecchio, keep_past_hours=24)
+        assert len(index["hours"]) == 2, "l'ora passata del volume si conserva"
+
+
 def test_browser_fixture_matches_the_writer():
     """scripts/tests/fixtures_cloud_env.bin.gz e' la piastrella che legge
     test_nubi_icon.js: se il writer cambia formato, va rigenerata."""

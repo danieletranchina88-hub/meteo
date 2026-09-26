@@ -7694,6 +7694,9 @@
       // La copertura nuvolosa per livello di ICON-EU (DWD) su tutta l'Europa
       // del volume: stessa struttura di piastrelle e indice.
       var NUBI_EU_URL = "data_weather/cloud_eu/";
+      // Il volume di ICON-EU sui livelli NATIVI (una sessantina sotto i 15
+      // km), ricampionato ogni 250 m: copertura e acqua+ghiaccio di nube.
+      var VOLUME_EU_URL = "data_weather/cloud_eu_vol/";
       var ambienteIndici = {};
       var ambientePiastrelle = {}, ambienteOrdine = [];
 
@@ -7741,12 +7744,41 @@
         return fuori;
       }
 
+      // La piastrella di volume (NUBV): i codici a 8 bit restano tali, la
+      // decodifica si fa solo quando serve.
+      function leggiVolume(buffer) {
+        var v = new DataView(buffer);
+        if (v.getUint8(0) !== 78 || v.getUint8(1) !== 85 || v.getUint8(2) !== 66 || v.getUint8(3) !== 86) {
+          throw new Error("piastrella di volume non riconosciuta");
+        }
+        var quanti = v.getUint8(5), nx = v.getUint16(6, true), ny = v.getUint16(8, true), nz = v.getUint16(10, true);
+        var fuori = {
+          volume: true, nx: nx, ny: ny, nz: nz,
+          sud: v.getFloat32(12, true), nord: v.getFloat32(16, true),
+          ovest: v.getFloat32(20, true), est: v.getFloat32(24, true),
+          z0: v.getFloat32(28, true), dz: v.getFloat32(32, true), campi: {}
+        };
+        var pos = 36, specifiche = [];
+        for (var i = 0; i < quanti; i++) {
+          var nome = "";
+          for (var c = 0; c < 8; c++) { var b = v.getUint8(pos + c); if (b) nome += String.fromCharCode(b); }
+          specifiche.push({ nome: nome, codifica: v.getUint8(pos + 8), scala: v.getFloat32(pos + 9, true) });
+          pos += 17;
+        }
+        specifiche.forEach(function (sp) {
+          fuori.campi[sp.nome] = new Uint8Array(buffer.slice(pos, pos + nx * ny * nz));
+          fuori.campi[sp.nome].specifica = sp;
+          pos += nx * ny * nz;
+        });
+        return fuori;
+      }
+
       function piastrellaAmbiente(file, url) {
         var chiave = (url || AMBIENTE_URL) + file;
         if (!ambientePiastrelle[chiave]) {
           ambientePiastrelle[chiave] = fetchDecompressedResponse(chiave)
             .then(function (r) { return r.arrayBuffer(); })
-            .then(leggiPiastrella)
+            .then(function (b) { return /\.vol\.gz$/.test(file) ? leggiVolume(b) : leggiPiastrella(b); })
             .catch(function () { delete ambientePiastrelle[chiave]; return null; });
           ambienteOrdine.push(chiave);
           // Scorrendo la timeline bastano poche ore in memoria.
@@ -7790,12 +7822,42 @@
       // ICON-2I (sull'Italia) e, accanto, la copertura per livello di ICON-EU
       // (in Europa): senza ICON-2I resta ICON-EU da solo.
       function ambienteAllIstante(epoca) {
-        return Promise.all([serieAllIstante(epoca, AMBIENTE_URL), serieAllIstante(epoca, NUBI_EU_URL)])
+        return Promise.all([serieAllIstante(epoca, AMBIENTE_URL), serieAllIstante(epoca, NUBI_EU_URL),
+          volumeAllIstante(epoca)])
           .then(function (d) {
-            var amb = d[0], eu = d[1];
-            if (amb) { amb.eu = eu; return amb; }
-            return eu ? { soloEU: true, eu: eu, modo: eu.modo, run: eu.run, distanza: eu.distanza } : null;
+            var amb = d[0], eu = d[1], vol = d[2];
+            if (amb) { amb.eu = eu; amb.vol = vol; return amb; }
+            if (!eu && !vol) return null;
+            var rif = eu || { modo: "vicino", run: null, distanza: 0 };
+            return { soloEU: true, eu: eu, vol: vol, modo: rif.modo, run: rif.run, distanza: rif.distanza };
           }).catch(function () { return null; });
+      }
+
+      // Il volume all'istante: fra due ore si mescolano i codici (copertura
+      // lineare, condensato gia' in scala quadratica: abbastanza vicino).
+      function volumeAllIstante(epoca) {
+        return indiceAmbiente(VOLUME_EU_URL).then(function (indice) {
+          var scelta = indice && mescolaOreAmbiente(indice.hours, epoca);
+          if (!scelta) return null;
+          return Promise.all([piastrellaAmbiente(scelta.prima.file, VOLUME_EU_URL),
+            scelta.dopo === scelta.prima ? null : piastrellaAmbiente(scelta.dopo.file, VOLUME_EU_URL)])
+            .then(function (p) {
+              var a = p[0], b = p[1];
+              if (!a) return null;
+              if (!b || b.nx !== a.nx || b.ny !== a.ny || b.nz !== a.nz || scelta.peso <= 0) return a;
+              var campi = {};
+              Object.keys(a.campi).forEach(function (nome) {
+                var x = a.campi[nome], y = b.campi[nome] || x, z = new Uint8Array(x.length);
+                for (var k = 0; k < x.length; k++) {
+                  z[k] = (x[k] === 255 || y[k] === 255) ? (x[k] === 255 ? y[k] : x[k])
+                    : Math.round(x[k] + (y[k] - x[k]) * scelta.peso);
+                }
+                z.specifica = x.specifica;
+                campi[nome] = z;
+              });
+              return Object.assign({}, a, { campi: campi });
+            });
+        }).catch(function () { return null; });
       }
 
       function serieAllIstante(epoca, url) {
@@ -7872,7 +7934,7 @@
       }
 
       function ambienteSulCampo(amb, w, h) {
-        var nomiEU = LIVELLI_ICON_EU.map(function (l) { return "c" + l[0]; });
+        var nomiEU = LIVELLI_ICON_EU.map(function (l) { return "c" + l[0]; }).concat(["hbas", "htop"]);
         if (amb.soloEU) {
           // Solo ICON-EU: nessun ambiente termodinamico, il satellite fa da
           // solo come prima; gli strati per quota ci sono.
@@ -7880,12 +7942,13 @@
             lcl: new Float32Array(n0).fill(BASE_CUMULO_KM), t2m: new Float32Array(n0).fill(NaN),
             gradiente: new Float32Array(n0).fill(6.5), suolo: new Float32Array(n0),
             convezione: new Float32Array(n0), disponibile: new Float32Array(n0),
-            extra: campiSulCampo(amb.eu, nomiEU, w, h)
+            extra: amb.eu ? campiSulCampo(amb.eu, nomiEU, w, h) : {}
           };
-          solo.modo = amb.modo; solo.run = amb.run; solo.distanza = amb.distanza;
+          solo.modo = amb.modo; solo.run = amb.run; solo.distanza = amb.distanza; solo.volume = amb.vol || null;
           return solo;
         }
         var conEU = ambienteSulCampoIcon2I(amb, w, h);
+        conEU.volume = amb.vol || null;
         if (amb.eu) {
           var livelliEU = campiSulCampo(amb.eu, nomiEU, w, h);
           Object.keys(livelliEU).forEach(function (nome) { conEU.extra[nome] = livelliEU[nome]; });
@@ -9931,7 +9994,8 @@
         [825, 1.700], [800, 1.949], [775, 2.204], [700, 3.012], [600, 4.206], [500, 5.574],
         [400, 7.185], [300, 9.164], [250, 10.363], [200, 11.784]
       ];
-      var MODELLO_NZ = 33, MODELLO_PASSO_KM = 0.5;
+      // La colonna del modello nel browser: 65 quote, una ogni 250 m fino a 16 km.
+      var MODELLO_NZ = 65, MODELLO_PASSO_KM = 0.25;
       // Dalla piastrella (per livello) alla colonna a quote regolari; null se
       // la piastrella non ha la copertura per livello (ore vecchie).
       function nubiDelModello(ex, giu, n) {
@@ -9965,7 +10029,43 @@
             dati[z * n + k] = Math.round(c * 255);
           }
         }
-        return { dati: dati, nz: MODELLO_NZ, passoKm: MODELLO_PASSO_KM };
+        return { dati: dati, condensato: null, nz: MODELLO_NZ, passoKm: MODELLO_PASSO_KM, fonte: "livelli isobarici" };
+      }
+
+      // Dal volume ICON-EU sui livelli nativi (griglia lat/lon regolare, quote
+      // regolari) alla griglia dello stato: copertura e condensato per quota.
+      function modelloDalVolume(vol, w, h) {
+        var clc = vol.campi.clc, qc = vol.campi.qcqi;
+        if (!clc) return null;
+        var n = w * h, dati = new Uint8Array(n * MODELLO_NZ), cond = new Uint8Array(n * MODELLO_NZ);
+        var passoLat = (vol.nord - vol.sud) / Math.max(1, vol.ny - 1);
+        var passoLon = (vol.est - vol.ovest) / Math.max(1, vol.nx - 1);
+        var pianoV = vol.nx * vol.ny, r = riquadroMercatore();
+        // Per ogni quota del browser, la quota del volume che le corrisponde.
+        var zv = new Int32Array(MODELLO_NZ);
+        for (var z = 0; z < MODELLO_NZ; z++) {
+          zv[z] = Math.round((z * MODELLO_PASSO_KM - vol.z0) / vol.dz);
+        }
+        for (var y = 0; y < h; y++) {
+          var my = r.nord - (y + 0.5) / h * (r.nord - r.sud);
+          var lat = (2 * Math.atan(Math.exp(my / RAGGIO_TERRA)) - Math.PI / 2) * 180 / Math.PI;
+          var iy = Math.round((lat - vol.sud) / passoLat);
+          if (iy < 0 || iy >= vol.ny) continue;
+          for (var x = 0; x < w; x++) {
+            var lon = DOMINIO.ovest + (x + 0.5) / w * (DOMINIO.est - DOMINIO.ovest);
+            var ix = Math.round((lon - vol.ovest) / passoLon);
+            if (ix < 0 || ix >= vol.nx) continue;
+            var sorgente = iy * vol.nx + ix, k = y * w + x;
+            for (z = 0; z < MODELLO_NZ; z++) {
+              if (zv[z] < 0 || zv[z] >= vol.nz) continue;
+              var c = clc[zv[z] * pianoV + sorgente];
+              if (c !== 255) dati[z * n + k] = Math.round(Math.min(100, c) * 2.55);
+              if (qc) { var q = qc[zv[z] * pianoV + sorgente]; if (q !== 255) cond[z * n + k] = q; }
+            }
+          }
+        }
+        return { dati: dati, condensato: qc ? cond : null, nz: MODELLO_NZ, passoKm: MODELLO_PASSO_KM,
+          fonte: "livelli nativi" };
       }
 
       function costruisciStato(campo, precedenti) {
@@ -9998,12 +10098,30 @@
           "depth", "rhmid", "stab"]
           .forEach(function (nome) { if (ex[nome]) ingresso[nome] = giu(ex[nome]); });
         if (amb && amb.gradiente) ingresso.gradiente = giu(amb.gradiente);
+        // LA SCALA DAI DATI anche fuori da ICON-2I: base e cima delle nubi
+        // convettive di ICON-EU (HBAS_CON, HTOP_CON) danno la base delle torri
+        // e lo spessore consentito. Dentro ICON-2I restano LCL e livello di
+        // equilibrio di ICON-2I, piu' fini.
+        if (ex.hbas && ingresso.lcl) {
+          var hb = giu(ex.hbas), ht = ex.htop ? giu(ex.htop) : null;
+          if (!ingresso.depth) ingresso.depth = new Float32Array(w2 * h2).fill(NaN);
+          for (k = 0; k < hb.length; k++) {
+            if (ingresso.disponibile && ingresso.disponibile[k] > 0.5) continue;
+            if (!Number.isFinite(hb[k])) continue;
+            ingresso.lcl[k] = hb[k] / 1000;
+            if (ht && Number.isFinite(ht[k]) && ht[k] > hb[k]) ingresso.depth[k] = ht[k] - hb[k];
+          }
+          ingresso.baseConvettiva = hb;
+        }
         if (campo.evidenzaSat && campo.evidenzaSat.basseAcqua) {
           var e = campo.evidenzaSat;
           ingresso.nebbia = ricampiona(e.basseAcqua, e.larghezza, e.altezza, w2, h2);
         }
         var stato = inferisciStati(ingresso);
-        stato.modello = nubiDelModello(ex, giu, w2 * h2);
+        // Il modello per quota: il volume sui livelli nativi di ICON-EU se c'e',
+        // altrimenti i livelli isobarici.
+        stato.modello = (amb && amb.volume ? modelloDalVolume(amb.volume, w2, h2) : null)
+          || nubiDelModello(ex, giu, w2 * h2);
         var torri = trovaTorri(ingresso, stato, precedenti ? precedenti.torri : null,
           precedenti ? (campo.epoca - precedenti.epoca) / 60000 : 999, campo.torri || null);
         stato.ingresso = ingresso;
@@ -10375,6 +10493,7 @@
         "uniform sampler3D uNubiModello; // ICON-EU: frazione di nube per quota (0-16 km, 500 m)",
         "uniform float uModelloNubi;    // 1: la frazione per quota c'e'",
         "uniform float uModelloPassoKm;",
+        "uniform float uCondensatoNoto; // 1: il canale G ha acqua+ghiaccio di nube (livelli nativi)",
         "uniform sampler3D uVuoto;     // km minimi dalla nube piu' vicina (griglia grossa)",
         "uniform float uVuotoKm;       // fondoscala della griglia del vuoto",
         "uniform float uVuotoQuotaKm;  // quota coperta dalla griglia del vuoto",
@@ -10541,10 +10660,13 @@
         "",
         "// LA FRAZIONE DI NUBE DEL MODELLO alla quota data (ICON-EU, DWD): la",
         "// struttura verticale che il satellite non vede. -1 se non c'e'.",
-        "float nubeDelModello(vec2 uv, float altKm) {",
-        "  if (uModelloNubi < 0.5) return -1.0;",
+        "// x: frazione di nube; y: acqua+ghiaccio di nube in g/kg (-1 se non noto).",
+        "vec2 nubeDelModello(vec2 uv, float altKm) {",
+        "  if (uModelloNubi < 0.5) return vec2(-1.0);",
         "  float nz = float(textureSize(uNubiModello, 0).z);",
-        "  return textureLod(uNubiModello, vec3(uv, (altKm / uModelloPassoKm + 0.5) / nz), 0.0).r;",
+        "  vec2 v = textureLod(uNubiModello, vec3(uv, (altKm / uModelloPassoKm + 0.5) / nz), 0.0).rg;",
+        "  float g = v.y * 255.0 / 254.0;",
+        "  return vec2(v.x, uCondensatoNoto > 0.5 ? g * g * 2.0 : -1.0);",
         "}",
         "",
         "// La colonna: lo stato inferito della cella (texture) e gli oggetti.",
@@ -10645,7 +10767,10 @@
         "  // massa dove il modello ha nube (negli strati, meno nei cumuliformi e",
         "  // mai nelle torri); SOTTO la fascia -- dove il satellite non vede,",
         "  // coperto dalla nube alta -- disegna gli strati del modello.",
-        "  float cm = campo.g >= 0.004 ? nubeDelModello(uv, altKm) : -1.0;",
+        "  vec2 modello = campo.g >= 0.004 ? nubeDelModello(uv, altKm) : vec2(-1.0);",
+        "  float cm = modello.x;",
+        "  // Quanto e' densa la nube del modello (acqua+ghiaccio): scala l'opacita'.",
+        "  float densitaModello = modello.y >= 0.0 ? mix(0.45, 1.25, smoothstep(0.0, 0.4, modello.y)) : 1.0;",
         "  if (cm >= 0.0) {",
         "    if (altKm >= baseKm && pTorri < profilo + 1e-4) {",
         "      profilo *= mix(1.0, smoothstep(0.02, 0.35, cm), 0.55 * (1.0 - 0.7 * cumulo));",
@@ -10666,11 +10791,17 @@
         "  }",
         "  gTipoCampione = uDebugTipi > 0.5 ? texelFetch(uMorfo2, ivec2(uv * vec2(textureSize(uMorfo2, 0))), 0).b * 255.0 : 0.0;",
         "  if (profilo <= 0.0) return pioggiaD;",
-        "  float scalaDensita = mix(0.35, 1.0, campo.g);",
+        "  float scalaDensita = mix(0.35, 1.0, campo.g) * mix(1.0, densitaModello, 0.6);",
         "  // LA FORMA (Horizon Zero Dawn, Nubis 2022): il profilo fa da copertura",
         "  // sul rumore degli ammassi -- dove il rumore supera 1 - profilo c'e'",
         "  // nube. I cirri lo leggono stirato nel verso del vento in quota.",
         "  vec3 qn = vec3(q.xy + deforma, q.z);",
+        "  // IL RUMORE GUIDATO DAI DATI. Lo shear: salendo, i lobi dei cumuli e",
+        "  // delle torri si spostano sottovento (il vento in quota della cella).",
+        "  vec2 ventoCella = m3.ba * 2.0 - 1.0;",
+        "  if (dot(ventoCella, ventoCella) > 0.25 && cumulo > 0.05) {",
+        "    qn.xy -= normalize(ventoCella) * q.z * 0.18 * cumulo;",
+        "  }",
         "  if (fibra > 0.02) {",
         "    // Il vento in quota DELLA CELLA (250 hPa, o lo shear), non uno solo per",
         "    // tutta la scena: i cirri si stirano ognuno nel suo verso.",
@@ -10708,7 +10839,10 @@
         "  }",
         "  // L'erosione morde il bordo tenue, non il nucleo; da lontano, sotto il",
         "  // pixel, si spegne e resta la forma.",
-        "  composto *= mix(uContrasto, uErosione, tipo) * (1.0 - smoothstep(1.0, 3.5, lodDet));",
+        "  // La durezza (aria instabile e secca) fa i cavolfiori piu' netti; il CAPE",
+        "  // li accende verso le cime, dove la corrente ascendente ribolle.",
+        "  composto = mix(composto, billowy, 0.35 * campo.a * smoothstep(0.4, 1.0, hRel) * tipo);",
+        "  composto *= mix(uContrasto, uErosione, tipo) * mix(0.85, 1.2, durezza) * (1.0 - smoothstep(1.0, 3.5, lodDet));",
         "  float d = saturare(rimappa(base, composto, 1.0, 0.0, 1.0));",
         "  // Nitidezza di Nubis3: piu' marcata dove la nube e' tenue.",
         "  float ps = pow(scalaDensita, 4.0);",
@@ -11379,10 +11513,17 @@
             this.modelloPerVuoto = null;
             this.modelloPronto = false;
             if (stato.modello) {
+              // R copertura, G acqua+ghiaccio di nube (0 = non noto).
+              var md = stato.modello, rg = new Uint8Array(md.dati.length * 2);
+              for (var iq = 0; iq < md.dati.length; iq++) {
+                rg[2 * iq] = md.dati[iq];
+                rg[2 * iq + 1] = md.condensato ? md.condensato[iq] : 0;
+              }
               gl.bindTexture(gl.TEXTURE_3D, this.texModello);
               gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-              gl.texImage3D(gl.TEXTURE_3D, 0, gl.R8, stato.larghezza, stato.altezza, stato.modello.nz, 0,
-                gl.RED, gl.UNSIGNED_BYTE, stato.modello.dati);
+              gl.texImage3D(gl.TEXTURE_3D, 0, gl.RG8, stato.larghezza, stato.altezza, md.nz, 0,
+                gl.RG, gl.UNSIGNED_BYTE, rg);
+              this.condensatoNoto = !!md.condensato;
               this.modelloPronto = true;
               this.modelloPerVuoto = { dati: stato.modello.dati, larghezza: stato.larghezza,
                 altezza: stato.altezza, nz: stato.modello.nz, passoKm: stato.modello.passoKm };
@@ -11840,6 +11981,7 @@
         gl.uniform1i(u("uNubiModello"), 8);
         gl.uniform1f(u("uModelloNubi"), this.modelloPronto ? 1 : 0);
         gl.uniform1f(u("uModelloPassoKm"), MODELLO_PASSO_KM);
+        gl.uniform1f(u("uCondensatoNoto"), this.modelloPronto && this.condensatoNoto ? 1 : 0);
         gl.activeTexture(gl.TEXTURE6);
         gl.bindTexture(gl.TEXTURE_3D, this.texVuoto);
         gl.uniform1i(u("uVuoto"), 6);
@@ -12903,7 +13045,8 @@
           + (stato.secondo[k] ? " (alternativa: " + secondo.nome + ")" : ""));
         righe.push("Cima " + numero(stato.cima[k], 1) + " km (osservata: CTH/IR)"
           + " · base " + numero(stato.base[k], 1) + " km ("
-          + (val("disponibile") > 0.5 ? "inferita da LCL ICON-2I" : "inferita per tipo, fuori da ICON-2I") + ")"
+          + (val("disponibile") > 0.5 ? "inferita da LCL ICON-2I"
+            : Number.isFinite(val("baseConvettiva")) ? "base convettiva ICON-EU" : "inferita per tipo, fuori da ICON-2I") + ")"
           + " · spessore " + numero(stato.cima[k] - stato.base[k], 1) + " km");
         var bt = val("btC");
         if (Number.isFinite(bt)) righe.push("Temperatura della sommita' " + Math.round(bt) + " °C (IR, osservata)");
@@ -12930,7 +13073,8 @@
               inizio = -1;
             }
           }
-          righe.push("Strati del modello ICON-EU: " + (strati.length ? strati.join(", ") : "nessuno"));
+          righe.push("Strati del modello ICON-EU (" + (md.fonte || "livelli") + "): "
+            + (strati.length ? strati.join(", ") : "nessuno"));
         }
         amb.push("durezza " + Math.round(stato.durezza[k] * 100) + "% ("
           + (stato.durezza[k] > 0.6 ? "cumulo compatto" : stato.durezza[k] < 0.35 ? "strato soffice" : "intermedia") + ")");
@@ -12944,7 +13088,7 @@
         if (val("disponibile") > 0.5) {
           if (amb.length) righe.push("ICON-2I (modello): " + amb.join(" · "));
         } else {
-          righe.push("Fuori dal dominio ICON-2I: forma dal satellite e dal tipo, strati da ICON-EU");
+          righe.push("Fuori dal dominio ICON-2I: forma dal satellite e dal tipo, strati e scala da ICON-EU");
         }
         var oss = [];
         if (Number.isFinite(val("dbz")) && val("dbz") >= 15) oss.push("radar " + Math.round(val("dbz")) + " dBZ");

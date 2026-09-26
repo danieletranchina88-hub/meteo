@@ -335,3 +335,39 @@ Nel browser:
   satellite non vede, disegna gli strati del modello (prova GPU "Strati");
 - la griglia del vuoto include gli strati del modello;
 - l'ispezione al tocco elenca gli strati ICON-EU della colonna.
+
+## I livelli nativi di ICON-EU e la regola archetipo / dati / rumore
+
+La strada dei simulatori (Microsoft Flight Simulator): **l'archetipo definisce
+la topologia, i dati la scala e le proporzioni, il rumore il dettaglio e la
+variazione fra celle.** Qui:
+
+- **Archetipo** (motore d'inferenza, nello shader come inviluppo): per il
+  cumulonembo capsula verticale con base piatta, cupola schiacciata in cima,
+  incudine orizzontale in quota; per i cumuli corpo a riempimento costante
+  con base netta; strati a lastra; cirri a fasce.
+- **Dati**:
+  - sull'Italia ICON-2I: LCL, livello di equilibrio (spessore), stabilita',
+    UR, shear 0-6 km (inclinazione), vento a 250 hPa (incudine, cirri);
+  - in tutta l'Europa del volume ICON-EU: base e cima delle nubi convettive
+    (HBAS_CON, HTOP_CON) per base e spessore delle torri, e la colonna di nube
+    sui **livelli nativi**.
+- **Rumore guidato**: la durezza fa i cavolfiori piu' netti, il CAPE li
+  accende verso le cime, lo shear sposta i lobi sottovento salendo.
+
+### Il volume sui livelli nativi (`data_weather/cloud_eu_vol/`)
+
+ICON-EU ha 74 livelli del modello; sotto i 15 km ce ne sono una sessantina, a
+130-300 m l'uno dall'altro (i livelli isobarici 700/600/500/400/300 hPa
+distano 1,2-2 km). Per le ore 0-20 di ogni run si scaricano i livelli
+14-74 di CLC (copertura), QC e QI (acqua e ghiaccio di nube), si leggono le
+quote vere dal file fisso HHL e ogni colonna si ricampiona **ogni 250 m da 0
+a 16 km (65 quote)**, a 0,1875 gradi (~18 km: il dettaglio orizzontale lo da'
+il satellite). Formato `NUBV` (gzip): copertura in % e condensato in scala
+quadratica fino a 2 g/kg, 8 bit; ~1,4 MB per ora; si conservano 24 ore
+passate. La serie isobarica `cloud_eu/` resta per le ore oltre la 20 e porta
+HBAS/HTOP.
+
+Nel browser la colonna del modello ha 65 quote (250 m) in una texture 3D a due
+canali: copertura (dove c'e' nube, anche sotto una coltre) e condensato (quanto
+e' densa: scala l'opacita').

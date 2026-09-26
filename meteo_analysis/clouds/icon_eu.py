@@ -97,11 +97,44 @@ class IconEuCloudProfile:
         self.longitudes = None
         # valid time -> livello -> copertura % (uint8, 255 = mancante)
         self.data: dict[datetime, dict[int, np.ndarray]] = {}
+        # valid time -> base/cima delle nubi convettive (m sul mare)
+        self.single: dict[datetime, dict[str, np.ndarray]] = {}
         self.run: datetime | None = None
         self.session = requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
 
     # --- scaricamento --------------------------------------------------------
+    def _crop(self, result):
+        if result is None:
+            return None
+        values, lats, lons = result
+        jlat = (lats >= self.south) & (lats <= self.north)
+        jlon = (lons >= self.west) & (lons <= self.east)
+        crop = values[np.ix_(jlat, jlon)].astype(np.float32)
+        clat, clon = lats[jlat], lons[jlon]
+        f = self.factor
+        if f > 1:
+            ny, nx = (crop.shape[0] // f) * f, (crop.shape[1] // f) * f
+            with np.errstate(invalid="ignore"):
+                crop = np.nanmean(np.nanmean(crop[:ny, :nx].reshape(ny // f, f, nx // f, f), axis=3), axis=1)
+            clat = clat[:ny].reshape(-1, f).mean(axis=1)
+            clon = clon[:nx].reshape(-1, f).mean(axis=1)
+        if self.latitudes is None:
+            self.latitudes, self.longitudes = clat, clon
+        return crop if crop.shape == (self.latitudes.size, self.longitudes.size) else None
+
+    def _get(self, url):
+        for _ in range(3):
+            try:
+                r = self.session.get(url, timeout=(15, 120))
+                if r.status_code == 404:
+                    return None
+                r.raise_for_status()
+                return decode_regular_grib(bz2.decompress(r.content))
+            except Exception:
+                continue
+        return None
+
     def _exists(self, url: str) -> bool:
         try:
             r = self.session.head(url, timeout=(10, 30), allow_redirects=True)
@@ -179,6 +212,19 @@ class IconEuCloudProfile:
                 valid = target_run + timedelta(hours=lead)
                 self.data.setdefault(valid, {})[level] = packed
                 count += 1
+        # Base e cima delle nubi convettive: la scala delle torri in Europa.
+        singoli = [(lead, var) for lead in leads for var in ("HBAS_CON", "HTOP_CON")
+                   if 0 <= lead + offset <= MAX_STEP_HOURS]
+
+        def singolo(job):
+            lead, var = job
+            return job, self._crop(self._get(single_level_url(run, lead + offset, var)))
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for (lead, var), arr in pool.map(singolo, singoli):
+                valid = target_run + timedelta(hours=lead)
+                if arr is not None and valid in self.data:
+                    self.single.setdefault(valid, {})[var.lower().replace("_con", "")] = arr
         return count
 
     # --- lettura ---------------------------------------------------------------
@@ -223,12 +269,201 @@ class IconEuCloudProfile:
                 values = packed.astype(np.float64)
                 values[packed == 255] = np.nan
                 fields[field_name(level)] = values
+            for name, values in self.single.get(valid, {}).items():
+                # HBAS/HTOP: -999 o 0 dove non c'e' convezione nel modello.
+                v = np.asarray(values, dtype=np.float64)
+                fields[name] = np.where(v > 10.0, v, np.nan)
             tile = Tile(valid, self.latitudes, self.longitudes, fields)
             name = tile_name(valid)
             _write_atomic(os.path.join(directory, name), tile.to_bytes())
             lead = int((valid - target_run).total_seconds() // 3600)
             entries.append({"valid": iso(valid), "run": iso(self.run or target_run), "lead": lead, "file": name})
         index = {"method": METHOD, "latestRun": iso(target_run), "hours": entries}
+        _write_atomic(os.path.join(directory, "index.json"),
+                      json.dumps(index, separators=(",", ":")).encode("utf-8"))
+        return index
+
+
+# --- i livelli NATIVI del modello (74, dal suolo a ~23 km) ---------------------
+# Sotto i 15 km ce ne sono una sessantina, a 130-300 m l'uno dall'altro: tre
+# volte i livelli isobarici. Per ognuno: frazione di nube CLC e acqua e
+# ghiaccio di nube (QC, QI), cioe' QUANTO e' densa la nube, non solo se c'e'.
+# Le quote vengono dal file fisso HHL (quota dei mezzi livelli sul mare).
+NATIVE_FIRST_LEVEL = 14          # ~15-16 km: sopra non ci sono nubi del volume
+NATIVE_LAST_LEVEL = 74           # il livello piu' basso, sul suolo
+VOLUME_DZ_KM = 0.25              # la colonna ricampionata a quote regolari
+VOLUME_TOP_KM = 16.0
+VOLUME_METHOD = "icon-eu-cloud-volume-v1"
+VOLUME_MAGIC = b"NUBV"
+# Il contenuto d'acqua + ghiaccio (g/kg) in 8 bit: quadratico fino a 2 g/kg,
+# fine dove la nube e' tenue.
+CONDENSATE_MAX_G_KG = 2.0
+
+
+def model_level_url(run: datetime, step: int, level: int, var: str) -> str:
+    return (f"{BASE_URL}/{run:%H}/{var.lower()}/icon-eu_europe_regular-lat-lon_model-level_"
+            f"{run:%Y%m%d%H}_{int(step):03d}_{int(level)}_{var.upper()}.grib2.bz2")
+
+
+def hhl_url(run: datetime, half_level: int) -> str:
+    return (f"{BASE_URL}/{run:%H}/hhl/icon-eu_europe_regular-lat-lon_time-invariant_"
+            f"{run:%Y%m%d%H}_{int(half_level)}_HHL.grib2.bz2")
+
+
+def single_level_url(run: datetime, step: int, var: str) -> str:
+    return (f"{BASE_URL}/{run:%H}/{var.lower()}/icon-eu_europe_regular-lat-lon_single-level_"
+            f"{run:%Y%m%d%H}_{int(step):03d}_{var.upper()}.grib2.bz2")
+
+
+def resample_columns(values, heights_km, dz_km=VOLUME_DZ_KM, top_km=VOLUME_TOP_KM):
+    """Da livelli nativi (k, ny, nx; quote decrescenti con k) a quote regolari.
+
+    Interpolazione lineare in quota fra i due livelli che racchiudono ogni
+    quota; sotto il livello piu' basso (sottosuolo) e sopra il piu' alto 0.
+    """
+    values = np.asarray(values, dtype=np.float32)
+    heights = np.asarray(heights_km, dtype=np.float32)
+    zs = np.arange(0.0, top_km + 1e-6, dz_km, dtype=np.float32)
+    out = np.zeros((zs.size,) + values.shape[1:], dtype=np.float32)
+    for j, z in enumerate(zs):
+        found = np.zeros(values.shape[1:], dtype=bool)
+        for k in range(values.shape[0] - 1):
+            upper, lower = heights[k], heights[k + 1]
+            inside = (~found) & (z <= upper) & (z >= lower)
+            if not inside.any():
+                continue
+            w = np.where(upper > lower, (z - lower) / np.maximum(upper - lower, 1e-6), 0.0)
+            v = values[k + 1] + (values[k] - values[k + 1]) * w
+            out[j] = np.where(inside, v, out[j])
+            found |= inside
+    return zs, out
+
+
+def encode_condensate(q_kg_kg):
+    g = np.clip(np.nan_to_num(np.asarray(q_kg_kg, dtype=np.float32), nan=0.0) * 1000.0, 0.0, CONDENSATE_MAX_G_KG)
+    return np.round(np.sqrt(g / CONDENSATE_MAX_G_KG) * 254).astype(np.uint8)
+
+
+def volume_to_bytes(valid, lats, lons, zs, fields) -> bytes:
+    """Piastrella di volume (gzip, little-endian)::
+
+        "NUBV" u8 versione u8 campi u16 nx u16 ny u16 nz
+        f32 sud f32 nord f32 ovest f32 est  f32 z0_km f32 dz_km
+        per campo: 8 byte nome, u8 codifica (0 lineare, 1 quadratica),
+                   f32 scala, f32 offset
+        per campo: nz*ny*nx uint8, ordine (z, y, x), riga 0 = sud; 255 = mancante
+    """
+    import gzip
+    import struct
+
+    nz, ny, nx = next(iter(fields.values()))[1].shape
+    head = VOLUME_MAGIC + struct.pack("<BBHHH", 1, len(fields), nx, ny, nz)
+    head += struct.pack("<ffffff", float(lats[0]), float(lats[-1]), float(lons[0]), float(lons[-1]),
+                        float(zs[0]), float(zs[1] - zs[0]))
+    body = b""
+    for name, (encoding, codes, scale, offset) in fields.items():
+        head += name.encode("ascii").ljust(8, b"\0") + struct.pack("<Bff", encoding, scale, offset)
+        body += np.ascontiguousarray(codes, dtype=np.uint8).tobytes()
+    return gzip.compress(head + body, compresslevel=9, mtime=0)
+
+
+def volume_from_bytes(data: bytes):
+    import gzip
+    import struct
+
+    raw = gzip.decompress(data)
+    if raw[:4] != VOLUME_MAGIC:
+        raise ValueError("piastrella di volume non riconosciuta")
+    _, count, nx, ny, nz = struct.unpack_from("<BBHHH", raw, 4)
+    s, n, w, e, z0, dz = struct.unpack_from("<ffffff", raw, 12)
+    pos, specs = 36, []
+    for _ in range(count):
+        name = raw[pos:pos + 8].rstrip(b"\0").decode("ascii")
+        encoding, scale, offset = struct.unpack_from("<Bff", raw, pos + 8)
+        specs.append((name, encoding, scale, offset))
+        pos += 17
+    fields = {}
+    for name, encoding, scale, offset in specs:
+        codes = np.frombuffer(raw, dtype=np.uint8, count=nx * ny * nz, offset=pos).reshape(nz, ny, nx)
+        pos += nx * ny * nz
+        if encoding == 1:
+            values = (codes.astype(np.float32) / 254.0) ** 2 * scale + offset
+        else:
+            values = codes.astype(np.float32) * scale + offset
+        fields[name] = np.where(codes == 255, np.nan, values)
+    return {"south": s, "north": n, "west": w, "east": e, "z0": z0, "dz": dz, "fields": fields}
+
+
+class IconEuCloudVolume(IconEuCloudProfile):
+    """La colonna di nube di ICON-EU sui livelli nativi, a quote regolari."""
+
+    def __init__(self, lat_bounds, lon_bounds, factor: int = 3) -> None:
+        super().__init__(lat_bounds, lon_bounds, margin_deg=0.0, factor=factor)
+        self.tiles: dict[datetime, bytes] = {}
+        self.heights_km = None  # (livelli, ny, nx) quote dei livelli pieni
+
+    def load_heights(self, run: datetime, workers: int = WORKERS) -> bool:
+        halves = list(range(NATIVE_FIRST_LEVEL, NATIVE_LAST_LEVEL + 2))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            got = list(pool.map(lambda h: self._crop(self._get(hhl_url(run, h))), halves))
+        if any(g is None for g in got):
+            return False
+        half = np.stack(got) / 1000.0
+        self.heights_km = 0.5 * (half[:-1] + half[1:])   # livelli pieni
+        return True
+
+    def download(self, target_run: datetime, leads, workers: int = WORKERS) -> int:
+        leads = sorted({int(v) for v in leads})
+        run = self.choose_run(target_run, leads[0]) if leads else None
+        if run is None or not self.load_heights(run, workers):
+            return 0
+        self.run = run
+        offset = int((target_run - run).total_seconds() // 3600)
+        levels = list(range(NATIVE_FIRST_LEVEL, NATIVE_LAST_LEVEL + 1))
+        count = 0
+        for lead in leads:
+            step = lead + offset
+            if not 0 <= step <= MAX_STEP_HOURS:
+                continue
+            jobs = [(var, lv) for var in ("CLC", "QC", "QI") for lv in levels]
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                got = list(pool.map(lambda j: self._crop(self._get(model_level_url(run, step, j[1], j[0]))), jobs))
+            per = {var: [] for var in ("CLC", "QC", "QI")}
+            for (var, _), arr in zip(jobs, got):
+                per[var].append(arr)
+            if any(a is None for a in per["CLC"]):
+                continue
+            zero = np.zeros_like(per["CLC"][0])
+            clc = np.stack(per["CLC"])
+            qc = np.stack([a if a is not None else zero for a in per["QC"]])
+            qi = np.stack([a if a is not None else zero for a in per["QI"]])
+            zs, clc_z = resample_columns(np.nan_to_num(clc), self.heights_km)
+            _, cond_z = resample_columns(qc + qi, self.heights_km)
+            valid = target_run + timedelta(hours=lead)
+            fields = {
+                "clc": (0, np.clip(np.round(clc_z), 0, 100).astype(np.uint8), 1.0, 0.0),
+                "qcqi": (1, encode_condensate(cond_z), CONDENSATE_MAX_G_KG, 0.0),
+            }
+            self.tiles[valid] = volume_to_bytes(valid, self.latitudes, self.longitudes, zs, fields)
+            count += 1
+        return count
+
+    def write(self, directory, target_run: datetime) -> dict:
+        import json
+        import os
+
+        from .environment import _write_atomic, iso, tile_name
+
+        if not self.tiles:
+            raise ValueError("nessuna ora del volume ICON-EU")
+        os.makedirs(directory, exist_ok=True)
+        entries = []
+        for valid in sorted(self.tiles):
+            name = tile_name(valid).replace(".bin.gz", ".vol.gz")
+            _write_atomic(os.path.join(directory, name), self.tiles[valid])
+            lead = int((valid - target_run).total_seconds() // 3600)
+            entries.append({"valid": iso(valid), "run": iso(self.run or target_run), "lead": lead, "file": name})
+        index = {"method": VOLUME_METHOD, "latestRun": iso(target_run), "hours": entries}
         _write_atomic(os.path.join(directory, "index.json"),
                       json.dumps(index, separators=(",", ":")).encode("utf-8"))
         return index

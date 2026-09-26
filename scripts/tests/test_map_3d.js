@@ -2523,7 +2523,16 @@ assert.match(fragment, /float profiloVerticale\(float hf, float cumulo, float sv
 // durezza, vento in quota della cella, domain warp contro il tiling.
 assert.match(html, /var DOMINIO = \{ ovest: -23\.5, sud: 29\.5, est: 42\.0, nord: 66\.0 \};/, "il volume deve coprire il satellite dove c'e' ICON-EU");
 assert.match(html, /var NUBI_EU_URL = "data_weather\/cloud_eu\/";/, "manca la serie ICON-EU per livello");
-assert.match(html, /return Promise\.all\(\[serieAllIstante\(epoca, AMBIENTE_URL\), serieAllIstante\(epoca, NUBI_EU_URL\)\]\)/, "ICON-2I e ICON-EU devono arrivare insieme");
+assert.match(html, /return Promise\.all\(\[serieAllIstante\(epoca, AMBIENTE_URL\), serieAllIstante\(epoca, NUBI_EU_URL\),\s*volumeAllIstante\(epoca\)\]\)/, "ICON-2I, ICON-EU e il volume nativo devono arrivare insieme");
+// I LIVELLI NATIVI: colonna ogni 250 m con acqua+ghiaccio; scala delle torri
+// da HBAS/HTOP fuori da ICON-2I; rumore guidato da durezza, CAPE e shear.
+assert.match(html, /var VOLUME_EU_URL = "data_weather\/cloud_eu_vol\/";/, "manca il volume sui livelli nativi");
+assert.match(html, /var MODELLO_NZ = 65, MODELLO_PASSO_KM = 0\.25;/, "la colonna del modello deve avere 250 m di passo");
+assert.match(html, /function modelloDalVolume\(vol, w, h\)/, "manca la lettura del volume nativo");
+assert.match(html, /ingresso\.lcl\[k\] = hb\[k\] \/ 1000;/, "fuori da ICON-2I la base delle torri deve venire da HBAS_CON");
+assert.match(fragment, /float densitaModello = modello\.y >= 0\.0/, "il condensato del modello non scala l'opacita'");
+assert.match(fragment, /qn\.xy -= normalize\(ventoCella\) \* q\.z \* 0\.18 \* cumulo;/, "il rumore non segue lo shear");
+assert.match(fragment, /mix\(0\.85, 1\.2, durezza\)/, "il dettaglio non segue la durezza");
 assert.match(fragment, /spessore = mix\(spessore, min\(spessore, max\(m3\.g \* 16\.0, 1\.0\)\), cumulo\);/, "lo spessore del modello non limita i cumuliformi");
 assert.match(fragment, /vec2 dir = dot\(locale, locale\) > 0\.25 \? normalize\(locale\) : uVentoAlto;/, "i cirri non seguono il vento della cella");
 assert.match(fragment, /deforma = \(macroV\.rg - 0\.5\) \* uScalaFormaKm \* 0\.2;/, "manca il domain warp");
