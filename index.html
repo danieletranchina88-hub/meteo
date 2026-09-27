@@ -12605,9 +12605,8 @@
       function nascondiNubePianaQuandoPronto() {
         if (!attiva || !volume.pronto || !map) return;
         volume.acceso = true;
-        // Il satellite 2D non si spegne piu': dentro il dominio ICON-2I lo
-        // copre la superficie fotografica sotto il volume, fuori resta la
-        // sola osservazione vera che c'e'.
+        // L'immagine EUMETSAT 2D si spegne gia' all'accensione (vedi
+        // attivaNubiVolumetriche): sotto il volume c'e' la fotografia del suolo.
         map.triggerRepaint();
       }
 
@@ -13279,10 +13278,40 @@
         registraTocco();
       }
 
+      // LA FOTOGRAFIA DEL SUOLO sotto le nubi 3D (ESRI World Imagery, base
+      // Maxar): una sorgente propria limitata al dominio del volume, cosi' le
+      // tessere fuori dalle nubi 3D non si scaricano nemmeno. Il fondo
+      // fotografico mondiale resta una scelta separata dell'utente.
+      function mostraFotografiaDominio(visibile) {
+        if (!map) return;
+        try {
+          if (visibile && !map.getSource("satellite-nubi")) {
+            map.addSource("satellite-nubi", {
+              type: "raster",
+              tiles: ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+              tileSize: 256,
+              maxzoom: 18,
+              bounds: [DOMINIO.ovest, DOMINIO.sud, DOMINIO.est, DOMINIO.nord],
+              attribution: "World Imagery \u00a9 Esri, Maxar, Earthstar Geographics"
+            });
+          }
+          if (visibile && !map.getLayer("satellite-nubi-strato")) {
+            map.addLayer({ id: "satellite-nubi-strato", type: "raster", source: "satellite-nubi",
+              paint: { "raster-opacity": 1, "raster-fade-duration": 0 } },
+              map.getLayer("weather-layer") ? "weather-layer" : undefined);
+          }
+          if (map.getLayer("satellite-nubi-strato")) {
+            map.setLayoutProperty("satellite-nubi-strato", "visibility", visibile ? "visible" : "none");
+          }
+        } catch (errore) {
+          console.error("Nubi 3D: fotografia del suolo non disponibile", errore);
+        }
+      }
+
       // La fotografia GeoColour stesa sotto le nubi (il suolo EUMETSAT dove il
       // cielo e' sereno) non si usa piu': copriva solo il dominio delle nubi
       // e a 3 km per pixel. Sotto le nubi 3D va la fotografia aerea del suolo
-      // (ESRI World Imagery), su tutta la mappa: vedi updateSatelliteBase.
+      // (ESRI World Imagery) sul solo dominio: vedi mostraFotografiaDominio.
       var SUPERFICIE_FOTOGRAFICA = false;
       function mostraSuperficie(visibile) {
         ["volume-superficie-strato"].forEach(function (id) {
@@ -13525,9 +13554,12 @@
         volume.acceso = false;
         volume.lampi = [];
         mostraSuperficie(true);
-        // Sotto le nubi 3D il suolo vero, come dall'aereo: la fotografia
-        // aerea su tutta la mappa invece dell'immagine EUMETSAT.
-        if (typeof updateSatelliteBase === "function") updateSatelliteBase();
+        // Sotto le nubi 3D il suolo vero, come dall'aereo: via l'immagine
+        // EUMETSAT, e la fotografia aerea SOLO dove ci sono le nubi 3D.
+        if (map.getLayer("satellite-clouds-layer")) {
+          map.setLayoutProperty("satellite-clouds-layer", "visibility", "none");
+        }
+        mostraFotografiaDominio(true);
         // L'inclinazione e' contorno: cielo, foschia, pitch. Un suo errore
         // non deve piu' poter fermare la costruzione del volume, che viene
         // dopo -- e' esattamente cosi' che le nubi sparivano del tutto,
@@ -13562,8 +13594,7 @@
         volume.lampi = [];
         mostraSuperficie(false);
         abilitaInclinazioneVolume(false);
-        // Torna il fondo scelto prima (carta o fotografia).
-        if (typeof updateSatelliteBase === "function") updateSatelliteBase();
+        mostraFotografiaDominio(false);
         if (!showLiveLightning) blitzDisconnect();
         if (map && map.getLayer("satellite-clouds-layer")) {
           map.setLayoutProperty(
@@ -15188,9 +15219,11 @@
 
       function updateSatelliteClouds(changedProduct) {
         if (!mapLoaded || !map.getLayer("satellite-clouds-layer")) return;
+        // Con le nubi 3D accese l'immagine EUMETSAT non si stende: le nubi
+        // sono il volume, sotto c'e' la fotografia del suolo.
         map.setLayoutProperty(
           "satellite-clouds-layer", "visibility",
-          showSatelliteClouds ? "visible" : "none"
+          showSatelliteClouds && !showVolumeClouds ? "visible" : "none"
         );
         const picker = document.getElementById("satclouds-picker");
         if (picker) picker.style.display = showSatelliteClouds ? "" : "none";
@@ -17385,7 +17418,7 @@
         if (map.getLayer("satellite-layer")) {
           map.setLayoutProperty(
             "satellite-layer", "visibility",
-            ((showSatellite || showVolumeClouds) && !synopticChart) ? "visible" : "none"
+            (showSatellite && !synopticChart) ? "visible" : "none"
           );
         }
         // In modalita' carta il foglio prende il posto della campitura: le

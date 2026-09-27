@@ -2589,6 +2589,10 @@ assert.match(fragment, /float mezzaLarghezza = 1\.15 \* r \+ 0\.47 \* max\(lungo
 assert.match(fragment, /float spessore = 2\.6 \* esag \* mix\(1\.0, 0\.3, avanti\) \* sqrt\(saturare\(1\.0 - rho \* rho\)\);/, "l'incudine non ha la sezione a lente e a cuneo");
 assert.match(fragment, /\(1\.0 - smoothstep\(tetto - 0\.08 \* spessore - 0\.05 \* esag, tetto, zv\)\)/, "l'incudine non ha piu' il tetto piatto");
 
+// Con le nubi 3D: niente immagine EUMETSAT, fotografia del suolo solo sul dominio.
+assert.match(html, /showSatelliteClouds && !showVolumeClouds \? "visible" : "none"/, "con le nubi 3D torna l'immagine EUMETSAT");
+assert.match(html, /bounds: \[DOMINIO\.ovest, DOMINIO\.sud, DOMINIO\.est, DOMINIO\.nord\],/, "la fotografia del suolo si scarica fuori dal dominio delle nubi 3D");
+assert.match(html, /\(showSatellite && !synopticChart\) \? "visible" : "none"/, "le nubi 3D accendono la fotografia su tutto il mondo");
 assert.match(fragment, /float aperta = max\(apertura, cumulo \* \(1\.0 - smoothstep\(0\.25, 0\.95, campo\.g\)\)\);/,
   "le aperture non rispettano piu' la copertura osservata");
 assert.match(html, /var GENERA_FORMA = \[/, "manca il generatore del rumore");
