@@ -2583,7 +2583,11 @@ assert.match(fragment, /float profiloTorri\(vec2 punto, float z, float kmPerUnit
 assert.match(fragment, /vec2 rel = dKm - B\.yz \* max\(z - base, 0\.0\);/, "le torri non si inclinano piu' con lo shear");
 assert.match(fragment, /float lungo = dot\(rel, dir\), largo = dot\(rel, vec2\(-dir\.y, dir\.x\)\);/,
   "l'incudine non segue piu' la direzione del vento in quota");
-assert.match(fragment, /float sdInc = max\(sdEllissoide\(e, raggi\), zv - tetto\);/, "l'incudine non ha piu' il tetto piatto");
+// L'incudine vera: ventaglio in pianta, cuneo in sezione, tetto piatto.
+assert.doesNotMatch(fragment, /sdEllissoide\(e, raggi\)/, "l'incudine torna un ellissoide");
+assert.match(fragment, /float mezzaLarghezza = 1\.15 \* r \+ 0\.47 \* max\(lungo, 0\.0\);/, "l'incudine non si apre a ventaglio sottovento");
+assert.match(fragment, /float spessore = 2\.6 \* esag \* mix\(1\.0, 0\.3, avanti\) \* sqrt\(saturare\(1\.0 - rho \* rho\)\);/, "l'incudine non ha la sezione a lente e a cuneo");
+assert.match(fragment, /\(1\.0 - smoothstep\(tetto - 0\.08 \* spessore - 0\.05 \* esag, tetto, zv\)\)/, "l'incudine non ha piu' il tetto piatto");
 
 assert.match(fragment, /float aperta = max\(apertura, cumulo \* \(1\.0 - smoothstep\(0\.25, 0\.95, campo\.g\)\)\);/,
   "le aperture non rispettano piu' la copertura osservata");
@@ -2595,7 +2599,8 @@ assert.match(html, /function inferisciStati\(ingresso\)/, "manca il motore d'inf
 assert.match(html, /function ispezionaNube\(lat, lon\)/, "manca l'ispezione meteorologica");
 assert.match(fragment, /vec3 verso = vec3\(uSole\.xy, uSole\.z\) \/ kmPerUnita;/,
   "le ombre non seguono piu' la geometria esagerata: da vicino spariscono");
-assert.match(fragment, /t = max\(tVicino, t - passoPrima\);/, "manca l'ingresso a passi corti: torna la brina");
+assert.match(fragment, /float tA = max\(tVicino, t - passoPrima\), tB = t;/, "manca l'ingresso a passi corti: torna la brina");
+assert.match(fragment, /for \(int b = 0; b < 5; b\+\+\) \{/, "manca la bisezione della superficie: tornano le terrazze sui banchi");
 assert.match(html, /var ESAGERAZIONE_MINIMA = 1\.5;/, "da vicino la scala deve tornare quasi vera: le nubi alte diventano guglie");
 // Prestazioni (Nubis3): il vuoto si salta con la distanza dalla nube, la
 // luce lontana legge il profilo, il rumore si legge a MIP crescente.
@@ -2611,7 +2616,7 @@ assert.match(fragment, /multipla \+= 0\.12 \* exp\(-tauSole \* 0\.12\) \* fase2;
 assert.match(fragment, /fract\(sin\(dot\(gl_FragCoord\.xy \+ vec2\(17\.31, 41\.73\) \* uFotogramma/,
   "lo scarto del raggio non cambia piu' da un fotogramma all'altro: l'accumulo non converge");
 assert.match(html, /passiLuce: 4, passi: 128, qualita: 0, accumula: 0, latoForma: 64, vuoto: 192 \}/, "il telefono deve restare leggero");
-assert.match(html, /qualita: 1, accumula: 8, latoForma: 128, vuoto: 384 \}/, "sul PC manca l'accumulo dei fotogrammi");
+assert.match(html, /qualita: 1, accumula: 16, latoForma: 128, vuoto: 384 \}/, "sul PC manca l'accumulo dei fotogrammi");
 assert.match(html, /var lampiAccesi = /, "l'accumulo spalmerebbe i lampi");
 assert.match(fragment, /passo = min\(passo, max\(fine, \(fascia\.y - fascia\.x\) \/ salita \* 0\.25\)\);/,
   "il passo non segue piu' lo spessore della colonna");
@@ -2803,6 +2808,11 @@ if (process.argv.includes("--gpu")) {
   const defaults=vm.runInNewContext("("+html.match(/var REGOLA_PREDEFINITA = (\{[\s\S]*?\});/)[1]+")");
   const uniforms={};
   for(const m of html.matchAll(/gl\.uniform1f\(u\("([^"]+)"\), REGOLA\.(\w+)\);/g)) uniforms[m[1]]=defaults[m[2]];
+  // Le sezioni di prova sono larghe 40 km: con i grappoli a centinaia di km
+  // ne leggono un solo valore, e il risultato dipenderebbe da dove cade il
+  // rumore (diverso fra il cubo 128 del PC e il 64 del telefono), non dalla
+  // morfologia degli archetipi. Qui i grappoli restano alla scala delle prove.
+  uniforms.uScalaMacroKm=Math.min(uniforms.uScalaMacroKm,90);
   fs.writeFileSync(path.join(dir,"cloud_settings.json"),JSON.stringify(uniforms));
   fs.writeFileSync(path.join(dir,"cloud_VERTICE.glsl"),shader("VERTICE"));
   fs.writeFileSync(path.join(dir,"cloud_GENERA.glsl"),shader("GENERA_FORMA"));

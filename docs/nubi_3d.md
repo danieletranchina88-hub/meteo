@@ -438,3 +438,37 @@ torna alla qualita' piena (sul PC con l'accumulo dei fotogrammi).
 `?regola=1` -> "Governatore 60 fps" lo spegne (0). Dalla console:
 `NubiVolumetriche.governatore()` dice livello, risoluzione, passo, ms di GPU
 e del fotogramma.
+
+## Le incudini, il suolo fotografato e le ombre al suolo
+
+**Incudini.** Erano ellissoidi (quelle delle torri RDT) e lastre di spessore
+costante (quelle ricavate dal satellite: base = cima - 2,6 km ovunque). Ora:
+- torri: in pianta un **ventaglio** che nasce stretto dalla torre e si apre
+  sottovento (circa 25 gradi per lato), con un breve sbalzo sopravento; in
+  sezione una **lente** (spessa sull'asse, sottile verso ogni bordo) e un
+  **cuneo** in lunghezza (sottile sottovento); tetto piatto alla tropopausa con
+  una gobba sopra la corrente ascendente e bordi che cadono appena; il collo
+  della torre si allarga e vi confluisce;
+- satellite: lo spessore dell'incudine va dal 20% (bordo del sistema, manto
+  otticamente sottile) al 100% (vicino al nucleo convettivo): una lente, non un
+  tavolo.
+
+**Suolo.** Con le nubi 3D accese il fondo e' la fotografia aerea (ESRI World
+Imagery, la stessa base Maxar di molti globi virtuali) su tutta la mappa;
+l'immagine EUMETSAT stesa sotto il volume non si usa piu' (copriva solo il
+dominio, a 3 km per pixel). Spegnendo le nubi 3D torna il fondo scelto prima.
+
+**Ombre al suolo.** Dove il raggio arriva a terra, lo shader risale verso il
+sole attraverso 6-8 quote (piu' fitte in basso) leggendo la forma grande delle
+nubi e scurisce il suolo di quanto la nube scherma: ombre vere, che si muovono
+col sole e seguono la forma delle nubi, bluastre (il cielo le rischiara) e
+assenti di notte. `?regola=1` -> "Ombre delle nubi sul suolo" (0-1, 0,7).
+
+**Terrazze sui banchi.** Con la nube densa (densita' 12) il raggio diventa
+opaco in un passo e il punto d'ingresso cadeva sui gradini dei passi: ogni
+gradino, illuminato, disegnava una terrazza (curve di livello concentriche).
+Ora l'ingresso nella nube si trova per bisezione (cinque dimezzamenti fra
+l'ultimo campione vuoto e il primo pieno): superfici lisce a ogni densita'.
+Verificato sulla pagina vera: con la bisezione le terrazze spariscono; non
+dipendevano ne' dal rumore piegato vicino alla camera (hhf) ne' dalla scala
+del dettaglio.
