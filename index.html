@@ -7135,7 +7135,7 @@
         cavolfiore: 0.8, ombra: 1.5, ambiente: 0.75, esposizione: 0.55, esagerazione: 0, contrasto: 0.8,
         dettaglioKm: 4.5, stiraBolle: 1.0, forzaMacro: 0.6, baseDura: 0.75, nucleo: 0.8,
         densita: 3.6, faseG: 0.6, polvere: 1.3, multipla: 1.0, foschiaKm: 420, sole: 1.0,
-        cavita: 0.7, incudineKm: 7.5, passi: 0, passiLuce: 0, accumula: 0, debugTipi: 0
+        cavita: 0.7, incudineKm: 7.5, passi: 0, passiLuce: 0, accumula: 0, debugTipi: 0, governatore: 1
       };
 
       var REGOLA_ATTIVA = typeof location !== "undefined" && /[?&]regola=1\b/.test(location.search || "");
@@ -10458,6 +10458,7 @@
         "uniform float uPassoKm;       // salita verticale del raggio fra due campioni",
         "uniform int uPassi;",
         "uniform int uPassiLuce;",
+        "uniform float uPassoScala;   // il governatore dei 60 fps: 1 = passi pieni",
         "uniform float uQualita;       // 1 sul PC (tutto), 0 sul telefono (versione leggera)",
         "uniform sampler3D uForma;     // Perlin-Worley a nube: R forma, GBA distanze Worley a 3 scale",
         "uniform float uLatoForma;",
@@ -10881,14 +10882,14 @@
         "// passi che raddoppiano e si somma lo spessore ottico attraversato. I primi",
         "// due passi vedono il dettaglio (le ombre dei lobi sui lobi); gli altri il",
         "// profilo medio, come la griglia di luce di Nubis3.",
-        "float spessoreVersoSole(vec3 p, float lodCampo, float lodRumore) {",
+        "float spessoreVersoSole(vec3 p, float lodCampo, float lodRumore, int nLuce) {",
         "  float kmPerUnita = uCircKm * cosLatDa(p.y);",
         "  // Il raggio verso il sole vive nella stessa geometria esagerata che si",
         "  // vede: le ombre cadono dalle cupole cosi' come appaiono sullo schermo.",
         "  vec3 verso = vec3(uSole.xy, uSole.z) / kmPerUnita;",
         "  float tau = 0.0, fatto = 0.0, lung = 0.08;",
         "  for (int i = 0; i < 8; i++) {",
-        "    if (i >= uPassiLuce) break;",
+        "    if (i >= nLuce) break;",
         "    vec3 q = p + verso * (fatto + 0.5 * lung);",
         "    float h, c; vec2 f;",
         "    tau += densita(q, lodCampo + 0.5 * float(i), lodRumore + 0.5 * float(i),",
@@ -10941,7 +10942,7 @@
         "  // vicino alla camera, dove una bolla occupa molti pixel, largo lontano,",
         "  // dove ne occupa uno. Un passo uniforme sull'intero raggio radente",
         "  // lasciava striature radiali davanti alla camera.",
-        "  float crescita = 0.004;",
+        "  float crescita = 0.004 * uPassoScala;",
         "  // A mappa ferma ogni fotogramma parte da uno scarto diverso (sequenza",
         "  // aurea) e la media dei fotogrammi vale molti piu' passi.",
         "  // Scarto CASUALE per pixel e per fotogramma: il rumore a gradiente",
@@ -11032,12 +11033,17 @@
         "    if (d > 0.001) {",
         "      if (tPrimo < 0.0) { tPrimo = t; tipoPrimo = gTipoCampione; lodPrimo = lodRumore + log2(uScalaFormaKm / uDettaglioKm); }",
         "      // Resolve the optical surface before integrating a long opaque step.",
-        "      passo = min(passo, max(t * uPixelAngolo * 0.65, mix(0.13, 0.07, uQualita) / kmPerUnita));",
+        "      passo = min(passo, max(t * uPixelAngolo * 0.65, mix(0.13, 0.07, uQualita) * uPassoScala / kmPerUnita));",
+        "      // DIETRO LA NUBE GIA' OPACA ogni campione pesa quanto la trasmissione",
+        "      // rimasta: il passo si allunga fino al doppio e la luce si fa con meno",
+        "      // campioni. Il bordo che si vede (trasmissione alta) resta pieno.",
+        "      passo *= 1.0 + (1.0 - trasmissione);",
+        "      int nLuce = trasmissione > 0.4 ? uPassiLuce : max(2, uPassiLuce - 2);",
         "      float passoKm = length(vec3(direzione.xy, direzione.z / uEsagerazione)) * passo * kmPerUnita;",
         "      float estinzione = uSigma * d;                     // per km",
         "      float trasmPasso = exp(-estinzione * passoKm);     // Beer-Lambert sul raggio di vista",
         "",
-        "      float tauSole = uForzaSole > 0.01 ? spessoreVersoSole(p, lodCampo, lodRumore) : 0.0;",
+        "      float tauSole = uForzaSole > 0.01 ? spessoreVersoSole(p, lodCampo, lodRumore, nLuce) : 0.0;",
         "      float beer = exp(-tauSole);",
         "      // POWDER: 1 - e^(-densita' x 2). E' la probabilita' che la luce abbia",
         "      // gia' incontrato abbastanza goccioline da essere rimbalzata verso di",
@@ -11059,10 +11065,14 @@
         "      // Il cielo arriva dall'alto: la nube sopra lo scherma. Un campione",
         "      // mezzo chilometro piu' su da' l'occlusione, e la parte bassa della",
         "      // colonna resta piu' scura della cupola.",
-        "      float hs, cs; vec2 fs;",
-        "      float sopra = densita(p + vec3(0.0, 0.0, 0.5 * uEsagerazione / kmPerUnita),",
-        "        lodCampo + 0.5, lodRumore + 0.5, true, hs, cs, fs);",
-        "      float occlusione = exp(-sopra * uSigma * 0.5);",
+        "      // (dietro la nube opaca l'occlusione si stima dall'ombra verso il sole)",
+        "      float occlusione = exp(-tauSole * 0.25);",
+        "      if (trasmissione > 0.2) {",
+        "        float hs, cs; vec2 fs;",
+        "        float sopra = densita(p + vec3(0.0, 0.0, 0.5 * uEsagerazione / kmPerUnita),",
+        "          lodCampo + 0.5, lodRumore + 0.5, true, hs, cs, fs);",
+        "        occlusione = exp(-sopra * uSigma * 0.5);",
+        "      }",
         "      // Il cielo e' azzurro e arriva dall'alto: e' lui a tingere di blu le",
         "      // ombre. Il suolo rimanda poca luce calda dal basso.",
         "      vec3 ambiente = (uCielo * (0.35 + 0.65 * occlusione) * (0.35 + 0.65 * h)",
@@ -11191,8 +11201,31 @@
         "out vec4 colorePixel;",
         "uniform sampler2D uVolume;",
         "uniform vec2 uTexel;",
+        "uniform float uNitido;",
+        "// Catmull-Rom in cinque letture bilineari: quando il governatore abbassa",
+        "// la risoluzione i bordi delle nubi restano netti invece di sfocarsi.",
+        "vec4 catmullRom(vec2 uv) {",
+        "  vec2 pos = uv / uTexel;",
+        "  vec2 c = floor(pos - 0.5) + 0.5;",
+        "  vec2 f = pos - c;",
+        "  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));",
+        "  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);",
+        "  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));",
+        "  vec2 w3 = f * f * (-0.5 + 0.5 * f);",
+        "  vec2 w12 = w1 + w2;",
+        "  vec2 t0 = (c - 1.0) * uTexel, t3 = (c + 2.0) * uTexel, t12 = (c + w2 / w12) * uTexel;",
+        "  vec4 r = texture(uVolume, vec2(t12.x, t0.y)) * (w12.x * w0.y)",
+        "    + texture(uVolume, vec2(t0.x, t12.y)) * (w0.x * w12.y)",
+        "    + texture(uVolume, t12) * (w12.x * w12.y)",
+        "    + texture(uVolume, vec2(t3.x, t12.y)) * (w3.x * w12.y)",
+        "    + texture(uVolume, vec2(t12.x, t3.y)) * (w12.x * w3.y);",
+        "  float n = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;",
+        "  r = clamp(r / n, 0.0, 1.0);",
+        "  return r;",
+        "}",
         "void main() {",
         "  vec2 uv = vNdc * 0.5 + 0.5;",
+        "  if (uNitido > 0.5) { colorePixel = catmullRom(uv); return; }",
         "  colorePixel = 0.25 * (",
         "      texture(uVolume, uv + uTexel * vec2(-0.5, -0.5))",
         "    + texture(uVolume, uv + uTexel * vec2(0.5, -0.5))",
@@ -11694,15 +11727,117 @@
         return esagerazione;
       };
 
+      // IL GOVERNATORE DEI 60 FPS. Vicino alle nubi ogni pixel attraversa
+      // chilometri di nube a passi di decine di metri, e il costo esplode.
+      // Il governatore misura quanto costa davvero il volume (il tempo della
+      // GPU dove l'estensione dei timer c'e', altrimenti l'intervallo fra i
+      // fotogrammi) e abbassa la qualita' nell'ordine in cui si vede meno:
+      // prima allunga i passi (lo scarto per pixel li nasconde), poi abbassa
+      // la risoluzione (stesa in bicubico, i bordi restano netti), per
+      // ultimo toglie un campione di luce. Sale di nuovo piano, con pazienza
+      // crescente se ogni tentativo di salire fa perdere fotogrammi.
+      // A mappa ferma torna alla qualita' piena: l'immagine non si muove.
+      function GovernatoreVolume(gl) {
+        this.livello = 0.6;              // 1 = qualita' piena, 0 = minima
+        this.bilancioMs = isMobile() ? 8 : 10;   // GPU per il volume, su 16,7
+        this.gpuMs = null;
+        this.dtMs = null;
+        this.buoni = 0;
+        this.pazienza = 40;
+        this.salito = false;
+        this.attese = [];
+        this.ultimo = 0;
+        try { this.ext = gl.getExtension("EXT_disjoint_timer_query_webgl2"); } catch (e) { this.ext = null; }
+      }
+      GovernatoreVolume.prototype.attivo = function () {
+        return !(REGOLA.governatore < 0.5);
+      };
+      GovernatoreVolume.prototype.risoluzione = function () {
+        var L = this.livello;
+        var r = L >= 0.5 ? 1 - 0.25 * (1 - L) / 0.5 : 0.75 - 0.2 * (0.5 - L) / 0.5;
+        return Math.round(r * 20) / 20;   // a gradini: la tela non si rifa' a ogni fotogramma
+      };
+      GovernatoreVolume.prototype.passo = function () {
+        return 1 + 0.7 * Math.min(1, (1 - this.livello) / 0.5);
+      };
+      GovernatoreVolume.prototype.menoLuce = function () {
+        return this.livello < 0.25 ? 1 : 0;
+      };
+      GovernatoreVolume.prototype.inizia = function (gl) {
+        if (!this.ext || this.attese.length > 3) return null;
+        try {
+          var q = gl.createQuery();
+          gl.beginQuery(this.ext.TIME_ELAPSED_EXT, q);
+          return q;
+        } catch (e) { this.ext = null; return null; }
+      };
+      GovernatoreVolume.prototype.finisci = function (gl, q) {
+        if (!q) return;
+        try { gl.endQuery(this.ext.TIME_ELAPSED_EXT); this.attese.push(q); } catch (e) { this.ext = null; }
+      };
+      // Le misure della GPU arrivano qualche fotogramma dopo.
+      GovernatoreVolume.prototype.raccogli = function (gl) {
+        if (!this.ext) return null;
+        var ms = null;
+        try {
+          var disgiunto = gl.getParameter(this.ext.GPU_DISJOINT_EXT);
+          while (this.attese.length) {
+            var q = this.attese[0];
+            if (!gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) break;
+            this.attese.shift();
+            var ns = gl.getQueryParameter(q, gl.QUERY_RESULT);
+            gl.deleteQuery(q);
+            if (!disgiunto) ms = ns / 1e6;
+          }
+        } catch (e) { this.ext = null; }
+        return ms;
+      };
+      GovernatoreVolume.prototype.aggiorna = function (gl, inMovimento) {
+        var adesso = performance.now();
+        var dt = this.ultimo ? adesso - this.ultimo : null;
+        this.ultimo = adesso;
+        var gpu = this.raccogli(gl);
+        if (!inMovimento) { this.buoni = 0; return; }
+        var prima = this.livello;
+        // Il tempo della GPU vale sempre; l'intervallo fra i fotogrammi solo
+        // dentro un movimento continuo.
+        var continuo = dt !== null && dt <= 250;
+        if (continuo) this.dtMs = this.dtMs === null ? dt : this.dtMs * 0.85 + dt * 0.15;
+        else if (gpu === null) { this.buoni = 0; return; }
+        if (gpu !== null) {
+          this.gpuMs = this.gpuMs === null ? gpu : this.gpuMs * 0.8 + gpu * 0.2;
+          var rapporto = this.gpuMs / this.bilancioMs;
+          if (rapporto > 1.08) this.livello -= Math.min(0.12, 0.08 * (rapporto - 1) + 0.01);
+          else if (rapporto < 0.7 && this.dtMs < 17.5) this.livello += 0.01;
+          // Anche con la GPU in regola il fotogramma intero deve stare nei 60 fps.
+          if (continuo && this.dtMs > 21) this.livello -= 0.02;
+        } else if (this.dtMs > 18.5) {
+          this.livello -= 0.03;
+          // Si era appena saliti e si perdono fotogrammi: la prossima volta
+          // si aspetta di piu' prima di riprovare.
+          if (this.salito) { this.pazienza = Math.min(this.pazienza * 2, 480); this.salito = false; }
+          this.buoni = 0;
+        } else if (this.dtMs < 17.3 && ++this.buoni > this.pazienza) {
+          this.livello += 0.02;
+          this.buoni = 0;
+          this.salito = true;
+        }
+        this.livello = Math.max(0, Math.min(1, this.livello));
+        if (this.livello !== prima && this.mappa) this.mappa.triggerRepaint();
+      };
+
       // La texture in cui si disegna il volume: al massimo QUALITA_VOLUME.pixel
       // pixel, con le proporzioni dello schermo.
       StratoVolume.prototype.preparaTela = function (gl) {
         var w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
         var scala = Math.min(1, Math.sqrt(QUALITA_VOLUME.pixel / Math.max(1, w * h)));
-        // Mentre la mappa si muove si disegna a due terzi: l'occhio non
-        // distingue il dettaglio in movimento, la GPU si'. A mappa ferma si
-        // torna alla risoluzione piena.
-        if (this.mappa && this.mappa.isMoving && this.mappa.isMoving()) scala *= 0.66;
+        // Mentre la mappa si muove decide il governatore dei 60 fps; senza
+        // governatore, due terzi come prima. A mappa ferma si torna alla
+        // risoluzione piena.
+        this.governatore = this.governatore || new GovernatoreVolume(gl);
+        this.inMovimento = !!(this.mappa && this.mappa.isMoving && this.mappa.isMoving());
+        if (this.inMovimento) scala *= this.governatore.attivo() ? this.governatore.risoluzione() : 0.66;
+        this.scalaTela = scala;
         var lw = Math.max(1, Math.round(w * scala)), lh = Math.max(1, Math.round(h * scala));
         if (this.fbo && this.misuraVolume.larghezza === lw && this.misuraVolume.altezza === lh) {
           return true;
@@ -11757,7 +11892,12 @@
           this.accumulo.n = 0;
           this.accumulo.firma = firma;
         }
+        var governatore = this.governatore;
+        governatore.mappa = this.mappa;
+        var misura = this.inMovimento && governatore.attivo() ? governatore.inizia(gl) : null;
         this.disegnatoInTela = this.disegnaVolume(gl, argomenti, this.misuraVolume.altezza);
+        governatore.finisci(gl, misura);
+        if (governatore.attivo()) governatore.aggiorna(gl, this.inMovimento);
         this.texDaStendere = this.texVolume;
         if (this.disegnatoInTela && this.programmaAccumula && fermo && !lampiAccesi
             && this.preparaAccumulo(gl)) {
@@ -11839,6 +11979,12 @@
           gl.uniform1i(gl.getUniformLocation(this.programmaStesura, "uVolume"), 0);
           gl.uniform2f(gl.getUniformLocation(this.programmaStesura, "uTexel"),
             1 / this.misuraVolume.larghezza, 1 / this.misuraVolume.altezza);
+          // Fra il 60% e il 90% della risoluzione dello schermo si stende in
+          // bicubico (bordi netti); piu' in basso la media morbida, perche' il
+          // bicubico ingrandirebbe la grana dei passi lunghi in quadretti.
+          var rapportoTela = this.misuraVolume.larghezza / Math.max(1, gl.drawingBufferWidth);
+          gl.uniform1f(gl.getUniformLocation(this.programmaStesura, "uNitido"),
+            rapportoTela < 0.9 && rapportoTela >= 0.6 ? 1 : 0);
           gl.drawArrays(gl.TRIANGLES, 0, 3);
           gl.bindVertexArray(null);
           return;
@@ -11911,7 +12057,10 @@
         gl.uniform1f(u("uPixelAngolo"), 2 * Math.tan(fov / 2) / Math.max(1, altezzaPixel));
         gl.uniform1f(u("uPassoKm"), QUALITA_VOLUME.passoKm);
         gl.uniform1i(u("uPassi"), REGOLA.passi > 0 ? Math.round(REGOLA.passi) : QUALITA_VOLUME.passi);
-        gl.uniform1i(u("uPassiLuce"), REGOLA.passiLuce > 0 ? Math.round(REGOLA.passiLuce) : QUALITA_VOLUME.passiLuce);
+        var gov = this.governatore && this.governatore.attivo() && this.inMovimento ? this.governatore : null;
+        gl.uniform1i(u("uPassiLuce"), Math.max(2, (REGOLA.passiLuce > 0 ? Math.round(REGOLA.passiLuce) : QUALITA_VOLUME.passiLuce)
+          - (gov ? gov.menoLuce() : 0)));
+        gl.uniform1f(u("uPassoScala"), gov ? gov.passo() : 1);
         gl.uniform1f(u("uQualita"), QUALITA_VOLUME.qualita);
         gl.uniform1f(u("uLatoForma"), QUALITA_VOLUME.latoForma);
         gl.uniform1f(u("uScalaFormaKm"), REGOLA.scalaFormaKm);
@@ -12925,7 +13074,8 @@
         ["debugTipi", "Debug meteo: colora per tipo (0/1)", 0, 1, 1, "Vista"],
         ["passi", "Passi del raggio (0 = auto)", 0, 512, 8, "Qualita'"],
         ["passiLuce", "Passi verso il sole (0 = auto)", 0, 8, 1, "Qualita'"],
-        ["accumula", "Fotogrammi accumulati (0 = auto)", 0, 64, 1, "Qualita'"]
+        ["accumula", "Fotogrammi accumulati (0 = auto)", 0, 64, 1, "Qualita'"],
+        ["governatore", "Governatore 60 fps (1 = acceso)", 0, 1, 1, "Qualita'"]
       ];
       var pannelloFatto = false;
       function creaPannelloRegolazione() {
@@ -13354,7 +13504,13 @@
         aggiorna: aggiornaNubiVolumetriche,
         notificaScarica: notificaScarica,
         // Per le prove e la console: cosa il motore ha inferito in un punto.
-        ispeziona: function (lat, lon) { return descriviNube(lat, lon); }
+        ispeziona: function (lat, lon) { return descriviNube(lat, lon); },
+        // Lo stato del governatore dei 60 fps (per le prove e la console).
+        governatore: function () {
+          var g = volume.governatore;
+          return g ? { livello: g.livello, risoluzione: g.risoluzione(), passo: g.passo(),
+            gpuMs: g.gpuMs, fotogrammaMs: g.dtMs, timerGpu: !!g.ext } : null;
+        }
       };
     })();
 

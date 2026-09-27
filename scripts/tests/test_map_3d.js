@@ -2108,7 +2108,7 @@ assert.equal(schermoAlto.width, schermoBasso.width,
   // numericamente in test_map_3d.js (anche su GPU con --gpu).
   // STRIATURE RADIALI: il passo cresce con la distanza ma copre sempre
   // tutto il raggio con i passi rimasti.
-  assert.match(frammento, /float crescita = 0\.004;/, "il passo non cresce piu' con la distanza");
+  assert.match(frammento, /float crescita = 0\.004 \* uPassoScala;/, "il passo non cresce piu' con la distanza");
   assert.match(frammento, /\(tLontano - t\) \/ float\(max\(1, uPassi - i\)\)/,
     "il raggio puo' esaurire i passi prima di attraversare la nube");
   // La sagoma viene dalla texture di fusione, letta al livello del pixel.
@@ -2418,9 +2418,9 @@ console.log("nubi in volume: spessore continuo, niente grana, niente coni, nient
   // Il realismo: luce cercata verso il sole, scultura di Worley letta al
   // dettaglio giusto, rumore periodico senza giunture.
   const frammento = html.slice(html.indexOf("var FRAMMENTO = ["), html.indexOf("var STESURA = ["));
-  assert.match(frammento, /float spessoreVersoSole\(vec3 p, float lodCampo, float lodRumore\)/,
+  assert.match(frammento, /float spessoreVersoSole\(vec3 p, float lodCampo, float lodRumore, int nLuce\)/,
     "manca la marcia della luce verso il sole: le nubi tornano illuminate uguali dappertutto");
-  assert.match(frammento, /spessoreVersoSole\(p, lodCampo, lodRumore\)/,
+  assert.match(frammento, /spessoreVersoSole\(p, lodCampo, lodRumore, nLuce\)/,
     "la marcia della luce non viene piu' usata");
   assert.match(frammento, /float passa = diretta \+ 0\.38 \* uLampoPesoCopertura \* \(diffusa - diretta\);/,
     "la luce del fulmine attraversa il nucleo fitto senza attenuazione coerente");
@@ -2482,6 +2482,45 @@ console.log("nubi in volume: spessore continuo, niente grana, niente coni, nient
   assert.match(frammento, /IL CANALE SOTTO LA NUBE/, "manca il canale visibile fra la base e il suolo");
 }
 console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, suolo sotto le nubi, luce e scultura, fianchi, lampi");
+
+// IL GOVERNATORE DEI 60 FPS: scende quando i fotogrammi rallentano, prima coi
+// passi e poi con la risoluzione, e risale piano; mai sotto i minimi.
+{
+  const inizio = html.indexOf("      function GovernatoreVolume(gl) {");
+  const fine = html.indexOf("      // La texture in cui si disegna il volume");
+  assert.ok(inizio > 0 && fine > inizio, "manca il governatore dei 60 fps");
+  let adesso = 0;
+  const crea = new Function("isMobile", "REGOLA", "performance",
+    html.slice(inizio, fine) + "\nreturn GovernatoreVolume;");
+  const Governatore = crea(() => false, { governatore: 1 }, { now: () => adesso });
+  const gl = { getExtension: () => null };
+  const g = new Governatore(gl);
+  const corri = (n, dt) => { for (let k = 0; k < n; k++) { adesso += dt; g.aggiorna(gl, true); } };
+  assert.equal(g.passo() >= 1 && g.passo() <= 1.7, true);
+  corri(200, 40);   // 25 fps: vicino alle nubi
+  assert.equal(g.livello, 0, "a 25 fps il governatore non scende al minimo");
+  assert.equal(g.risoluzione(), 0.55, "la risoluzione minima non e' 0,55");
+  assert.equal(g.passo(), 1.7, "il passo al minimo non e' 1,7 volte");
+  assert.equal(g.menoLuce(), 1, "al minimo non si toglie un campione di luce");
+  corri(3000, 16.6);  // di nuovo 60 fps: risale
+  assert.equal(g.livello, 1, "a 60 fps il governatore non torna alla qualita' piena");
+  assert.equal(g.risoluzione(), 1);
+  assert.equal(g.passo(), 1);
+  // La prima meta' della discesa costa soprattutto passi, poco la risoluzione.
+  g.livello = 0.5;
+  assert.equal(g.passo(), 1.7);
+  assert.equal(g.risoluzione(), 0.75);
+  // A mappa ferma non misura niente e non cambia.
+  g.livello = 0.3; adesso += 16; g.aggiorna(gl, false); adesso += 40; g.aggiorna(gl, false);
+  assert.equal(g.livello, 0.3, "a mappa ferma il governatore cambia qualita'");
+  // Spento dal pannello: nessuna regolazione.
+  const Spento = crea(() => false, { governatore: 0 }, { now: () => adesso });
+  assert.equal(new Spento(gl).attivo(), false);
+  assert.match(html, /"      passo \*= 1\.0 \+ \(1\.0 - trasmissione\);",/, "dietro la nube opaca il passo non si allunga");
+  assert.match(html, /int nLuce = trasmissione > 0\.4 \? uPassiLuce : max\(2, uPassiLuce - 2\);/, "dietro la nube opaca la luce non si alleggerisce");
+  assert.match(html, /if \(uNitido > 0\.5\) \{ colorePixel = catmullRom\(uv\); return; \}/, "manca la stesura bicubica");
+  console.log("governatore dei 60 fps: discesa, risalita, minimi, mappa ferma");
+}
 
 // Physical cloud-volume regression and optional software-GPU visual checks.
 {
@@ -2576,7 +2615,7 @@ assert.match(html, /qualita: 1, accumula: 8, latoForma: 128, vuoto: 384 \}/, "su
 assert.match(html, /var lampiAccesi = /, "l'accumulo spalmerebbe i lampi");
 assert.match(fragment, /passo = min\(passo, max\(fine, \(fascia\.y - fascia\.x\) \/ salita \* 0\.25\)\);/,
   "il passo non segue piu' lo spessore della colonna");
-assert.match(fragment, /float occlusione = exp\(-sopra \* uSigma \* 0\.5\);/, "manca l'occlusione del cielo");
+assert.match(fragment, /occlusione = exp\(-sopra \* uSigma \* 0\.5\);/, "manca l'occlusione del cielo");
 assert.match(fragment, /float powder = 1\.0 - exp\(-estinzione \* 2\.0\);/, "manca il powder");
 assert.match(fragment, /float beer = exp\(-tauSole\);/, "manca Beer-Lambert verso il sole");
 assert.match(fragment, /float henyeyGreenstein\(float coseno, float g\)/, "manca Henyey-Greenstein");
@@ -2657,6 +2696,7 @@ for n,v in dict(uScalaKm=16,uCircKm=40075,uEsagerazione=esag,uSigma=3.6,uFaseG=.
 import json
 for n,v in json.load(open('/tmp/cloud_settings.json')).items():uf(n,v)
 uf('uQualita',0 if mobile else 1)
+uf('uPassoScala',1)
 uf('uSemenza',.3,.6,.1);uf('uDominio',.5-20*unit,.5-20*unit,.5+20*unit,.5+20*unit);uf('uSole',.5,-.4,.768);uf('uCielo',.46,.58,.78);uf('uSuolo',.26,.25,.23);uf('uColoreSole',2.6,2.5,2.34);uf('uFoschia',.72,.81,.92)
 x,y=np.meshgrid(np.linspace(-20,20,128),np.linspace(-20,20,128));r=np.hypot(x,y)
 def smooth(a,b,v):

@@ -404,3 +404,37 @@ Rimedio: mai moltiplicare le coordinate assolute per un fattore variabile.
   i valori, con il contrasto reso;
 - i cirri si leggono in otto versi fissi (ogni 22,5 gradi) e si sfumano i
   valori dei due versi vicini; `fibra` sfuma i valori, non le coordinate.
+
+## Il governatore dei 60 fps
+
+Vicino alle nubi ogni pixel attraversa chilometri di nube a passi di 70-130 m,
+e ogni campione dentro la nube legge la densita' 8-9 volte (luce verso il sole,
+occlusione del cielo): il costo esplode. Due rimedi.
+
+**Lo shader non spreca campioni dietro la nube opaca.** Ogni campione pesa
+quanto la trasmissione rimasta sul raggio: dove e' gia' bassa il passo si
+allunga fino al doppio, la luce verso il sole usa due campioni in meno e
+l'occlusione del cielo si stima dall'ombra invece di leggere la densita'.
+Il bordo visibile (trasmissione alta) resta pieno. Da solo: -44% di costo per
+fotogramma nella vista ravvicinata di prova, immagine praticamente identica.
+
+**Il governatore** (`GovernatoreVolume`) misura il costo vero: il tempo della
+GPU con `EXT_disjoint_timer_query_webgl2` (bilancio 10 ms sul PC, 8 sul
+telefono), altrimenti l'intervallo fra i fotogrammi (obiettivo 16,7 ms).
+Mentre la mappa si muove abbassa la qualita' nell'ordine in cui si vede meno:
+
+| livello | passi | risoluzione | luce |
+|---|---|---|---|
+| 1 (pieno) | x1 | 100% | piena |
+| 0,5 | x1,7 | 75% | piena |
+| 0 (minimo) | x1,7 | 55% | un campione in meno |
+
+Fra il 60% e il 90% della risoluzione la tela si stende in bicubico
+(Catmull-Rom), cosi' i bordi restano netti; piu' in basso la media morbida,
+perche' il bicubico ingrandirebbe la grana dei passi lunghi in quadretti. Risale piano; se ogni tentativo di risalire fa
+perdere fotogrammi aspetta sempre di piu' prima di riprovare. A mappa ferma
+torna alla qualita' piena (sul PC con l'accumulo dei fotogrammi).
+
+`?regola=1` -> "Governatore 60 fps" lo spegne (0). Dalla console:
+`NubiVolumetriche.governatore()` dice livello, risoluzione, passo, ms di GPU
+e del fotogramma.
