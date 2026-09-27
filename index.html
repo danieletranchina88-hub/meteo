@@ -10419,6 +10419,9 @@
         return arr;
       })();
       var DEBUG_NUBI = typeof location !== "undefined" && /[?&]debug=nubi\b/.test(location.search || "");
+      // TEMPORANEO (?debug=lod): colora la nube per il livello MIP a cui legge
+      // il rumore di dettaglio al primo contatto del raggio.
+      var DEBUG_LOD = typeof location !== "undefined" && /[?&]debug=lod\b/.test(location.search || "");
 
       // --- il volume, attraversato dai raggi ---------------------------------
       // Uno strato personalizzato di MapLibre: prende il contesto WebGL e la
@@ -10488,6 +10491,7 @@
         "uniform vec4 uTorreD[24];     // ciclo 0-3, forza, torri secondarie, sfondamento",
         "uniform vec2 uVentoAlto;      // verso del vento in quota (cirri), unitario",
         "uniform float uDebugTipi;     // 1: colora le nubi per tipo",
+        "uniform float uDebugLod;      // 1: colora le nubi per lodDet (temporaneo)",
         "uniform vec3 uColoriTipi[16];",
         "uniform sampler2D uMorfo3;    // profilo ICON-2I: R durezza, G spessore (km/16), BA vento in quota",
         "uniform sampler3D uNubiModello; // ICON-EU: frazione di nube per quota (0-16 km, 500 m)",
@@ -10744,7 +10748,17 @@
         "    // cella di 3 km alta 5, stirata tre volte, sarebbe uno spiedo.",
         "    float cellaVistaKm = max(cellaKm * 2.2 * mix(1.0, max(1.0, 0.55 * esag), sviluppo), 1.5);",
         "    if (variaCime > 0.01) {",
-        "      float cella = textureLod(uForma, vec3(q.xy / cellaVistaKm, 0.63) + uSemenza.yxz, max(lodRumore - log2(cellaVistaKm / uScalaFormaKm) + 1.5 - log2(128.0 / uLatoForma), 1.5 - log2(128.0 / uLatoForma))).r;",
+        "      // SCALA VARIABILE SENZA ANELLI: q vale migliaia di km, e dividerlo per",
+        "      // una scala che cambia da pixel a pixel sposta il rumore di decine di",
+        "      // periodi lungo le curve di livello del campo: impronte digitali.",
+        "      // Due letture a scale fisse (potenze di 2) sfumate fra loro.",
+        "      float ottava = log2(cellaVistaKm);",
+        "      float o0 = floor(ottava), pesoO = ottava - o0;",
+        "      float k0 = exp2(o0), lodBaseC = 1.5 - log2(128.0 / uLatoForma);",
+        "      float c0 = textureLod(uForma, vec3(q.xy / k0, 0.63) + uSemenza.yxz, max(lodRumore - log2(k0 / uScalaFormaKm) + lodBaseC, lodBaseC)).r;",
+        "      float c1 = textureLod(uForma, vec3(q.xy / (2.0 * k0), 0.37) + uSemenza.yxz, max(lodRumore - log2(2.0 * k0 / uScalaFormaKm) + lodBaseC, lodBaseC)).r;",
+        "      // (la media di due rumori perde contrasto a meta': lo si rende)",
+        "      float cella = 0.5 + (mix(c0, c1, pesoO) - 0.5) / sqrt(pesoO * pesoO + (1.0 - pesoO) * (1.0 - pesoO));",
         "      // (letta sfocata: le cime salgono e scendono dolci, niente pareti)",
         "      float quota = mix(1.0, 0.2 + 0.8 * smoothstep(0.15, 0.85, cella), clamp(variaCime, 0.0, 1.0));",
         "      hRel = clamp((altKm - baseKm) / max(0.05, spessore * quota), 0.0, 1.2);",
@@ -10802,16 +10816,29 @@
         "  if (dot(ventoCella, ventoCella) > 0.25 && cumulo > 0.05) {",
         "    qn.xy -= normalize(ventoCella) * q.z * 0.18 * cumulo;",
         "  }",
+        "  float lodF = max(lodRumore + (leggera ? 1.0 : 0.0), 0.0);",
+        "  vec4 f = textureLod(uForma, qn / uScalaFormaKm + uSemenza, lodF);",
         "  if (fibra > 0.02) {",
         "    // Il vento in quota DELLA CELLA (250 hPa, o lo shear), non uno solo per",
-        "    // tutta la scena: i cirri si stirano ognuno nel suo verso.",
+        "    // tutta la scena: i cirri si stirano ognuno nel suo verso. Il verso",
+        "    // non ruota le coordinate (a migliaia di km dal centro ogni grado",
+        "    // di differenza fra pixel vicini disegnava anelli): i cirri si",
+        "    // leggono in otto versi FISSI e si sfumano i valori dei due piu'",
+        "    // vicini; fibra sfuma i valori, non le coordinate.",
         "    vec2 locale = m3.ba * 2.0 - 1.0;",
         "    vec2 dir = dot(locale, locale) > 0.25 ? normalize(locale) : uVentoAlto;",
-        "    vec2 perp = vec2(-dir.y, dir.x);",
-        "    vec2 stirato = dir * dot(qn.xy, dir) * 0.22 + perp * dot(qn.xy, perp) * 1.6;",
-        "    qn.xy = mix(qn.xy, stirato, fibra);",
+        "    float settore = mod(atan(dir.y, dir.x) / (PI / 8.0), 8.0);",
+        "    float s0 = floor(settore), pesoS = settore - s0;",
+        "    float lodS = lodF + 0.68;",
+        "    vec4 fs = vec4(0.0);",
+        "    for (int k = 0; k < 2; k++) {",
+        "      float ang = (s0 + float(k)) * PI / 8.0;",
+        "      vec2 d = vec2(cos(ang), sin(ang)), pp = vec2(-d.y, d.x);",
+        "      vec2 st = d * dot(qn.xy, d) * 0.22 + pp * dot(qn.xy, pp) * 1.6;",
+        "      fs += textureLod(uForma, vec3(st, qn.z) / uScalaFormaKm + uSemenza, lodS) * (k == 0 ? 1.0 - pesoS : pesoS);",
+        "    }",
+        "    f = mix(f, fs, fibra);",
         "  }",
-        "  vec4 f = textureLod(uForma, qn / uScalaFormaKm + uSemenza, max(lodRumore + (leggera ? 1.0 : 0.0), 0.0));",
         "  // Negli strati gli ammassi sono appena accennati: ondulazioni, non cupole.",
         "  float grumi = mix(0.62 + 0.38 * f.r, f.r, mix(0.3, 1.0, tipo));",
         "  // Nel nucleo (profilo pieno) la nube e' piena: gli ammassi scolpiscono",
@@ -10941,6 +10968,7 @@
         "  float trasmissione = 1.0;",
         "  float tPrimo = -1.0;",
         "  float tipoPrimo = 0.0;",
+        "  float lodPrimo = 0.0;",
         "  // L'INGRESSO NELLA NUBE: quando il raggio passa dal vuoto alla nube torna",
         "  // indietro di un passo e riparte con passi quattro volte piu' corti. Con",
         "  // la cima netta, lo scarto casuale del primo passo decideva pixel per",
@@ -11002,7 +11030,7 @@
         "    if (affina > 0) { passo *= 0.25; affina--; }",
         "    vuotoPrima = d <= 0.001;",
         "    if (d > 0.001) {",
-        "      if (tPrimo < 0.0) { tPrimo = t; tipoPrimo = gTipoCampione; }",
+        "      if (tPrimo < 0.0) { tPrimo = t; tipoPrimo = gTipoCampione; lodPrimo = lodRumore + log2(uScalaFormaKm / uDettaglioKm); }",
         "      // Resolve the optical surface before integrating a long opaque step.",
         "      passo = min(passo, max(t * uPixelAngolo * 0.65, mix(0.13, 0.07, uQualita) / kmPerUnita));",
         "      float passoKm = length(vec3(direzione.xy, direzione.z / uEsagerazione)) * passo * kmPerUnita;",
@@ -11105,6 +11133,13 @@
         "    colore = alfa * clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);",
         "    // DEBUG METEOROLOGICO: la nube colorata per tipo inferito.",
         "    if (uDebugTipi > 0.5) colore = mix(colore, uColoriTipi[int(clamp(tipoPrimo + 0.5, 0.0, 15.0))] * alfa, 0.6);",
+        "    // DEBUG LOD: blu <0 (piu' fine del texel), ciano 0-1, verde 1-2, giallo 2-3,",
+        "    // rosso >=3.5 (dettaglio spento). Bande nette ogni mezzo livello.",
+        "    if (uDebugLod > 0.5) {",
+        "      float l = floor(clamp(lodPrimo, -1.0, 4.0) * 2.0) / 2.0;",
+        "      vec3 c = l < 0.0 ? vec3(0.1, 0.2, 1.0) : l < 1.0 ? vec3(0.0, 0.8, 1.0) : l < 2.0 ? vec3(0.1, 0.9, 0.2) : l < 3.0 ? vec3(1.0, 0.9, 0.0) : l < 3.5 ? vec3(1.0, 0.5, 0.0) : vec3(1.0, 0.1, 0.1);",
+        "      colore = mix(colore, c * alfa * (0.75 + 0.25 * fract(l)), 0.7);",
+        "    }",
         "  }",
         "  // IL CANALE SOTTO LA NUBE: dalla base al suolo, dove Blitzortung ha",
         "  // misurato la scarica, il canale e' fuori dalla nube e si vede.",
@@ -11991,6 +12026,7 @@
         var vento = this.ventoAlto || [1, 0];
         gl.uniform2f(u("uVentoAlto"), vento[0], vento[1]);
         gl.uniform1f(u("uDebugTipi"), REGOLA.debugTipi > 0.5 || DEBUG_NUBI ? 1 : 0);
+        gl.uniform1f(u("uDebugLod"), DEBUG_LOD ? 1 : 0);
         gl.uniform3fv(u("uColoriTipi"), COLORI_TIPI);
 
         gl.disable(gl.DEPTH_TEST);

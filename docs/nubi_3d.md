@@ -371,3 +371,36 @@ HBAS/HTOP.
 Nel browser la colonna del modello ha 65 quote (250 m) in una texture 3D a due
 canali: copertura (dove c'e' nube, anche sotto una coltre) e condensato (quanto
 e' densa: scala l'opacita').
+
+## Gli anelli a impronta digitale (e perche' non era il domain warp)
+
+Sui banchi comparivano curve concentriche, come un'impronta digitale, e da
+vicino strisce parallele ai bordi. Diagnosi sulla pagina vera, qualita' del
+telefono, stesso istante e stessa vista:
+
+| Variante | Anelli |
+|---|---|
+| attuale | si' |
+| domain warp azzerato | si' |
+| ingresso nella fascia sfalsato per pixel | si' |
+| passi quattro volte piu' fitti | si' |
+| rumore di dettaglio spento | attenuati, non spariti |
+| scala delle celle fissa + stiramento dei cirri spento | **no** |
+
+`?debug=lod` colora la nube per il livello MIP del rumore di dettaglio al
+primo contatto (blu < 0, ciano 0-1, verde 1-2, giallo 2-3, arancio 3-3,5,
+rosso spento): gli anelli stavano a lodDet 1-2, ma la causa non era il LOD.
+
+La causa e' la **modulazione di fase**: le coordinate del rumore sono in km dal
+centro del dominio (migliaia di km). Dividerle per una scala che cambia da
+pixel a pixel (`cellaVistaKm`, dalla tessitura a 8 bit) o ruotarle secondo il
+vento locale (lo stiramento dei cirri) sposta il rumore di decine di periodi
+fra pixel vicini: il rumore si comprime lungo le curve di livello del campo.
+Il warp e l'inclinazione da shear spostano al piu' di pochi km (ampiezza
+limitata) e non lo fanno.
+
+Rimedio: mai moltiplicare le coordinate assolute per un fattore variabile.
+- la mappa delle cime legge il rumore a due scale fisse (potenze di 2) e sfuma
+  i valori, con il contrasto reso;
+- i cirri si leggono in otto versi fissi (ogni 22,5 gradi) e si sfumano i
+  valori dei due versi vicini; `fibra` sfuma i valori, non le coordinate.
