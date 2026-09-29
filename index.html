@@ -9645,7 +9645,10 @@
         var stratiforme = Math.max(radarDiffuso * (1 - radarForte), 0.7 * pioggiaScalaMod);
         var estensione = top - numeroValido(x.lcl, 1.0);        // cima - LCL
         var nucleo = x.chi, incudine = x.incudine;
-        var tempesta = Math.max(nucleo, 0.8 * lampi * radarForte * ls(5.5, 8, top));
+        // Un temporale e' per definizione un cumulonembo: i fulmini osservati
+        // bastano. Dove il radar non arriva (mare aperto, Nord Africa) l'eco
+        // manca, non e' debole: il fulmine vale da solo.
+        var tempesta = Math.max(nucleo, 0.9 * lampi * Math.max(radarForte, 0.7) * ls(4.5, 7, top));
 
         p[TIPO.Ci] = alto * sottile * (0.35 + x.fibra) * (1 - tempesta) * (1 - incudine);
         p[TIPO.Cs] = alto * ls(0.3, 0.6, tau) * (1 - ls(0.78, 0.95, tau)) * (0.5 + x.liscio)
@@ -9676,7 +9679,8 @@
         // Il cumulonembo: nucleo convettivo osservato (rilievo IR, RDT,
         // radar + fulmini) che arriva in alta troposfera. Il CAPE lo sostiene,
         // non lo crea mai da solo.
-        var cb = tempesta * ls(5.5, 8.5, top) * (1.2 + lampi + radarForte + 0.5 * conv);
+        // (le neoformazioni hanno ancora la cima bassa: 4,5-7,5 km)
+        var cb = tempesta * ls(4.5, 7.5, top) * (1.2 + lampi + radarForte + 0.5 * conv);
         var anvilVicino = ls(0.12, 0.45, numeroValido(x.incudineVicina, 0));
         p[TIPO["Cb cal"]] = cb * (1 - 0.8 * ghiaccio) * (1 - anvilVicino);
         p[TIPO["Cb cap"]] = cb * ghiaccio * (1 - anvilVicino);
@@ -10891,10 +10895,17 @@
         "      // (letta sfocata: le cime salgono e scendono dolci, niente pareti)",
         "      float quota = mix(1.0, 0.2 + 0.8 * smoothstep(0.15, 0.85, cella), clamp(variaCime, 0.0, 1.0));",
         "      hRel = clamp((altKm - baseKm) / max(0.05, spessore * quota), 0.0, 1.2);",
-        "      copertura *= smoothstep(0.1, 0.45, cella + 0.5 * (1.0 - cumulo));",
+        "      // (una cella convettiva che il satellite vede densa non si dirada)",
+        "      copertura *= max(smoothstep(0.1, 0.45, cella + 0.5 * (1.0 - cumulo)),",
+        "        0.85 * smoothstep(0.35, 0.85, campo.g) * smoothstep(0.3, 0.7, sviluppo));",
         "    }",
         "    profilo = hRel > 1.0 ? 0.0 : profiloVerticale(hRel, cumulo, sviluppo, fibra, durezza) * copertura;",
         "    hRel = min(hRel, 1.0);",
+        "    // IL NUCLEO PIENO: nella cella convettiva sviluppata (congesto, Cb) la",
+        "    // corrente ascendente e' satura dalla base alla cima. Il rumore ne",
+        "    // scolpisce la superficie, non la svuota: niente gusci vuoti.",
+        "    float nucleoPieno = cumulo * smoothstep(0.45, 0.9, sviluppo) * smoothstep(0.35, 0.8, campo.g);",
+        "    profilo = max(profilo, nucleoPieno * copertura * smoothstep(0.0, 0.06, hRel) * (1.0 - smoothstep(0.85, 1.0, hRel)));",
         "    conv = cumulo * sviluppo;",
         "  }",
         "  if (pTorri > profilo) {",

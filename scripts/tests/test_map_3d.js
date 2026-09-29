@@ -2526,6 +2526,9 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.match(html, /vec3 centro22 = vec3\(21\.7, 22\.0, 22\.4\)/, "manca l'alone di 22 gradi");
   assert.match(html, /return max\(1\.0 - smoothstep\(-38\.0, -5\.0, tC\), gFibra\);/, "la fase non segue la temperatura");
   assert.match(html, /b\[i \+ 3\] = Math\.round\(limita\(\(Number\.isFinite\(zeroQui\) \? zeroQui : 3\.0\) \/ 8, 0, 1\) \* 255\);/, "lo zero termico non arriva allo shader");
+  // Il temporale: i fulmini bastano anche senza radar; il nucleo e' pieno.
+  assert.match(html, /var tempesta = Math\.max\(nucleo, 0\.9 \* lampi \* Math\.max\(radarForte, 0\.7\) \* ls\(4\.5, 7, top\)\);/, "senza radar i fulmini non fanno piu' il cumulonembo");
+  assert.match(html, /float nucleoPieno = cumulo \* smoothstep\(0\.45, 0\.9, sviluppo\) \* smoothstep\(0\.35, 0\.8, campo\.g\);/, "la cella convettiva torna un guscio vuoto");
   console.log("spessore dai livelli ICON-EU, copertura e cime dal satellite");
 }
 
