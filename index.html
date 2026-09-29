@@ -8202,7 +8202,9 @@
           var fisica = cimaFisica(bt[k], t2, grad, zs);
           cima[k] = campo.quota[k] + (fisica - campo.quota[k]) * disp;
         }
-        cima = sfoca(mediana3(cima, w, h), w, h, SFOCATURA_GRADINI_PX);
+        // Solo la mediana e un raggio di sfocatura: il rilievo delle cime che
+        // l'infrarosso vede (celle, torri, onde) resta quello osservato.
+        cima = sfoca(mediana3(cima, w, h), w, h, 1);
         // La densita': albedo VIS di giorno, contrasto IR di notte.
         var densita = new Float32Array(n);
         var albedo = null, fondo = null;
@@ -10076,6 +10078,40 @@
           fonte: "livelli nativi" };
       }
 
+      // LO SPESSORE DAI LIVELLI VERTICALI (ICON-EU): il satellite vede la cima,
+      // il modello sa fin dove scende la nube. Dalla cima osservata si cerca lo
+      // strato nuvoloso del modello (copertura >= 25%, al piu' 1,5 km sotto la
+      // cima: il CTH e il modello non coincidono mai al metro) e lo si segue
+      // verso il basso finche' la copertura resta >= 20%, scavalcando buchi di
+      // mezzo chilometro al piu'. La base e' il fondo di quello strato. Dove il
+      // modello non vede la nube osservata resta la base inferita per tipo.
+      function spessoreDalModello(stato) {
+        var md = stato.modello;
+        stato.baseDalModello = null;
+        if (!md || !md.dati || !stato.cima || !stato.base) return;
+        var n = stato.larghezza * stato.altezza, nz = md.nz, dz = md.passoKm;
+        var fonte = new Uint8Array(n);
+        for (var k = 0; k < n; k++) {
+          var cima = stato.cima[k];
+          if (!stato.tipo[k] || !(cima > 0.3)) continue;
+          var zAlto = Math.min(nz - 1, Math.floor((cima + 0.5) / dz));
+          var primo = -1;
+          for (var z = zAlto; z >= 0 && cima - z * dz <= 1.5; z--) {
+            if (md.dati[z * n + k] >= 64) { primo = z; break; }
+          }
+          if (primo < 0) continue;
+          var fondo = primo, buchi = 0;
+          for (z = primo - 1; z >= 0; z--) {
+            if (md.dati[z * n + k] >= 51) { fondo = z; buchi = 0; }
+            else if (++buchi > 2) break;
+          }
+          var base = Math.max(0, fondo * dz - 0.5 * dz);
+          stato.base[k] = limita(base, 0, Math.max(0, cima - 0.25));
+          fonte[k] = 1;
+        }
+        stato.baseDalModello = fonte;
+      }
+
       function costruisciStato(campo, precedenti) {
         var m = campo.classeMisura;
         if (!m || !campo.chi) return null;
@@ -10130,6 +10166,7 @@
         // altrimenti i livelli isobarici.
         stato.modello = (amb && amb.volume ? modelloDalVolume(amb.volume, w2, h2) : null)
           || nubiDelModello(ex, giu, w2 * h2);
+        spessoreDalModello(stato);
         var torri = trovaTorri(ingresso, stato, precedenti ? precedenti.torri : null,
           precedenti ? (campo.epoca - precedenti.epoca) / 60000 : 999, campo.torri || null);
         stato.ingresso = ingresso;
@@ -10724,7 +10761,10 @@
         "  float gLiscia = textureLod(uCampo, uv, lodCampo + 2.0).g;",
         "  if (campo.g < 0.004 && pTorri <= 0.0) return 0.0;",
         "  vec4 liscio = textureLod(uCampo, uv, lodCampo + 1.5);",
-        "  campo.rba = mix(liscio.rba, campo.rba, 0.3);",
+        "  // La cima conserva il rilievo osservato (IR a 1-2 km); base, densita' e",
+        "  // CAPE si leggono lisci.",
+        "  campo.r = mix(liscio.r, campo.r, 0.8);",
+        "  campo.ba = mix(liscio.ba, campo.ba, 0.3);",
         "  float cimaKm = campo.r * uScalaKm;",
         "  float baseKm = campo.b * uScalaKm;",
         "  vec4 m1 = textureLod(uMorfo1, uv, lodCampo);",
@@ -10739,7 +10779,9 @@
         "  fascia = vec2(baseKm - sotto, cimaKm + 0.15);",
         "  // L'impronta osservata: dentro la maschera la struttura e' ricostruita,",
         "  // fuori non si inventano nubi.",
-        "  float impronta = smoothstep(0.004, 0.2, gLiscia);",
+        "  // (dal campo quasi nitido: le strisce e i varchi di pochi km che il",
+        "  // satellite vede restano; il mip piu' liscio ammorbidisce solo il bordo)",
+        "  float impronta = smoothstep(0.004, 0.2, mix(gLiscia, campo.g, 0.75));",
         "  // Al bordo del dominio ICON-2I il volume si dissolve (fuori resta il",
         "  // satellite 2D): niente parete dove finiscono i dati.",
         "  float bordo = smoothstep(0.0, 0.025, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));",
@@ -10767,16 +10809,24 @@
         "    // a tratti le celle vuote crescono; la mappa macro raggruppa le celle",
         "    // in ammassi e varchi a scala di decine di km.",
         "    vec4 macroV = textureLod(uForma, vec3(q.xy / uScalaMacroKm, 0.31) + uSemenza, max(lodRumore - log2(uScalaMacroKm / uScalaFormaKm), 0.0));",
-        "    float macro = macroV.b;",
         "    // DOMAIN WARP: le coordinate del rumore si piegano su scala macro, e il",
         "    // cubo di rumore non si ripete piu' a griglia regolare.",
         "    deforma = (macroV.rg - 0.5) * uScalaFormaKm * 0.2;",
-        "    float copertura = saturare((1.0 - aperta * uCopertura * 1.6) + (macro - 0.5) * uForzaMacro * cumulo);",
+        "    // La copertura e' quella del satellite: i grappoli del rumore non",
+        "    // aggiungono ne' tolgono nubi (restano solo nel domain warp).",
+        "    float copertura = saturare(1.0 - aperta * uCopertura * 1.6);",
+        "    // LA FRAZIONE OSSERVATA: nei cumuliformi la parte di pixel coperta",
+        "    // segue la densita' del satellite (cumuli radi dove e' bassa, campo",
+        "    // chiuso dove e' piena); negli strati nessun buco inventato.",
+        "    copertura *= mix(1.0, smoothstep(0.08, 0.7, campo.g), cumulo);",
         "    // LE CIME DELLE CELLE: in un campo convettivo ogni cella sale fin dove",
         "    // la porta la sua corrente; la cima osservata e' quella delle piu' alte.",
         "    // Una mappa delle altezze a scala di cella (il 'Cloud Max Height' di",
         "    // Nubis) abbassa le altre: niente muro unico alla quota del satellite.",
         "    float variaCime = cumulo * mix(0.25, 0.85, sviluppo) * uRigonfio;",
+        "    // Celle piu' grandi di un pixel del satellite (2-6 km) le cime le ha",
+        "    // gia' misurate l'infrarosso: il rumore non ne inventa altre.",
+        "    variaCime *= 1.0 - smoothstep(2.0, 6.0, cellaKm);",
         "    // Con la quota esagerata le celle si allargano in proporzione: una",
         "    // cella di 3 km alta 5, stirata tre volte, sarebbe uno spiedo.",
         "    float cellaVistaKm = max(cellaKm * 2.2 * mix(1.0, max(1.0, 0.55 * esag), sviluppo), 1.5);",
@@ -13344,7 +13394,8 @@
           + (stato.secondo[k] ? " (alternativa: " + secondo.nome + ")" : ""));
         righe.push("Cima " + numero(stato.cima[k], 1) + " km (osservata: CTH/IR)"
           + " · base " + numero(stato.base[k], 1) + " km ("
-          + (val("disponibile") > 0.5 ? "inferita da LCL ICON-2I"
+          + (stato.baseDalModello && stato.baseDalModello[k] ? "fondo dello strato nei livelli ICON-EU"
+            : val("disponibile") > 0.5 ? "inferita da LCL ICON-2I"
             : Number.isFinite(val("baseConvettiva")) ? "base convettiva ICON-EU" : "inferita per tipo, fuori da ICON-2I") + ")"
           + " · spessore " + numero(stato.cima[k] - stato.base[k], 1) + " km");
         var bt = val("btC");

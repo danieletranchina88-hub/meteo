@@ -2483,6 +2483,33 @@ console.log("nubi in volume: spessore continuo, niente grana, niente coni, nient
 }
 console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, suolo sotto le nubi, luce e scultura, fianchi, lampi");
 
+// LO SPESSORE DAI LIVELLI VERTICALI: la base e' il fondo dello strato del
+// modello sotto la cima osservata; senza strato resta quella inferita.
+{
+  const src = implementazione("spessoreDalModello");
+  const limita = (v, a, b) => Math.min(b, Math.max(a, v));
+  const fn = new Function("limita", src + "\nreturn spessoreDalModello;")(limita);
+  const nz = 65, n = 3, dati = new Uint8Array(nz * n);
+  // colonna 0: strato 2,0-5,0 km; colonna 1: niente; colonna 2: due strati con buco di 1 km
+  for (let z = 8; z <= 20; z++) dati[z * n] = 200;
+  for (let z = 4; z <= 8; z++) dati[z * n + 2] = 180;
+  for (let z = 13; z <= 24; z++) dati[z * n + 2] = 180;
+  const stato = { larghezza: 3, altezza: 1, tipo: new Uint8Array([3, 3, 3]),
+    cima: new Float32Array([5.2, 5.2, 6.0]), base: new Float32Array([4.0, 4.0, 5.0]),
+    modello: { dati, nz, passoKm: 0.25 } };
+  fn(stato);
+  assert.ok(Math.abs(stato.base[0] - 1.875) < 1e-6, "la base non e' il fondo dello strato del modello: " + stato.base[0]);
+  assert.equal(stato.base[1], 4.0, "senza strato nel modello la base inferita deve restare");
+  assert.ok(Math.abs(stato.base[2] - 3.125) < 1e-6, "un buco di un chilometro deve chiudere lo strato: " + stato.base[2]);
+  assert.deepEqual(Array.from(stato.baseDalModello), [1, 0, 1]);
+  assert.match(html, /spessoreDalModello\(stato\);/, "lo spessore dal modello non e' collegato");
+  assert.match(html, /float copertura = saturare\(1\.0 - aperta \* uCopertura \* 1\.6\);/, "i grappoli del rumore cambiano di nuovo la copertura del satellite");
+  assert.match(html, /variaCime \*= 1\.0 - smoothstep\(2\.0, 6\.0, cellaKm\);/, "il rumore inventa cime dove l'infrarosso le ha misurate");
+  assert.match(html, /copertura \*= mix\(1\.0, smoothstep\(0\.08, 0\.7, campo\.g\), cumulo\);/, "la frazione di nube non segue la densita' del satellite");
+  assert.match(html, /float impronta = smoothstep\(0\.004, 0\.2, mix\(gLiscia, campo\.g, 0\.75\)\);/, "l'impronta si legge di nuovo sfocata");
+  console.log("spessore dai livelli ICON-EU, copertura e cime dal satellite");
+}
+
 // IL GOVERNATORE DEI 60 FPS: scende quando i fotogrammi rallentano, prima coi
 // passi e poi con la risoluzione, e risale piano; mai sotto i minimi.
 {
