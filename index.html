@@ -10085,6 +10085,7 @@
       // verso il basso finche' la copertura resta >= 20%, scavalcando buchi di
       // mezzo chilometro al piu'. La base e' il fondo di quello strato. Dove il
       // modello non vede la nube osservata resta la base inferita per tipo.
+      var OGGETTI_CONVETTIVI = false;
       function spessoreDalModello(stato) {
         var md = stato.modello;
         stato.baseDalModello = null;
@@ -10094,6 +10095,9 @@
         for (var k = 0; k < n; k++) {
           var cima = stato.cima[k];
           if (!stato.tipo[k] || !(cima > 0.3)) continue;
+          // Lo scudo dell'incudine resta una lente attorno al nucleo: la
+          // colonna del modello (a 15-20 km) lo farebbe scendere fino al suolo.
+          if (stato.tipo[k] === TIPO.Inc) continue;
           var zAlto = Math.min(nz - 1, Math.floor((cima + 0.5) / dz));
           var primo = -1;
           for (var z = zAlto; z >= 0 && cima - z * dz <= 1.5; z--) {
@@ -10821,7 +10825,7 @@
         "    // LA FRAZIONE OSSERVATA: nei cumuliformi la parte di pixel coperta",
         "    // segue la densita' del satellite (cumuli radi dove e' bassa, campo",
         "    // chiuso dove e' piena); negli strati nessun buco inventato.",
-        "    copertura *= mix(1.0, smoothstep(0.08, 0.7, campo.g), cumulo);",
+        "    copertura *= mix(1.0, smoothstep(0.08, 0.5, campo.g), cumulo);",
         "    // LE CIME DELLE CELLE: in un campo convettivo ogni cella sale fin dove",
         "    // la porta la sua corrente; la cima osservata e' quella delle piu' alte.",
         "    // Una mappa delle altezze a scala di cella (il 'Cloud Max Height' di",
@@ -10873,7 +10877,15 @@
         "  float densitaModello = modello.y >= 0.0 ? mix(0.45, 1.25, smoothstep(0.0, 0.4, modello.y)) : 1.0;",
         "  if (cm >= 0.0) {",
         "    if (altKm >= baseKm && pTorri < profilo + 1e-4) {",
-        "      profilo *= mix(1.0, smoothstep(0.02, 0.35, cm), 0.55 * (1.0 - 0.7 * cumulo));",
+        "      // LA COLONNA DAI LIVELLI: dove il modello ha nube alla quota della",
+        "      // cima osservata (concorda col satellite), la massa in quota segue la",
+        "      // sua copertura, non la sagoma di un archetipo; l'ultimo tratto",
+        "      // sotto la cima resta al satellite.",
+        "      float accordo = smoothstep(0.1, 0.3, nubeDelModello(uv, max(cimaKm - 0.3, 0.0)).x);",
+        "      float dalModello = smoothstep(0.03, 0.45, cm) * (hRel > 0.0 ? 1.0 : 0.0);",
+        "      float pesoModello = 0.8 * accordo * (1.0 - smoothstep(0.8, 1.0, hRel));",
+        "      profilo = mix(profilo * mix(1.0, smoothstep(0.02, 0.35, cm), 0.55 * (1.0 - 0.7 * cumulo)),",
+        "        max(profilo, 0.8 * dalModello), pesoModello);",
         "    } else if (altKm < baseKm - 0.1) {",
         "      float strato = smoothstep(0.12, 0.6, cm) * smoothstep(0.05, 0.4, gLiscia);",
         "      if (strato > profilo) { profilo = strato; tipo = durezza * 0.8; }",
@@ -10936,8 +10948,11 @@
         "  // IL DETTAGLIO (Nubis3): Alligator a scala piu' piccola, ruotato per non",
         "  // allinearsi alla forma. Wispy per veli e cirri, billowy a cavolfiore",
         "  // per i cumuliformi, dai lobi grandi del bordo a quelli piccoli dentro.",
-        "  float lodDet = lodRumore + log2(uScalaFormaKm / uDettaglioKm);",
-        "  vec3 qd = vec3(0.8 * qn.x - 0.6 * qn.y, 0.6 * qn.x + 0.8 * qn.y, qn.z) / uDettaglioKm + uSemenza.zxy;",
+        "  // Il dettaglio scolpisce la superficie: mai piu' grande di meta' della",
+        "  // forma, altrimenti l'erosione cancella nubi intere osservate.",
+        "  float dettaglioKm = min(uDettaglioKm, 0.5 * uScalaFormaKm);",
+        "  float lodDet = lodRumore + log2(uScalaFormaKm / dettaglioKm);",
+        "  vec3 qd = vec3(0.8 * qn.x - 0.6 * qn.y, 0.6 * qn.x + 0.8 * qn.y, qn.z) / dettaglioKm + uSemenza.zxy;",
         "  vec4 n = textureLod(uForma, qd, max(lodDet, 0.0));",
         "  float wispy = n.g;",
         "  float billowy = mix(n.b, n.a, 0.25 + 0.5 * base);",
@@ -11129,7 +11144,7 @@
         "    if (affina > 0) { passo *= 0.25; affina--; }",
         "    vuotoPrima = d <= 0.001;",
         "    if (d > 0.001) {",
-        "      if (tPrimo < 0.0) { tPrimo = t; tipoPrimo = gTipoCampione; lodPrimo = lodRumore + log2(uScalaFormaKm / uDettaglioKm); }",
+        "      if (tPrimo < 0.0) { tPrimo = t; tipoPrimo = gTipoCampione; lodPrimo = lodRumore + log2(uScalaFormaKm / min(uDettaglioKm, 0.5 * uScalaFormaKm)); }",
         "      // Resolve the optical surface before integrating a long opaque step.",
         "      passo = min(passo, max(t * uPixelAngolo * 0.65, mix(0.13, 0.07, uQualita) * uPassoScala / kmPerUnita));",
         "      // DIETRO LA NUBE GIA' OPACA ogni campione pesa quanto la trasmissione",
@@ -11771,7 +11786,11 @@
             gl.bindTexture(gl.TEXTURE_2D, this.texMorfo3);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stato.larghezza, stato.altezza, 0,
               gl.RGBA, gl.UNSIGNED_BYTE, tessere.c);
-            this.oggettiTorri = uniformiTorri(campo.torri, stato, this.dominioUnitario());
+            // Niente sagome predefinite di torri e incudini (uguali per ogni
+            // temporale): il temporale e' il nucleo freddo e lo scudo che il
+            // satellite vede, con la cima dall'infrarosso e la colonna dai
+            // livelli del modello. Le torri restano per lampi e ispezione.
+            this.oggettiTorri = OGGETTI_CONVETTIVI ? uniformiTorri(campo.torri, stato, this.dominioUnitario()) : null;
             this.ventoAlto = ventoInQuota(stato.ingresso);
           }
         } catch (errore) {

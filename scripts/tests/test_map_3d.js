@@ -2488,7 +2488,7 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
 {
   const src = implementazione("spessoreDalModello");
   const limita = (v, a, b) => Math.min(b, Math.max(a, v));
-  const fn = new Function("limita", src + "\nreturn spessoreDalModello;")(limita);
+  const fn = new Function("limita", "TIPO", src + "\nreturn spessoreDalModello;")(limita, { Inc: 9 });
   const nz = 65, n = 3, dati = new Uint8Array(nz * n);
   // colonna 0: strato 2,0-5,0 km; colonna 1: niente; colonna 2: due strati con buco di 1 km
   for (let z = 8; z <= 20; z++) dati[z * n] = 200;
@@ -2503,14 +2503,23 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.ok(Math.abs(stato.base[2] - 3.125) < 1e-6, "un buco di un chilometro deve chiudere lo strato: " + stato.base[2]);
   assert.deepEqual(Array.from(stato.baseDalModello), [1, 0, 1]);
   assert.match(html, /spessoreDalModello\(stato\);/, "lo spessore dal modello non e' collegato");
+  // Lo scudo dell'incudine non diventa una colonna fino al suolo.
+  const inc = { larghezza: 1, altezza: 1, tipo: new Uint8Array([9]), cima: new Float32Array([5.2]),
+    base: new Float32Array([4.0]), modello: { dati: dati.filter((_, i) => i % n === 0), nz, passoKm: 0.25 } };
+  fn(inc);
+  assert.equal(inc.base[0], 4.0, "sotto lo scudo dell'incudine la base non deve scendere col modello");
+  // Niente torri e incudini predefinite: il temporale e' quello osservato.
+  assert.match(html, /var OGGETTI_CONVETTIVI = false;/, "tornano le sagome predefinite di torri e incudini");
+  assert.match(html, /float accordo = smoothstep\(0\.1, 0\.3, nubeDelModello\(uv, max\(cimaKm - 0\.3, 0\.0\)\)\.x\);/, "la colonna non segue i livelli del modello");
   assert.match(html, /float copertura = saturare\(1\.0 - aperta \* uCopertura \* 1\.6\);/, "i grappoli del rumore cambiano di nuovo la copertura del satellite");
   assert.match(html, /variaCime \*= 1\.0 - smoothstep\(2\.0, 6\.0, cellaKm\);/, "il rumore inventa cime dove l'infrarosso le ha misurate");
-  assert.match(html, /copertura \*= mix\(1\.0, smoothstep\(0\.08, 0\.7, campo\.g\), cumulo\);/, "la frazione di nube non segue la densita' del satellite");
+  assert.match(html, /copertura \*= mix\(1\.0, smoothstep\(0\.08, 0\.5, campo\.g\), cumulo\);/, "la frazione di nube non segue la densita' del satellite");
   assert.match(html, /float impronta = smoothstep\(0\.004, 0\.2, mix\(gLiscia, campo\.g, 0\.75\)\);/, "l'impronta si legge di nuovo sfocata");
   // Dall'alto la cima prende il colore della fotografia del satellite.
   assert.match(html, /colore = mix\(colore, oss \* alfa, uFedelta \* dallAlto\);/, "le cime viste dall'alto non prendono il colore osservato");
   assert.match(html, /volume\.pubblicaPelle\(campo, pixelPelle\);/, "la fotografia della scena non arriva allo shader");
   assert.match(html, /gl\.uniform1i\(u\("uPelle"\), 9\);/, "campionatore della fotografia non collegato");
+  assert.match(html, /float dettaglioKm = min\(uDettaglioKm, 0\.5 \* uScalaFormaKm\);/, "il dettaglio piu' grande della forma cancella le nubi osservate");
   console.log("spessore dai livelli ICON-EU, copertura e cime dal satellite");
 }
 
