@@ -7131,13 +7131,28 @@
       // nell'indirizzo compare un pannello per cambiarli dal vivo, e i valori
       // scelti restano in questo browser (solo con ?regola=1).
       var REGOLA_PREDEFINITA = {
-        // (scelti a occhio da Daniele col pannello, settembre 2026)
-        scalaFormaKm: 15.5, scalaMacroKm: 400, copertura: 0.2, erosione: 0.73, rigonfio: 1.0,
-        cavolfiore: 0.8, ombra: 3.05, ambiente: 1.1, esposizione: 0.55, esagerazione: 0, contrasto: 0.6,
-        dettaglioKm: 20, stiraBolle: 1.0, forzaMacro: 1.5, baseDura: 0.75, nucleo: 1.5,
-        densita: 12, faseG: 0.6, polvere: 1.3, multipla: 1.9, foschiaKm: 420, sole: 1.0,
-        cavita: 1.0, incudineKm: 7.5, passi: 0, passiLuce: 0, accumula: 0, debugTipi: 0, governatore: 1,
-        ombreSuolo: 0.7, fedelta: 0.7
+        // VALORI FISICI (vedi docs/nubi_3d.md, "I numeri reali"):
+        //  - densita': coefficiente di estinzione dell'acqua di nube a densita'
+        //    piena, beta = 3 LWC / (2 rho_w r_e) (Stephens 1978): stratocumulo
+        //    LWC ~0,25 g/m3, r_e ~10 um -> ~37 /km; si usa 35 /km;
+        //  - faseG: asimmetria delle goccioline nel visibile, g ~0,85 (Mie,
+        //    Hansen e Travis 1974);
+        //  - ombra e nucleo: 1, lo stesso mezzo per la vista e per il sole;
+        //  - ambiente e sole: 1, irradianza del cielo e del sole senza ritocchi;
+        //  - scalaFormaKm 8: celle di cumulo di 1-3 km (Cu humilis ~1 km,
+        //    stratocumulo 2-10 km: il resto lo vede il satellite);
+        //  - dettaglioKm 3: i vortici del bordo turbolento, i piu' grandi quanto
+        //    lo spessore della nube (~1 km): una tessera di 3 km ne ha 4-8;
+        //  - erosione 0,45 / contrasto 0,3: la fascia di rimescolamento del
+        //    bordo e' il 10-20% della cella; le cime a strato sono lisce;
+        //  - polvere 0,5, cavita' 0,5, multipla 1: le approssimazioni della
+        //    diffusione multipla (Wrenninge 2015, Schneider 2015) a peso neutro.
+        scalaFormaKm: 8, scalaMacroKm: 150, copertura: 0.25, erosione: 0.45, rigonfio: 1.0,
+        cavolfiore: 0.8, ombra: 1.0, ambiente: 1.0, esposizione: 0.55, esagerazione: 0, contrasto: 0.3,
+        dettaglioKm: 3, stiraBolle: 1.0, forzaMacro: 0, baseDura: 0.75, nucleo: 1.0,
+        densita: 35, faseG: 0.85, polvere: 0.5, multipla: 1.0, foschiaKm: 420, sole: 1.0,
+        cavita: 0.5, incudineKm: 7.5, passi: 0, passiLuce: 0, accumula: 0, debugTipi: 0, governatore: 1,
+        ombreSuolo: 1.0, fedelta: 0.7
       };
 
       var REGOLA_ATTIVA = typeof location !== "undefined" && /[?&]regola=1\b/.test(location.search || "");
@@ -7145,7 +7160,7 @@
         var r = Object.assign({}, REGOLA_PREDEFINITA);
         if (!REGOLA_ATTIVA) return r;
         try {
-          var salvata = JSON.parse(localStorage.getItem("nubi3d-regola") || "{}");
+          var salvata = JSON.parse(localStorage.getItem("nubi3d-regola-2") || "{}");
           Object.keys(r).forEach(function (k) { if (typeof salvata[k] === "number") r[k] = salvata[k]; });
         } catch (errore) {
           // Senza memoria del browser si parte dai predefiniti.
@@ -13348,7 +13363,7 @@
           riduci.textContent = nascosto ? "\u2212" : "+";
         });
         var aggiorna = function () {
-          try { localStorage.setItem("nubi3d-regola", JSON.stringify(REGOLA)); } catch (errore) { /* niente memoria */ }
+          try { localStorage.setItem("nubi3d-regola-2", JSON.stringify(REGOLA)); } catch (errore) { /* niente memoria */ }
           if (typeof map !== "undefined" && map) map.triggerRepaint();
         };
         var campi = {};
