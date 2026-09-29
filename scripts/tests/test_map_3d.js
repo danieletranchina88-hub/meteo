@@ -2520,6 +2520,12 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.match(html, /volume\.pubblicaPelle\(campo, pixelPelle\);/, "la fotografia della scena non arriva allo shader");
   assert.match(html, /gl\.uniform1i\(u\("uPelle"\), 9\);/, "campionatore della fotografia non collegato");
   assert.match(html, /float dettaglioKm = min\(uDettaglioKm, 0\.5 \* uScalaFormaKm\);/, "il dettaglio piu' grande della forma cancella le nubi osservate");
+  // Il ghiaccio: estinzione, fase con gli aloni, delta-scaling per le ombre.
+  assert.match(html, /return mix\(1\.0, mix\(0\.07, 0\.45, clamp\(convettivo, 0\.0, 1\.0\)\), ghiaccio\);/, "il ghiaccio attenua come l'acqua: i cirri non sono veli");
+  assert.match(html, /float estinzione = uSigma \* d \* fattoreGhiaccio\(ghiQui, conv\);/, "l'estinzione non distingue il ghiaccio");
+  assert.match(html, /vec3 centro22 = vec3\(21\.7, 22\.0, 22\.4\)/, "manca l'alone di 22 gradi");
+  assert.match(html, /return max\(1\.0 - smoothstep\(-38\.0, -5\.0, tC\), gFibra\);/, "la fase non segue la temperatura");
+  assert.match(html, /b\[i \+ 3\] = Math\.round\(limita\(\(Number\.isFinite\(zeroQui\) \? zeroQui : 3\.0\) \/ 8, 0, 1\) \* 255\);/, "lo zero termico non arriva allo shader");
   console.log("spessore dai livelli ICON-EU, copertura e cime dal satellite");
 }
 
