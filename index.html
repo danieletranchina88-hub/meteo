@@ -7137,7 +7137,7 @@
         dettaglioKm: 20, stiraBolle: 1.0, forzaMacro: 1.5, baseDura: 0.75, nucleo: 1.5,
         densita: 12, faseG: 0.6, polvere: 1.3, multipla: 1.9, foschiaKm: 420, sole: 1.0,
         cavita: 1.0, incudineKm: 7.5, passi: 0, passiLuce: 0, accumula: 0, debugTipi: 0, governatore: 1,
-        ombreSuolo: 0.7
+        ombreSuolo: 0.7, fedelta: 0.7
       };
 
       var REGOLA_ATTIVA = typeof location !== "undefined" && /[?&]regola=1\b/.test(location.search || "");
@@ -10542,6 +10542,9 @@
         "uniform vec3 uColoriTipi[16];",
         "uniform sampler2D uMorfo3;    // profilo ICON-2I: R durezza, G spessore (km/16), BA vento in quota",
         "uniform sampler3D uNubiModello; // ICON-EU: frazione di nube per quota (0-16 km, 500 m)",
+        "uniform sampler2D uPelle;     // la fotografia del satellite (GeoColour) sul dominio",
+        "uniform float uPelleOk;       // 1 quando la fotografia della scena e' arrivata",
+        "uniform float uFedelta;       // quanto la cima vista dall'alto prende il colore osservato",
         "uniform float uModelloNubi;    // 1: la frazione per quota c'e'",
         "uniform float uModelloPassoKm;",
         "uniform float uCondensatoNoto; // 1: il canale G ha acqua+ghiaccio di nube (livelli nativi)",
@@ -11236,6 +11239,17 @@
         "    // restano morbide e colorate.",
         "    vec3 x = colore / max(alfa, 1e-3) * uEsposizione;",
         "    colore = alfa * clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);",
+        "    // LE NUBI COME LE VEDE IL SATELLITE: guardando dall'alto la cima prende",
+        "    // il colore e la luminosita' della fotografia GeoColour nel punto in",
+        "    // cui il raggio la tocca (strisce, celle, veli: quelli osservati, non",
+        "    // quelli del rumore). Inclinando la vista torna a pesare la luce 3D.",
+        "    if (uPelleOk > 0.5 && uFedelta > 0.01 && tPrimo > 0.0) {",
+        "      vec3 pp = origine + direzione * tPrimo;",
+        "      vec2 uvP = vec2((pp.x - uDominio.x) / (uDominio.z - uDominio.x), (pp.y - uDominio.y) / (uDominio.w - uDominio.y));",
+        "      vec3 oss = texture(uPelle, uvP).rgb;",
+        "      float dallAlto = smoothstep(0.3, 0.85, -direzioneVera.z);",
+        "      colore = mix(colore, oss * alfa, uFedelta * dallAlto);",
+        "    }",
         "    // DEBUG METEOROLOGICO: la nube colorata per tipo inferito.",
         "    if (uDebugTipi > 0.5) colore = mix(colore, uColoriTipi[int(clamp(tipoPrimo + 0.5, 0.0, 15.0))] * alfa, 0.6);",
         "    // DEBUG LOD: blu <0 (piu' fine del texel), ciano 0-1, verde 1-2, giallo 2-3,",
@@ -11682,7 +11696,28 @@
         });
       };
 
+      // La fotografia GeoColour della scena, per il colore delle cime viste
+      // dall'alto: stessa griglia del campo (WMS sul riquadro del dominio).
+      StratoVolume.prototype.pubblicaPelle = function (campo, pixel) {
+        var gl = this.gl;
+        if (!gl || !pixel) return;
+        if (!this.texPelle) this.texPelle = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.texPelle);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, pixel.width, pixel.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixel.data);
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        this.campoPelle = campo;
+        this.pelleOk = true;
+        if (this.mappa) this.mappa.triggerRepaint();
+      };
+
       StratoVolume.prototype.pubblicaCampo = function (campo) {
+        // Una scena nuova non usa la fotografia della precedente.
+        if (campo !== this.campoPelle) this.pelleOk = false;
         var gl = this.gl;
         if (!gl) return;
         // IL MOTORE D'INFERENZA: stato di ogni cella e oggetti convettivi,
@@ -12297,6 +12332,11 @@
         gl.uniform1f(u("uModelloNubi"), this.modelloPronto ? 1 : 0);
         gl.uniform1f(u("uModelloPassoKm"), MODELLO_PASSO_KM);
         gl.uniform1f(u("uCondensatoNoto"), this.modelloPronto && this.condensatoNoto ? 1 : 0);
+        gl.activeTexture(gl.TEXTURE9);
+        gl.bindTexture(gl.TEXTURE_2D, this.pelleOk ? this.texPelle : this.texMorfo1);
+        gl.uniform1i(u("uPelle"), 9);
+        gl.uniform1f(u("uPelleOk"), this.pelleOk ? 1 : 0);
+        gl.uniform1f(u("uFedelta"), REGOLA.fedelta);
         gl.activeTexture(gl.TEXTURE6);
         gl.bindTexture(gl.TEXTURE_3D, this.texVuoto);
         gl.uniform1i(u("uVuoto"), 6);
@@ -13034,6 +13074,7 @@
             // Secondo upload: stessa scena, ora include anche nubi basse e
             // calde che il solo infrarosso non separa bene dal suolo.
             volume.pubblicaCampo(campo);
+            volume.pubblicaPelle(campo, pixelPelle);
             if (SUPERFICIE_FOTOGRAFICA) {
             superficieSenzaNubi(pixelPelle, misuraPelle, campo);
             var tela = document.createElement("canvas");
@@ -13199,6 +13240,7 @@
         ["multipla", "Bagliore interno (diffusione multipla)", 0, 3, 0.05, "Luce"],
         ["faseG", "Bordo d'argento controsole", 0, 0.95, 0.01, "Luce"],
         ["ombreSuolo", "Ombre delle nubi sul suolo", 0, 1, 0.01, "Luce"],
+        ["fedelta", "Cime come le vede il satellite (dall'alto)", 0, 1, 0.01, "Luce"],
         ["esposizione", "Esposizione", 0.1, 2, 0.01, "Luce"],
         ["foschiaKm", "Distanza della foschia (km)", 50, 3000, 10, "Luce"],
         ["esagerazione", "Esagerazione (0 = auto)", 0, 8, 0.1, "Vista"],

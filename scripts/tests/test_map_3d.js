@@ -2507,6 +2507,10 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.match(html, /variaCime \*= 1\.0 - smoothstep\(2\.0, 6\.0, cellaKm\);/, "il rumore inventa cime dove l'infrarosso le ha misurate");
   assert.match(html, /copertura \*= mix\(1\.0, smoothstep\(0\.08, 0\.7, campo\.g\), cumulo\);/, "la frazione di nube non segue la densita' del satellite");
   assert.match(html, /float impronta = smoothstep\(0\.004, 0\.2, mix\(gLiscia, campo\.g, 0\.75\)\);/, "l'impronta si legge di nuovo sfocata");
+  // Dall'alto la cima prende il colore della fotografia del satellite.
+  assert.match(html, /colore = mix\(colore, oss \* alfa, uFedelta \* dallAlto\);/, "le cime viste dall'alto non prendono il colore osservato");
+  assert.match(html, /volume\.pubblicaPelle\(campo, pixelPelle\);/, "la fotografia della scena non arriva allo shader");
+  assert.match(html, /gl\.uniform1i\(u\("uPelle"\), 9\);/, "campionatore della fotografia non collegato");
   console.log("spessore dai livelli ICON-EU, copertura e cime dal satellite");
 }
 
