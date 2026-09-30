@@ -8267,6 +8267,11 @@
           base: estendiFuori(base, dentro, w, h),
           convezione: estendiFuori(convezione, dentro, w, h),
           densita: densita,
+          // Riflettanza VIS 0,6 um corretta per il coseno zenitale e coseno
+          // stesso: servono all'assimilazione per lo spessore ottico di giorno.
+          albedo: albedo,
+          fondo: fondo,
+          mu: mu,
           conVisibile: !!pixelVis
         };
         return campo;
@@ -11502,11 +11507,19 @@
         "        // e' piu' larga della nube che si vede, e il velo tenue non scurisce.",
         "        float ghS, betaS;",
         "        estinzioneFisica(q, quota, cq, ghS, betaS);",
-        "        tauS += smoothstep(0.12, 0.55, dq) * betaS * 0.3 * strato / max(uSole.z, 0.15);",
+        "        tauS += smoothstep(0.12, 0.55, dq) * betaS * strato;",
         "      }",
-        "      float ombra = 1.0 - exp(-tauS);",
-        "      ombraA = trasmissione * uOmbreSuolo * 0.78 * ombra;",
-        "      ombraC = uCielo * 0.12 * ombraA;",
+        "      // Sotto la nube arriva la luce diretta rimasta e quella diffusa che",
+        "      // la attraversa: a due flussi T = 1 / (1 + 0,75 (1 - g) tau), g 0,85",
+        "      // (il ghiaccio e' gia' in delta-scaling). tau 1: -10%; tau 20: -69%.",
+        "      // Il sole basso allunga il cammino, piu' debolmente della diretta.",
+        "      float tauV = tauS / sqrt(max(uSole.z, 0.15));",
+        "      float ombra = 1.0 - 1.0 / (1.0 + 0.1125 * tauV);",
+        "      ombraA = trasmissione * uOmbreSuolo * ombra;",
+        "      // Visto dall'alto il suolo in ombra non e' nero: l'aria sotto la",
+        "      // nube resta in parte al sole e diffonde verso chi guarda (radianza",
+        "      // di cammino, 0,6 um: ~0,04-0,06 di riflettanza equivalente, blu).",
+        "      ombraC = uCielo * 0.28 * ombraA;",
         "    }",
         "  }",
         "  colorePixel = vec4(colore + canale + ombraC, min(1.0, max(alfa, canaleAlfa) + ombraA));",
@@ -11922,6 +11935,156 @@
       // quadratici fino a 3 e 1 g/m3), A temperatura (0,5 K da -90 C; 255 sotto
       // il suolo). Senza i campi v2, o con una GPU che non regge la griglia,
       // lo shader usa i valori tipici (uAriaOk = 0).
+      // L'ASSIMILAZIONE COLONNA PER COLONNA (fase 3a): il satellite corregge il
+      // volume fisico di ICON-EU. Per ogni colonna del modello (0,1875 gradi)
+      // si raccoglie cio' che il satellite vede nella stessa area -- frazione
+      // nuvolosa, cima (IR/CTH), base stimata, spessore ottico dal visibile di
+      // giorno -- e:
+      //  - sereno per il satellite (meno del 5% di pixel nuvolosi): la colonna
+      //    del modello si svuota;
+      //  - nube del modello sopra la cima osservata (+0,5 km): tolta;
+      //  - lo strato piu' alto del modello vicino alla cima osservata (entro
+      //    1,5 km sotto): spostato alla quota osservata;
+      //  - nube vista e nessuno strato del modello vicino alla cima: se ne crea
+      //    uno fra la cima e la base stimata, acqua o ghiaccio secondo la
+      //    temperatura del modello, con lo spessore ottico osservato (o 10 per
+      //    l'acqua e 1 per il ghiaccio, di notte);
+      //  - di giorno il condensato della colonna si scala (fra 1/3 e 3) finche'
+      //    lo spessore ottico dentro la nube eguaglia quello del satellite:
+      //    tau = 2R / ((1 - g)(1 - R)), g = 0,85 (due flussi, diffusione
+      //    conservativa).
+      // Restituisce un nuovo volume (stessi codici NUBV v2) e la diagnostica.
+      function assimilaVolume(vol, f, geo) {
+        var c = vol && vol.campi;
+        if (!c || !c.clc || !c.lwc || !c.iwc || !f || !f.densita) return null;
+        var nx = vol.nx, ny = vol.ny, nz = vol.nz, piano = nx * ny, dz = vol.dz, z0 = vol.z0;
+        var w = geo.larghezza, h = geo.altezza;
+        var celle = piano, somma = new Float32Array(celle * 6);  // n, nuvolosi, cima, base, tau, nTau
+        var passoLat = ny > 1 ? (vol.nord - vol.sud) / (ny - 1) : 1, passoLon = nx > 1 ? (vol.est - vol.ovest) / (nx - 1) : 1;
+        for (var y = 0; y < h; y++) {
+          var my = geo.nordM - (y + 0.5) / h * (geo.nordM - geo.sudM);
+          var lat = (2 * Math.atan(Math.exp(my / geo.raggio)) - Math.PI / 2) * 180 / Math.PI;
+          var iy = Math.round((lat - vol.sud) / passoLat);
+          if (!(iy >= 0 && iy < ny)) continue;
+          for (var x = 0; x < w; x++) {
+            var lon = geo.ovest + (x + 0.5) / w * (geo.est - geo.ovest);
+            var ix = Math.round((lon - vol.ovest) / passoLon);
+            if (!(ix >= 0 && ix < nx)) continue;
+            var k = y * w + x, cella = (iy * nx + ix) * 6;
+            somma[cella] += 1;
+            if (f.densita[k] > 0.05) {
+              somma[cella + 1] += 1;
+              somma[cella + 2] += f.cima[k];
+              somma[cella + 3] += f.base[k];
+              var R = f.albedo ? f.albedo[k] : NaN;
+              if (R >= 0 && f.mu && f.mu[k] > 0.25) {
+                // La luce che il suolo (neve, rocce, deserto) rimanda oltre la
+                // nube non e' spessore ottico: si toglie il fondo sereno locale.
+                var A = f.fondo ? Math.max(0, Math.min(0.9, f.fondo[k])) : 0;
+                R = Math.max(0, Math.min((R - A) / (1 - A), 0.95));
+                somma[cella + 4] += 2 * R / (0.15 * (1 - R));
+                somma[cella + 5] += 1;
+              }
+            }
+          }
+        }
+        var clc = new Uint8Array(c.clc), lwc = new Uint8Array(c.lwc), iwc = new Uint8Array(c.iwc);
+        var t = c.t;
+        var dec = function (code, max) { return code === 255 ? 0 : Math.pow(code / 254, 2) * max; };
+        var enc = function (v, max) { return Math.round(Math.sqrt(Math.max(0, Math.min(v, max)) / max) * 254); };
+        var azioni = new Uint8Array(piano), fattori = new Float32Array(piano).fill(1);
+        var conta = [0, 0, 0, 0, 0], colonneVis = 0;
+        var colL = new Float32Array(nz), colI = new Float32Array(nz), colC = new Float32Array(nz);
+        for (var cel = 0; cel < piano; cel++) {
+          var n = somma[cel * 6];
+          if (n < 1) continue;
+          var frazione = somma[cel * 6 + 1] / n;
+          if (somma[cel * 6 + 5] > 0) colonneVis++;
+          for (var z = 0; z < nz; z++) {
+            var q = z * piano + cel;
+            colL[z] = dec(lwc[q], 3); colI[z] = dec(iwc[q], 1); colC[z] = clc[q] === 255 ? 0 : clc[q] / 100;
+          }
+          var azione = 0;
+          if (frazione < 0.05) {
+            // Sereno per il satellite: nessuna nube nella colonna.
+            for (z = 0; z < nz; z++) { colL[z] = 0; colI[z] = 0; colC[z] = 0; }
+            azione = 1;
+          } else {
+            var nNuv = somma[cel * 6 + 1];
+            var cimaSat = somma[cel * 6 + 2] / nNuv, baseSat = Math.min(somma[cel * 6 + 3] / nNuv, cimaSat - 0.25);
+            var zCima = function (zz) { return z0 + (zz + 0.5) * dz; };
+            // Sopra la cima osservata non c'e' nube.
+            for (z = 0; z < nz; z++) {
+              if (z0 + z * dz > cimaSat + 0.5) { colL[z] = 0; colI[z] = 0; colC[z] = 0; }
+            }
+            var alto = -1;
+            for (z = nz - 1; z >= 0; z--) { if (colL[z] + colI[z] > 0.005) { alto = z; break; } }
+            if (alto >= 0 && zCima(alto) >= cimaSat - 1.5) {
+              // Lo strato piu' alto si porta alla cima osservata.
+              var basso = alto;
+              while (basso > 0 && colL[basso - 1] + colI[basso - 1] > 0.005) basso--;
+              var salto = Math.round((cimaSat - zCima(alto)) / dz);
+              if (salto !== 0) {
+                var sL = colL.slice(basso, alto + 1), sI = colI.slice(basso, alto + 1), sC = colC.slice(basso, alto + 1);
+                for (z = basso; z <= alto; z++) { colL[z] = 0; colI[z] = 0; colC[z] = 0; }
+                for (var j = 0; j < sL.length; j++) {
+                  var dove = basso + j + salto;
+                  if (dove < 0 || dove >= nz) continue;
+                  colL[dove] = sL[j]; colI[dove] = sI[j]; colC[dove] = sC[j];
+                }
+              }
+              azione = 2;
+            } else {
+              // Nessuno strato vicino alla cima: se ne crea uno fra cima e base.
+              var tauObiettivo = somma[cel * 6 + 5] > 0 ? somma[cel * 6 + 4] / somma[cel * 6 + 5] : NaN;
+              var spessore = Math.max(0.25, cimaSat - baseSat);
+              for (z = 0; z < nz; z++) {
+                var quota = z0 + z * dz;
+                if (quota < cimaSat - spessore || quota > cimaSat) continue;
+                var tC = t && t[z * piano + cel] !== 255 ? t[z * piano + cel] * 0.5 - 90 : -20;
+                var ghiaccio = Math.max(0, Math.min(1, (-5 - tC) / 33));
+                var tau = Number.isFinite(tauObiettivo) ? Math.max(0.5, tauObiettivo) : (ghiaccio > 0.5 ? 1 : 10);
+                var beta = tau / spessore;                      // 1/km dentro la nube
+                var reG = 20 + 40 * Math.max(0, Math.min(1, (tC + 60) / 50));
+                colL[z] = (1 - ghiaccio) * beta * 10 / 1500 * frazione;
+                colI[z] = ghiaccio * beta * 0.917 * reG / 1500 * frazione;
+                colC[z] = frazione;
+              }
+              azione = 3;
+            }
+            // Di giorno lo spessore ottico della colonna si porta a quello osservato.
+            if (somma[cel * 6 + 5] > 0 && azione !== 3) {
+              var tauSat = somma[cel * 6 + 4] / somma[cel * 6 + 5], tauMod = 0;
+              for (z = 0; z < nz; z++) {
+                var fr = Math.max(colC[z], 0.1);
+                var tz = t && t[z * piano + cel] !== 255 ? t[z * piano + cel] * 0.5 - 90 : -20;
+                var re = 20 + 40 * Math.max(0, Math.min(1, (tz + 60) / 50));
+                tauMod += (1500 * colL[z] / fr / 10 + 1500 * colI[z] / fr / (0.917 * re)) * dz;
+              }
+              if (tauMod > 0.01) {
+                var s = Math.max(1 / 3, Math.min(3, tauSat / tauMod));
+                for (z = 0; z < nz; z++) { colL[z] *= s; colI[z] *= s; }
+                fattori[cel] = s;
+                conta[4]++;
+              }
+            }
+          }
+          azioni[cel] = azione;
+          conta[azione]++;
+          for (z = 0; z < nz; z++) {
+            q = z * piano + cel;
+            lwc[q] = enc(colL[z], 3); iwc[q] = enc(colI[z], 1); clc[q] = Math.round(Math.max(0, Math.min(1, colC[z])) * 100);
+          }
+        }
+        var campi = Object.assign({}, c, { clc: clc, lwc: lwc, iwc: iwc });
+        return {
+          volume: Object.assign({}, vol, { campi: campi }),
+          azioni: azioni, fattori: fattori,
+          conteggi: { svuotate: conta[1], spostate: conta[2], create: conta[3], scalateTau: conta[4],
+            colonneVis: colonneVis, conVisibile: !!f.albedo }
+        };
+      }
+
       StratoVolume.prototype.pubblicaAria = function (gl, vol) {
         if (vol === this.ariaVolume) return;
         this.ariaVolume = vol;
@@ -12005,7 +12168,18 @@
               this.modelloPerVuoto = { dati: stato.modello.dati, larghezza: stato.larghezza,
                 altezza: stato.altezza, nz: stato.modello.nz, passoKm: stato.modello.passoKm };
             }
-            this.pubblicaAria(gl, campo.ambiente && campo.ambiente.volume);
+            var volGrezzo = campo.ambiente && campo.ambiente.volume;
+            var assimilato = null;
+            try {
+              var rq = riquadroMercatore();
+              assimilato = volGrezzo && campo.fusione ? assimilaVolume(volGrezzo, campo.fusione, {
+                larghezza: campo.larghezza, altezza: campo.altezza, ovest: DOMINIO.ovest, est: DOMINIO.est,
+                nordM: rq.nord, sudM: rq.sud, raggio: RAGGIO_TERRA }) : null;
+            } catch (errore) {
+              console.error("Nubi 3D: assimilazione non riuscita", errore);
+            }
+            this.assimilazione = assimilato;
+            this.pubblicaAria(gl, assimilato ? assimilato.volume : volGrezzo);
             gl.bindTexture(gl.TEXTURE_2D, this.texMorfo1);
             gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stato.larghezza, stato.altezza, 0,
@@ -12693,7 +12867,7 @@
       }
 
       // --- caricamento -------------------------------------------------------
-      function scarica(strato, misura, adesso, epocaRichiesta, soloSlot) {
+      function scarica(strato, misura, adesso, epocaRichiesta, soloSlot, attesaMs) {
         var epoca = Number(epocaRichiesta);
         var slot = Number.isFinite(epoca) && epoca > 0
           ? {
@@ -12712,7 +12886,7 @@
             immagine.onload = immagine.onerror = null;
             immagine.src = "data:,";
             risolvi(null);
-          }, 8000) : 0;
+          }, attesaMs || 8000) : 0;
           var termina = function (valore) {
             if (conclusa) return;
             conclusa = true;
@@ -13041,19 +13215,30 @@
           ambienteAllIstante(slotScena),
           new Promise(function (risolvi) { setTimeout(function () { risolvi(null); }, 6000); })
         ]);
+        // Il visibile a 0,6 um dello stesso istante: la densita' delle nubi
+        // 3D e lo spessore ottico per l'assimilazione. Solo di giorno e solo
+        // quello slot. A piena risoluzione arriva spesso dopo 8 s: non
+        // trattiene il primo fotogramma, lo affina quando c'e'.
+        var promessaVisibile = diGiorno
+          ? scarica(STRATI.visibile, misure.forma, adesso, slotScena, true, 45000) : Promise.resolve(null);
         Promise.all([
           scarica(STRATI.forma, misure.forma, adesso, slotScena),
           scarica(STRATI.maschera, misure.msg, adesso, slotMsg),
           scarica(STRATI.cime, misure.msg, adesso, slotMsg),
-          promessaAmbiente,
-          // Il visibile a 0,6 um dello stesso istante: la densita' delle
-          // nubi 3D. Solo di giorno, e solo quello slot.
-          diGiorno ? scarica(STRATI.visibile, misure.forma, adesso, slotScena, true) : null
+          promessaAmbiente
         ]).then(function (arrivati) {
           if (!attiva || seriale !== scenaSeriale) return;
           var campo = componi(arrivati[0], arrivati[1], arrivati[2], null, promessaPelle, misure, seriale,
-            arrivati[3], arrivati[4]);
+            arrivati[3], null);
           if (!campo) return;
+          promessaVisibile.then(function (visibile) {
+            if (!attiva || seriale !== scenaSeriale || !visibile || visibile.ultimo || !campo.pixelIr) return;
+            try {
+              var pixelVis = leggiPixel(visibile.immagine, misure.forma).data;
+              fusioneDelCampo(campo, campo.pixelIr, pixelVis, campo.epoca);
+              volume.pubblicaCampo(campo);
+            } catch (errore) { /* resta la fusione dal solo infrarosso */ }
+          });
           promessaCelle.then(function (celle) {
             campo.rdtTerminato = true;
             if (attiva && seriale === scenaSeriale && celle && celle.length) {
@@ -13263,6 +13448,7 @@
             try { pixelVis = leggiPixel(visibile.immagine, misuraForma).data; } catch (e) { pixelVis = null; }
           }
           fusioneDelCampo(campo, pixelForma.data, pixelVis, forma.slot.epoca);
+          campo.pixelIr = pixelForma.data;
           // Questo e' il primo frame vero: viene caricato nella GPU prima di
           // qualunque lavoro opzionale. Cosi' una canvas GeoColour lenta o a
           // corto di memoria non puo' piu' cancellare anche le nubi IR.
@@ -13984,7 +14170,8 @@
         // Il volume fisico ICON-EU caricato nello shader (per le prove e la console).
         aria: function () {
           return { pronta: !!volume.ariaPronta, moto: !!volume.ariaMotoPronta,
-            griglia: volume.ariaGriglia || null, geo: volume.ariaGeo || null };
+            griglia: volume.ariaGriglia || null, geo: volume.ariaGeo || null,
+            assimilazione: volume.assimilazione ? volume.assimilazione.conteggi : null };
         },
         // Lo stato del governatore dei 60 fps (per le prove e la console).
         governatore: function () {

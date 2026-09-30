@@ -2527,7 +2527,7 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.match(html, /float betaAcqua = 1500\.0 \* lwc \/ 10\.0, betaGhiaccio = 1500\.0 \* iwc \/ \(0\.917 \* reGhiaccio\);/, "beta = 3 W / (2 rho r_e) cambiato");
   // 0,3 g/m3 d'acqua a r_e 10 um: 45 /km; 0,02 g/m3 di ghiaccio a 30 um: ~1,1 /km.
   assert.ok(Math.abs(1500 * 0.3 / 10 - 45) < 1e-9 && Math.abs(1500 * 0.02 / (0.917 * 30) - 1.09) < 0.01);
-  assert.match(html, /this\.pubblicaAria\(gl, campo\.ambiente && campo\.ambiente\.volume\);/, "il volume fisico non arriva allo shader");
+  assert.match(html, /this\.pubblicaAria\(gl, assimilato \? assimilato\.volume : volGrezzo\);/, "il volume fisico non arriva allo shader");
   assert.match(html, /if \(vol\.nx > lato \|\| vol\.ny > lato \|\| vol\.nz > lato\) return;/, "manca il controllo del lato massimo delle texture 3D");
   // Fase 2b: la forma dal moto dell'aria, niente doppio conto del condensato.
   assert.match(html, /float sale = smoothstep\(0\.2, 1\.5, moto\.x\), scende = smoothstep\(0\.2, 1\.0, -moto\.x\);/, "la forma non segue la corrente verticale");
@@ -2540,6 +2540,48 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.match(html, /var tempesta = Math\.max\(nucleo, 0\.9 \* lampi \* Math\.max\(radarForte, 0\.7\) \* ls\(4\.5, 7, top\)\);/, "senza radar i fulmini non fanno piu' il cumulonembo");
   assert.match(html, /float nucleoPieno = cumulo \* smoothstep\(0\.45, 0\.9, sviluppo\) \* smoothstep\(0\.35, 0\.8, campo\.g\);/, "la cella convettiva torna un guscio vuoto");
   console.log("spessore dai livelli ICON-EU, copertura e cime dal satellite");
+}
+
+// L'ASSIMILAZIONE COLONNA PER COLONNA: il satellite corregge il volume ICON-EU.
+{
+  const src = implementazione("assimilaVolume");
+  const assimila = new Function(src + "\nreturn assimilaVolume;")();
+  // Volume 4 colonne x 1 riga, 65 quote ogni 250 m.
+  const nx = 4, ny = 1, nz = 65, piano = nx * ny;
+  const enc = (v, max) => Math.round(Math.sqrt(Math.min(v, max) / max) * 254);
+  const dec = (c, max) => Math.pow(c / 254, 2) * max;
+  const clc = new Uint8Array(nz * piano), lwc = new Uint8Array(nz * piano), iwc = new Uint8Array(nz * piano), t = new Uint8Array(nz * piano);
+  for (let z = 0; z < nz; z++) for (let c = 0; c < piano; c++) t[z * piano + c] = Math.round((15 - 6.5 * z * 0.25 + 90) / 0.5);
+  // colonne 0 e 1: strato d'acqua 1,0-2,0 km (0,2 g/m3); colonne 2 e 3: niente.
+  for (const c of [0, 1]) for (let z = 4; z <= 8; z++) { lwc[z * piano + c] = enc(0.2, 3); clc[z * piano + c] = 100; }
+  const vol = { nx, ny, nz, sud: 40, nord: 40, ovest: 10, est: 13, z0: 0, dz: 0.25, campi: { clc, lwc, iwc, t } };
+  // Campo 4 x 1: pixel 0 sereno; 1 nube con cima 2,5 km; 2 nube a 5 km; 3 nube a 9 km (ghiaccio).
+  const f = { densita: new Float32Array([0, 0.8, 0.8, 0.8]), cima: new Float32Array([0, 2.5, 5, 9]),
+    base: new Float32Array([0, 1, 4, 8]), albedo: null, mu: null };
+  const yM = 6378137 * Math.log(Math.tan(Math.PI / 4 + 40 * Math.PI / 360));
+  const geo = { larghezza: 4, altezza: 1, ovest: 9.5, est: 13.5, nordM: yM + 1, sudM: yM - 1, raggio: 6378137 };
+  const a = assimila(vol, f, geo);
+  const col = (campo, c, max) => Array.from({ length: nz }, (_, z) => dec(a.volume.campi[campo][z * piano + c], max));
+  assert.equal(col("lwc", 0, 3).reduce((x, y) => x + y), 0, "sereno per il satellite: la colonna non si svuota");
+  const l1 = col("lwc", 1, 3), alto1 = l1.map((v, z) => v > 0.005 ? z : -1).reduce((x, y) => Math.max(x, y));
+  assert.ok(Math.abs((alto1 + 0.5) * 0.25 - 2.5) <= 0.25, "lo strato non e' salito alla cima osservata: " + (alto1 + 0.5) * 0.25);
+  assert.ok(col("lwc", 2, 3).some((v, z) => v > 0 && z * 0.25 >= 4 && z * 0.25 <= 5), "la nube osservata a 4-5 km non e' stata creata");
+  assert.ok(col("iwc", 3, 1).some(v => v > 0) && col("lwc", 3, 3).slice(33).every(v => v === 0), "a 8-9 km (-40 C) la nube creata deve essere ghiaccio");
+  assert.deepEqual(a.conteggi, { svuotate: 1, spostate: 1, create: 2, scalateTau: 0,
+    colonneVis: 0, conVisibile: false });
+  // Di giorno lo spessore ottico si porta a quello del visibile (R 0,6 -> tau 20).
+  const g = Object.assign({}, f, { albedo: new Float32Array([0, 0.6, 0.6, 0.6]), mu: new Float32Array([1, 1, 1, 1]) });
+  const b = assimila(vol, g, geo);
+  assert.equal(b.conteggi.scalateTau, 1, "lo strato del modello non si scala sullo spessore ottico osservato");
+  // Lo strato del modello: 0,2 g/m3 per 1,25 km = 30 /km x 1,25 = tau 37,5; il
+  // satellite ne vede 20: il condensato scende a 20 / 37,5 = 0,53.
+  assert.ok(Math.abs(b.fattori[1] - 20 / 37.5) < 0.04, "fattore tau sbagliato: " + b.fattori[1]);
+  assert.match(html, /assimilato \? assimilato\.volume : volGrezzo/, "il volume assimilato non arriva allo shader");
+  // Il visibile a piena risoluzione arriva spesso dopo 8 s: non deve essere
+  // scartato, ma rifare la fusione (e l'assimilazione) quando arriva.
+  assert.match(html, /scarica\(STRATI\.visibile, misure\.forma, adesso, slotScena, true, 45000\)/, "il visibile scade ancora dopo 8 s");
+  assert.match(html, /promessaVisibile\.then\(function \(visibile\) \{[\s\S]{0,400}fusioneDelCampo\(campo, campo\.pixelIr, pixelVis, campo\.epoca\);\s*volume\.pubblicaCampo\(campo\);/, "il visibile arrivato non rifa' la fusione");
+  console.log("assimilazione: sereno svuota, cima spostata, strati creati, tau dal visibile");
 }
 
 // IL GOVERNATORE DEI 60 FPS: scende quando i fotogrammi rallentano, prima coi
