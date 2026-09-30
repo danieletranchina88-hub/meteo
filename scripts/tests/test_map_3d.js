@@ -2568,7 +2568,7 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.ok(col("lwc", 2, 3).some((v, z) => v > 0 && z * 0.25 >= 4 && z * 0.25 <= 5), "la nube osservata a 4-5 km non e' stata creata");
   assert.ok(col("iwc", 3, 1).some(v => v > 0) && col("lwc", 3, 3).slice(33).every(v => v === 0), "a 8-9 km (-40 C) la nube creata deve essere ghiaccio");
   assert.deepEqual(a.conteggi, { svuotate: 1, spostate: 1, create: 2, scalateTau: 0,
-    colonneVis: 0, conVisibile: false });
+    colonneVis: 0, conVisibile: false, colonneOca: 0, secondoStrato: 0, conOca: false });
   // Di giorno lo spessore ottico si porta a quello del visibile (R 0,6 -> tau 20).
   const g = Object.assign({}, f, { albedo: new Float32Array([0, 0.6, 0.6, 0.6]), mu: new Float32Array([1, 1, 1, 1]) });
   const b = assimila(vol, g, geo);
@@ -2577,6 +2577,30 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   // satellite ne vede 20: il condensato scende a 20 / 37,5 = 0,53.
   assert.ok(Math.abs(b.fattori[1] - 20 / 37.5) < 0.04, "fattore tau sbagliato: " + b.fattori[1]);
   assert.match(html, /assimilato \? assimilato\.volume : volGrezzo/, "il volume assimilato non arriva allo shader");
+  // OCA (EUMETSAT): tau misurato al posto del visibile, secondo strato, fase.
+  const piastra = (valori, scala, offset) => {
+    const a = Uint8Array.from(valori.map(v => Number.isFinite(v) ? Math.round((v - offset) / scala) : 255));
+    a.specifica = { codifica: 0, scala, offset };
+    return a;
+  };
+  const oca = { nx, ny, nz: 1, sud: 40, nord: 40, ovest: 10, est: 13, campi: {
+    cot1: piastra([NaN, Math.log10(20), Math.log10(3), Math.log10(2)], 3.5 / 254, -1),
+    cot2: piastra([NaN, NaN, Math.log10(8), NaN], 3.5 / 254, -1),
+    ml: piastra([NaN, 0, 0.6, 0], 1 / 254, 0),
+    zt2: piastra([NaN, NaN, 1.5, NaN], 0.1, 0),
+    ice: piastra([NaN, 0, 0, 0], 1 / 254, 0) } };
+  const o = assimila(vol, f, geo, oca);
+  assert.equal(o.conteggi.conOca, true, "la piastrella OCA sulla stessa griglia non e' stata riconosciuta");
+  assert.equal(o.conteggi.colonneOca, 3);
+  assert.ok(Math.abs(o.fattori[1] - 20 / 37.5) < 0.05, "tau OCA non usato per scalare lo strato: " + o.fattori[1]);
+  assert.equal(o.conteggi.secondoStrato, 1, "lo strato basso osservato da OCA non e' stato creato");
+  const colO = (campo, c, max) => Array.from({ length: nz }, (_, z) => dec(o.volume.campi[campo][z * piano + c], max));
+  assert.ok(colO("lwc", 2, 3).some((v, z) => v > 0 && (z + 0.5) * 0.25 <= 1.5 && (z + 0.5) * 0.25 >= 0.7), "manca l'acqua dello strato basso a 0,7-1,5 km");
+  assert.ok(colO("iwc", 3, 1).some(v => v > 0), "a -43 C la cima e' ghiaccio anche se OCA dice acqua");
+  // Il lettore NUBV conserva l'offset (i log10 di tau partono da -1).
+  assert.match(html, /offset: v\.getFloat32\(pos \+ 13, true\)/, "il lettore NUBV perde l'offset dei campi");
+  assert.match(html, /volumeAllIstante\(epoca\), ocaAllIstante\(epoca\)\]/, "l'OCA dell'istante non viene caricato");
+  assert.match(html, /raggio: RAGGIO_TERRA \}, oca\) : null;/, "l'OCA non arriva all'assimilazione");
   // Il visibile a piena risoluzione arriva spesso dopo 8 s: non deve essere
   // scartato, ma rifare la fusione (e l'assimilazione) quando arriva.
   assert.match(html, /scarica\(STRATI\.visibile, misure\.forma, adesso, slotScena, true, 45000\)/, "il visibile scade ancora dopo 8 s");
@@ -2663,7 +2687,7 @@ assert.match(fragment, /float profiloVerticale\(float hf, float cumulo, float sv
 // durezza, vento in quota della cella, domain warp contro il tiling.
 assert.match(html, /var DOMINIO = \{ ovest: -23\.5, sud: 29\.5, est: 42\.0, nord: 66\.0 \};/, "il volume deve coprire il satellite dove c'e' ICON-EU");
 assert.match(html, /var NUBI_EU_URL = "data_weather\/cloud_eu\/";/, "manca la serie ICON-EU per livello");
-assert.match(html, /return Promise\.all\(\[serieAllIstante\(epoca, AMBIENTE_URL\), serieAllIstante\(epoca, NUBI_EU_URL\),\s*volumeAllIstante\(epoca\)\]\)/, "ICON-2I, ICON-EU e il volume nativo devono arrivare insieme");
+assert.match(html, /return Promise\.all\(\[serieAllIstante\(epoca, AMBIENTE_URL\), serieAllIstante\(epoca, NUBI_EU_URL\),\s*volumeAllIstante\(epoca\), ocaAllIstante\(epoca\)\]\)/, "ICON-2I, ICON-EU e il volume nativo devono arrivare insieme");
 // I LIVELLI NATIVI: colonna ogni 250 m con acqua+ghiaccio; scala delle torri
 // da HBAS/HTOP fuori da ICON-2I; rumore guidato da durezza, CAPE e shear.
 assert.match(html, /var VOLUME_EU_URL = "data_weather\/cloud_eu_vol\/";/, "manca il volume sui livelli nativi");

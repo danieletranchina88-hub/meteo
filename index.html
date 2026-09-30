@@ -7714,6 +7714,11 @@
       // Il volume di ICON-EU sui livelli NATIVI (una sessantina sotto i 15
       // km), ricampionato ogni 250 m: copertura e acqua+ghiaccio di nube.
       var VOLUME_EU_URL = "data_weather/cloud_eu_vol/";
+      // Le proprieta' ottiche misurate da EUMETSAT (OCA MTG-FCI, ogni 10
+      // minuti) sulle stesse colonne del volume: spessore ottico dei due
+      // strati, quote delle cime, fase. Le scrive il workflow cloud_oca.
+      var OCA_URL = "data_weather/cloud_oca/";
+      var OCA_DISTANZA_MAX_MS = 10 * 60 * 1000;
       var ambienteIndici = {};
       var ambientePiastrelle = {}, ambienteOrdine = [];
 
@@ -7779,7 +7784,8 @@
         for (var i = 0; i < quanti; i++) {
           var nome = "";
           for (var c = 0; c < 8; c++) { var b = v.getUint8(pos + c); if (b) nome += String.fromCharCode(b); }
-          specifiche.push({ nome: nome, codifica: v.getUint8(pos + 8), scala: v.getFloat32(pos + 9, true) });
+          specifiche.push({ nome: nome, codifica: v.getUint8(pos + 8), scala: v.getFloat32(pos + 9, true),
+            offset: v.getFloat32(pos + 13, true) });
           pos += 17;
         }
         specifiche.forEach(function (sp) {
@@ -7795,7 +7801,7 @@
         if (!ambientePiastrelle[chiave]) {
           ambientePiastrelle[chiave] = fetchDecompressedResponse(chiave)
             .then(function (r) { return r.arrayBuffer(); })
-            .then(function (b) { return /\.vol\.gz$/.test(file) ? leggiVolume(b) : leggiPiastrella(b); })
+            .then(function (b) { return /\.(vol|oca)\.gz$/.test(file) ? leggiVolume(b) : leggiPiastrella(b); })
             .catch(function () { delete ambientePiastrelle[chiave]; return null; });
           ambienteOrdine.push(chiave);
           // Scorrendo la timeline bastano poche ore in memoria.
@@ -7840,13 +7846,13 @@
       // (in Europa): senza ICON-2I resta ICON-EU da solo.
       function ambienteAllIstante(epoca) {
         return Promise.all([serieAllIstante(epoca, AMBIENTE_URL), serieAllIstante(epoca, NUBI_EU_URL),
-          volumeAllIstante(epoca)])
+          volumeAllIstante(epoca), ocaAllIstante(epoca)])
           .then(function (d) {
-            var amb = d[0], eu = d[1], vol = d[2];
-            if (amb) { amb.eu = eu; amb.vol = vol; return amb; }
+            var amb = d[0], eu = d[1], vol = d[2], oca = d[3];
+            if (amb) { amb.eu = eu; amb.vol = vol; amb.oca = oca; return amb; }
             if (!eu && !vol) return null;
             var rif = eu || { modo: "vicino", run: null, distanza: 0 };
-            return { soloEU: true, eu: eu, vol: vol, modo: rif.modo, run: rif.run, distanza: rif.distanza };
+            return { soloEU: true, eu: eu, vol: vol, oca: oca, modo: rif.modo, run: rif.run, distanza: rif.distanza };
           }).catch(function () { return null; });
       }
 
@@ -7874,6 +7880,23 @@
               });
               return Object.assign({}, a, { campi: campi });
             });
+        }).catch(function () { return null; });
+      }
+
+      // L'OCA dello stesso istante (entro 10 minuti), o null. Non si
+      // interpola: e' un'osservazione, non un campo che scorre.
+      function ocaAllIstante(epoca) {
+        return indiceAmbiente(OCA_URL).then(function (indice) {
+          var migliore = null, distanza = Infinity;
+          ((indice && indice.frames) || []).forEach(function (f) {
+            var d = Math.abs(Date.parse(f.valid) - epoca);
+            if (d < distanza) { distanza = d; migliore = f; }
+          });
+          if (!migliore || !(distanza <= OCA_DISTANZA_MAX_MS)) return null;
+          return piastrellaAmbiente(migliore.file, OCA_URL).then(function (t) {
+            if (t) t.valido = migliore.valid;
+            return t;
+          });
         }).catch(function () { return null; });
       }
 
@@ -7962,10 +7985,12 @@
             extra: amb.eu ? campiSulCampo(amb.eu, nomiEU, w, h) : {}
           };
           solo.modo = amb.modo; solo.run = amb.run; solo.distanza = amb.distanza; solo.volume = amb.vol || null;
+          solo.oca = amb.oca || null;
           return solo;
         }
         var conEU = ambienteSulCampoIcon2I(amb, w, h);
         conEU.volume = amb.vol || null;
+        conEU.oca = amb.oca || null;
         if (amb.eu) {
           var livelliEU = campiSulCampo(amb.eu, nomiEU, w, h);
           Object.keys(livelliEU).forEach(function (nome) { conEU.extra[nome] = livelliEU[nome]; });
@@ -11954,10 +11979,18 @@
       //    tau = 2R / ((1 - g)(1 - R)), g = 0,85 (due flussi, diffusione
       //    conservativa).
       // Restituisce un nuovo volume (stessi codici NUBV v2) e la diagnostica.
-      function assimilaVolume(vol, f, geo) {
+      function assimilaVolume(vol, f, geo, oca) {
         var c = vol && vol.campi;
         if (!c || !c.clc || !c.lwc || !c.iwc || !f || !f.densita) return null;
         var nx = vol.nx, ny = vol.ny, nz = vol.nz, piano = nx * ny, dz = vol.dz, z0 = vol.z0;
+        // OCA (EUMETSAT) sulle stesse colonne: si usa solo se la griglia coincide.
+        var conOca = !!(oca && oca.campi && oca.campi.cot1 && oca.nx === nx && oca.ny === ny
+          && Math.abs(oca.sud - vol.sud) < 0.01 && Math.abs(oca.ovest - vol.ovest) < 0.01);
+        var ov = function (nome, cel) {
+          var a = oca.campi[nome];
+          if (!a || a[cel] === 255) return NaN;
+          return a[cel] * a.specifica.scala + (a.specifica.offset || 0);
+        };
         var w = geo.larghezza, h = geo.altezza;
         var celle = piano, somma = new Float32Array(celle * 6);  // n, nuvolosi, cima, base, tau, nTau
         var passoLat = ny > 1 ? (vol.nord - vol.sud) / (ny - 1) : 1, passoLon = nx > 1 ? (vol.est - vol.ovest) / (nx - 1) : 1;
@@ -11993,13 +12026,31 @@
         var dec = function (code, max) { return code === 255 ? 0 : Math.pow(code / 254, 2) * max; };
         var enc = function (v, max) { return Math.round(Math.sqrt(Math.max(0, Math.min(v, max)) / max) * 254); };
         var azioni = new Uint8Array(piano), fattori = new Float32Array(piano).fill(1);
-        var conta = [0, 0, 0, 0, 0], colonneVis = 0;
+        var conta = [0, 0, 0, 0, 0], colonneVis = 0, colonneOca = 0, secondoStrato = 0;
         var colL = new Float32Array(nz), colI = new Float32Array(nz), colC = new Float32Array(nz);
         for (var cel = 0; cel < piano; cel++) {
           var n = somma[cel * 6];
           if (n < 1) continue;
           var frazione = somma[cel * 6 + 1] / n;
           if (somma[cel * 6 + 5] > 0) colonneVis++;
+          // Lo spessore ottico misurato (OCA): strato alto e, dove c'e',
+          // strato basso; e la fase delle cime. Altrimenti la stima dal visibile.
+          var tau1 = NaN, tau2 = NaN, zt2 = NaN, ml = 0, iceOca = NaN, tauOca = NaN;
+          if (conOca) {
+            var l1 = ov("cot1", cel);
+            if (Number.isFinite(l1)) {
+              tau1 = Math.pow(10, l1);
+              ml = ov("ml", cel) || 0;
+              var l2 = ov("cot2", cel);
+              tau2 = Number.isFinite(l2) ? Math.pow(10, l2) : NaN;
+              zt2 = ov("zt2", cel);
+              tauOca = tau1 + (Number.isFinite(tau2) ? ml * tau2 : 0);
+              colonneOca++;
+            }
+            iceOca = ov("ice", cel);
+          }
+          var tauVis = somma[cel * 6 + 5] > 0 ? somma[cel * 6 + 4] / somma[cel * 6 + 5] : NaN;
+          var tauOss = Number.isFinite(tauOca) ? tauOca : tauVis;
           for (var z = 0; z < nz; z++) {
             var q = z * piano + cel;
             colL[z] = dec(lwc[q], 3); colI[z] = dec(iwc[q], 1); colC[z] = clc[q] === 255 ? 0 : clc[q] / 100;
@@ -12036,13 +12087,17 @@
               azione = 2;
             } else {
               // Nessuno strato vicino alla cima: se ne crea uno fra cima e base.
-              var tauObiettivo = somma[cel * 6 + 5] > 0 ? somma[cel * 6 + 4] / somma[cel * 6 + 5] : NaN;
+              var dueStrati = ml >= 0.3 && Number.isFinite(tau2) && zt2 < cimaSat - 1.5;
+              var tauObiettivo = Number.isFinite(tauOca) ? (dueStrati ? tau1 : tauOca) : tauVis;
               var spessore = Math.max(0.25, cimaSat - baseSat);
               for (z = 0; z < nz; z++) {
                 var quota = z0 + z * dz;
                 if (quota < cimaSat - spessore || quota > cimaSat) continue;
                 var tC = t && t[z * piano + cel] !== 255 ? t[z * piano + cel] * 0.5 - 90 : -20;
                 var ghiaccio = Math.max(0, Math.min(1, (-5 - tC) / 33));
+                // La fase osservata dalle cime, entro la fisica: sotto -38 C
+                // solo ghiaccio (congelamento omogeneo), sopra 0 C solo acqua.
+                if (Number.isFinite(iceOca)) ghiaccio = tC <= -38 ? 1 : (tC >= 0 ? 0 : iceOca);
                 var tau = Number.isFinite(tauObiettivo) ? Math.max(0.5, tauObiettivo) : (ghiaccio > 0.5 ? 1 : 10);
                 var beta = tau / spessore;                      // 1/km dentro la nube
                 var reG = 20 + 40 * Math.max(0, Math.min(1, (tC + 60) / 50));
@@ -12052,9 +12107,33 @@
               }
               azione = 3;
             }
-            // Di giorno lo spessore ottico della colonna si porta a quello osservato.
-            if (somma[cel * 6 + 5] > 0 && azione !== 3) {
-              var tauSat = somma[cel * 6 + 4] / somma[cel * 6 + 5], tauMod = 0;
+            // Il secondo strato osservato (OCA) sotto quello alto: se il
+            // modello non ha nube vicino alla sua cima, lo si crea (0,8 km).
+            if (ml >= 0.3 && Number.isFinite(tau2) && zt2 < cimaSat - 1.5 && zt2 > z0 + 0.3) {
+              var vicino = false;
+              for (z = 0; z < nz; z++) {
+                var qz = z0 + (z + 0.5) * dz;
+                if (qz >= zt2 - 1.5 && qz <= zt2 + 0.5 && colL[z] + colI[z] > 0.005) { vicino = true; break; }
+              }
+              if (!vicino) {
+                var sp2 = 0.8, beta2 = tau2 / sp2, fr2 = frazione * ml;
+                for (z = 0; z < nz; z++) {
+                  var q2 = z0 + (z + 0.5) * dz;
+                  if (q2 < zt2 - sp2 || q2 > zt2) continue;
+                  var t2 = t && t[z * piano + cel] !== 255 ? t[z * piano + cel] * 0.5 - 90 : 0;
+                  var g2 = Math.max(0, Math.min(1, (-5 - t2) / 33));
+                  var re2 = 20 + 40 * Math.max(0, Math.min(1, (t2 + 60) / 50));
+                  colL[z] = (1 - g2) * beta2 * 10 / 1500 * fr2;
+                  colI[z] = g2 * beta2 * 0.917 * re2 / 1500 * fr2;
+                  colC[z] = Math.max(colC[z], fr2);
+                }
+                secondoStrato++;
+              }
+            }
+            // Lo spessore ottico della colonna si porta a quello osservato:
+            // OCA quando c'e', altrimenti di giorno il visibile.
+            if (Number.isFinite(tauOss) && azione !== 3) {
+              var tauSat = tauOss, tauMod = 0;
               for (z = 0; z < nz; z++) {
                 var fr = Math.max(colC[z], 0.1);
                 var tz = t && t[z * piano + cel] !== 255 ? t[z * piano + cel] * 0.5 - 90 : -20;
@@ -12081,7 +12160,8 @@
           volume: Object.assign({}, vol, { campi: campi }),
           azioni: azioni, fattori: fattori,
           conteggi: { svuotate: conta[1], spostate: conta[2], create: conta[3], scalateTau: conta[4],
-            colonneVis: colonneVis, conVisibile: !!f.albedo }
+            colonneVis: colonneVis, conVisibile: !!f.albedo,
+            colonneOca: colonneOca, secondoStrato: secondoStrato, conOca: conOca }
         };
       }
 
@@ -12169,12 +12249,13 @@
                 altezza: stato.altezza, nz: stato.modello.nz, passoKm: stato.modello.passoKm };
             }
             var volGrezzo = campo.ambiente && campo.ambiente.volume;
+        var oca = campo.ambiente && campo.ambiente.oca;
             var assimilato = null;
             try {
               var rq = riquadroMercatore();
               assimilato = volGrezzo && campo.fusione ? assimilaVolume(volGrezzo, campo.fusione, {
                 larghezza: campo.larghezza, altezza: campo.altezza, ovest: DOMINIO.ovest, est: DOMINIO.est,
-                nordM: rq.nord, sudM: rq.sud, raggio: RAGGIO_TERRA }) : null;
+                nordM: rq.nord, sudM: rq.sud, raggio: RAGGIO_TERRA }, oca) : null;
             } catch (errore) {
               console.error("Nubi 3D: assimilazione non riuscita", errore);
             }
