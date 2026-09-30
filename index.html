@@ -7123,9 +7123,9 @@
       // attraversato o scavalcato.
       var QUALITA_VOLUME = isMobile()
         ? { forma: 1200, pelle: 1400, misura: 800, esagerazione: 3.2, passoKm: 0.30, pixel: 520000,
-            rumore: 48, passiLuce: 4, passi: 128, qualita: 0, accumula: 0, latoForma: 64, vuoto: 192 }
+            rumore: 48, passiLuce: 4, passi: 128, qualita: 0, accumula: 0, latoForma: 64, vuoto: 192, luci: 2048 }
         : { forma: 2560, pelle: 3072, misura: 1100, esagerazione: 3.5, passoKm: 0.2, pixel: 2100000,
-            rumore: 64, passiLuce: 5, passi: 192, qualita: 1, accumula: 16, latoForma: 128, vuoto: 384 };
+            rumore: 64, passiLuce: 5, passi: 192, qualita: 1, accumula: 16, latoForma: 128, vuoto: 384, luci: 4096 };
 
       // I numeri dell'aspetto delle nubi. Sono quelli di tutti; con ?regola=1
       // nell'indirizzo compare un pannello per cambiarli dal vivo, e i valori
@@ -7634,7 +7634,36 @@
           + Math.cos(la) * Math.cos(decl) * Math.cos(oraAngolo));
         var azimut = Math.atan2(-Math.sin(oraAngolo),
           Math.tan(decl) * Math.cos(la) - Math.sin(la) * Math.cos(oraAngolo));
-        return { elevazione: elevazione, azimut: azimut };
+        // declinazione e angolo orario a longitudine zero: il terminatore
+        // punto per punto nello shader (angolo orario = oraZero + lon).
+        return { elevazione: elevazione, azimut: azimut, decl: decl,
+          oraZero: (gmst * 15) * Math.PI / 180 - ar, lambda: lambda };
+      }
+
+      // LA LUNA: effemeride a bassa precisione (circa 1 grado, basta per la
+      // luce). Longitudine e latitudine eclittiche dai termini principali,
+      // poi come il sole. La frazione illuminata viene dall'elongazione.
+      function posizioneLuna(quando, lat, lon) {
+        var giorni = (quando - Date.UTC(2000, 0, 1, 12)) / 86400000;
+        var r = Math.PI / 180;
+        var L = (218.316 + 13.176396 * giorni) * r;
+        var M = (134.963 + 13.064993 * giorni) * r;
+        var F = (93.272 + 13.229350 * giorni) * r;
+        var lambda = L + 6.289 * r * Math.sin(M);
+        var beta = 5.128 * r * Math.sin(F);
+        var eps = (23.439 - 0.0000004 * giorni) * r;
+        var ar = Math.atan2(Math.sin(lambda) * Math.cos(eps) - Math.tan(beta) * Math.sin(eps), Math.cos(lambda));
+        var decl = Math.asin(Math.sin(beta) * Math.cos(eps) + Math.cos(beta) * Math.sin(eps) * Math.sin(lambda));
+        var gmst = (18.697374558 + 24.06570982441908 * giorni) % 24;
+        var oraAngolo = (gmst * 15 + lon) * r - ar;
+        var la = lat * r;
+        var elevazione = Math.asin(Math.sin(la) * Math.sin(decl)
+          + Math.cos(la) * Math.cos(decl) * Math.cos(oraAngolo));
+        var azimut = Math.atan2(-Math.sin(oraAngolo),
+          Math.tan(decl) * Math.cos(la) - Math.sin(la) * Math.cos(oraAngolo));
+        var sole = posizioneSole(quando, lat, lon);
+        var elongazione = Math.acos(limita(Math.cos(beta) * Math.cos(lambda - sole.lambda), -1, 1));
+        return { elevazione: elevazione, azimut: azimut, illuminata: (1 - Math.cos(elongazione)) / 2 };
       }
 
       function slotPiuRecente(strato, adesso) {
@@ -10612,6 +10641,13 @@
         "uniform sampler3D uNubiModello; // ICON-EU: frazione di nube per quota (0-16 km, 500 m)",
         "uniform sampler2D uPelle;     // la fotografia del satellite (GeoColour) sul dominio",
         "uniform float uPelleOk;       // 1 quando la fotografia della scena e' arrivata",
+        "uniform sampler2D uLuci;      // le luci delle citta' (Black Marble) sul dominio",
+        "uniform sampler2D uLuciAlone; // le stesse, sfocate (~30 km): il chiarore sotto le nubi",
+        "uniform float uLuciOk;",
+        "uniform vec2 uSoleDecl;       // sin e cos della declinazione del sole",
+        "uniform float uSoleOra;       // angolo orario del sole a longitudine zero (rad)",
+        "uniform float uLunaSuolo;     // quanto della fotografia del suolo resta di notte (luna)",
+        "uniform float uNotteScena;    // 0 giorno, 1 notte al centro della vista",
         "uniform float uFedelta;       // quanto la cima vista dall'alto prende il colore osservato",
         "uniform float uModelloNubi;    // 1: la frazione per quota c'e'",
         "uniform highp sampler3D uAria; // ICON-EU nativo: R copertura %, G LWC, B IWC, A T (NUBV v2)",
@@ -11385,6 +11421,16 @@
         "      vec3 ambiente = (uCielo * (0.35 + 0.65 * occlusione) * (0.35 + 0.65 * h)",
         "        + uSuolo * 0.35 * (1.0 - h)) * (0.55 + 0.45 * powder) * uAmbiente",
         "        * mix(1.0, sqrt(cavita), uCavita);",
+        "      // IL CHIARORE DELLE CITTA': di notte la luce dei centri abitati",
+        "      // accende da sotto le nubi basse, arancione (sodio e LED caldi). Cala",
+        "      // con la quota e con la nube che c'e' sotto; la cupola resta scura.",
+        "      if (uLuciOk > 0.5 && uNotteScena > 0.01) {",
+        "        vec2 uvA = vec2((p.x - uDominio.x) / (uDominio.z - uDominio.x), (p.y - uDominio.y) / (uDominio.w - uDominio.y));",
+        "        float quotaA = p.z * kmPerUnita / uEsagerazione;",
+        "        vec3 alone = texture(uLuciAlone, uvA).rgb;",
+        "        ambiente += alone * alone * vec3(1.0, 0.72, 0.42) * 2.2 * uNotteScena",
+        "          * exp(-quotaA / 2.0) * (0.3 + 0.7 * (1.0 - h)) * (0.55 + 0.45 * powder);",
+        "      }",
         "      // I LAMPI: una scarica Blitzortung accende la nube dall'interno. La",
         "      // sorgente e' il canale -- tronco verticale fino alla regione di",
         "      // carica e rami a ragno -- e la luce arriva attenuata dalla nube che",
@@ -11547,7 +11593,36 @@
         "      ombraC = uCielo * 0.28 * ombraA;",
         "    }",
         "  }",
-        "  colorePixel = vec4(colore + canale + ombraC, min(1.0, max(alfa, canaleAlfa) + ombraA));",
+        "  // IL SUOLO DI NOTTE, punto per punto: il terminatore attraversa il",
+        "  // dominio. Dove il sole e' sotto l'orizzonte la fotografia del suolo si",
+        "  // spegne fino al chiarore della luna (una frazione, bluastra) e restano le",
+        "  // luci delle citta', viste attraverso le nubi (la trasmissione del raggio).",
+        "  float notteA = 0.0;",
+        "  vec3 notteC = vec3(0.0);",
+        "  if (direzione.z < 0.0 && trasmissione > 0.01) {",
+        "    float tN = -origine.z / direzione.z;",
+        "    if (tN >= tVicino && tN <= tLontano * 1.001 + 1e-9) {",
+        "      vec3 pN = origine + direzione * tN;",
+        "      float latN = atan(sinh(PI * (1.0 - 2.0 * pN.y)));",
+        "      float lonN = (2.0 * pN.x - 1.0) * PI;",
+        "      float sinEl = sin(latN) * uSoleDecl.x + cos(latN) * uSoleDecl.y * cos(uSoleOra + lonN);",
+        "      // crepuscolo civile: da +1 a -6 gradi",
+        "      float notte = 1.0 - smoothstep(-0.105, 0.017, sinEl);",
+        "      if (notte > 0.001) {",
+        "        vec3 luciN = vec3(0.0);",
+        "        if (uLuciOk > 0.5) {",
+        "          vec2 uvN = vec2((pN.x - uDominio.x) / (uDominio.z - uDominio.x), (pN.y - uDominio.y) / (uDominio.w - uDominio.y));",
+        "          luciN = texture(uLuci, uvN).rgb;",
+        "          // curva di tono: i nuclei restano accesi, il fondo diffuso",
+        "          // (periferie, riflessi del suolo nella composizione) si abbassa",
+        "          luciN = luciN * luciN * 1.3;",
+        "        }",
+        "        notteA = trasmissione * notte * (1.0 - uLunaSuolo);",
+        "        notteC = trasmissione * notte * (luciN + vec3(0.003, 0.005, 0.011));",
+        "      }",
+        "    }",
+        "  }",
+        "  colorePixel = vec4(colore + canale + ombraC + notteC, min(1.0, max(alfa, canaleAlfa) + ombraA + notteA));",
         "}"
       ].join("\n");
 
@@ -12710,6 +12785,27 @@
         var mescola = function (notte, pieno) {
           return notte.map(function (v, i) { return v + (pieno[i] - v) * giorno; });
         };
+        // LA LUNA. Di notte e' lei la luce delle nubi: la direzione vera, la
+        // forza dalla fase (la luminosita' cresce molto piu' in fretta della
+        // frazione illuminata: effetto opposizione), un argento freddo -- la
+        // visione notturna vede azzurro. Luna piena alta: ~0,22 del sole
+        // nella resa adattata al buio. Gli stessi raggi fanno le ombre.
+        var luna = posizioneLuna(this.epoca || Date.now(), soleLat, soleLon);
+        var lunaSu = limita(Math.sin(luna.elevazione) / 0.25, 0, 1);
+        var lunaLuce = 0.22 * Math.pow(luna.illuminata, 2) * lunaSu * lunaSu * (3 - 2 * lunaSu) * (1 - giorno);
+        var conLuna = lunaLuce > giorno * 0.5 && lunaLuce > 0.004;
+        var coloreLuce = [1.0, 0.96 - 0.22 * basso, 0.9 - 0.42 * basso];
+        var forzaLuce = giorno;
+        if (conLuna) {
+          var lu = [Math.cos(luna.elevazione) * Math.sin(luna.azimut),
+            -Math.cos(luna.elevazione) * Math.cos(luna.azimut), Math.max(0.02, Math.sin(luna.elevazione))];
+          var ll = Math.hypot(lu[0], lu[1], lu[2]) || 1;
+          soleGL = [lu[0] / ll, lu[1] / ll, lu[2] / ll];
+          coloreLuce = [0.74, 0.83, 1.0];
+          forzaLuce = lunaLuce;
+        }
+        this.luna = { luce: lunaLuce, attiva: conLuna, illuminata: luna.illuminata,
+          elevazione: luna.elevazione * 180 / Math.PI };
         var u = function (nome) { return gl.getUniformLocation(p, nome); };
         gl.uniformMatrix4fv(u("uInversa"), false, inversa);
         gl.uniform4f(u("uDominio"), dom.x0, dom.yNord, dom.x1, dom.ySud);
@@ -12761,10 +12857,27 @@
         gl.uniform1f(u("uSigma"), REGOLA.densita);
         gl.uniform1f(u("uFaseG"), REGOLA.faseG);
         gl.uniform3fv(u("uSole"), new Float32Array(soleGL));
-        gl.uniform3fv(u("uColoreSole"), new Float32Array(
-          [1.0, 0.96 - 0.22 * basso, 0.9 - 0.42 * basso].map(function (v) { return v * 2.6; })));
-        gl.uniform1f(u("uForzaSole"), giorno);
-        gl.uniform3fv(u("uCielo"), new Float32Array(mescola([0.10, 0.12, 0.18], [0.46, 0.58, 0.78])));
+        gl.uniform3fv(u("uColoreSole"), new Float32Array(coloreLuce.map(function (v) { return v * 2.6; })));
+        gl.uniform1f(u("uForzaSole"), forzaLuce);
+        // Il cielo di notte: il chiarore della luna lo schiarisce un poco.
+        var cieloNotte = [0.10 + 0.30 * lunaLuce, 0.12 + 0.40 * lunaLuce, 0.18 + 0.60 * lunaLuce];
+        gl.uniform3fv(u("uCielo"), new Float32Array(mescola(cieloNotte, [0.46, 0.58, 0.78])));
+        // IL SUOLO DI NOTTE, punto per punto (il terminatore attraversa il
+        // dominio): le luci delle citta' (NASA Black Marble) e la fotografia
+        // del suolo spenta fino al chiarore della luna.
+        var s0 = this.sole;
+        gl.uniform2f(u("uSoleDecl"), Math.sin(s0.decl), Math.cos(s0.decl));
+        gl.uniform1f(u("uSoleOra"), s0.oraZero);
+        gl.uniform1f(u("uLunaSuolo"), 0.035 + 0.55 * lunaLuce);
+        gl.uniform1f(u("uNotteScena"), 1 - giorno);
+        var luci = caricaLuciNotte(gl, this, 1 - giorno);
+        gl.activeTexture(gl.TEXTURE12);
+        gl.bindTexture(gl.TEXTURE_2D, luci ? luci.nitide : this.texMorfo1);
+        gl.uniform1i(u("uLuci"), 12);
+        gl.activeTexture(gl.TEXTURE13);
+        gl.bindTexture(gl.TEXTURE_2D, luci ? luci.alone : this.texMorfo1);
+        gl.uniform1i(u("uLuciAlone"), 13);
+        gl.uniform1f(u("uLuciOk"), luci ? 1 : 0);
         gl.uniform3fv(u("uSuolo"), new Float32Array(mescola([0.03, 0.035, 0.05], [0.26, 0.25, 0.23])));
         gl.uniform3fv(u("uFoschia"), new Float32Array(mescola([0.06, 0.08, 0.12], [0.72, 0.81, 0.92])));
         gl.uniform1f(u("uPerlinKm"), PERLIN_KM);
@@ -12879,6 +12992,75 @@
 
       // Nessuna luce direzionale finta di notte: il sole astronomico scende a
       // zero nel crepuscolo, restano ambiente notturno e scariche osservate.
+      // LE LUCI DELLE CITTA' (NASA Black Marble 2016, VIIRS, via GIBS: libero,
+      // senza chiave, CORS aperto). Un'immagine sola sul dominio, scaricata
+      // la prima volta che da qualche parte del dominio e' notte; la
+      // texture si carica durante il disegno, con il contesto di MapLibre.
+      // Due texture: le luci nitide per il suolo e un alone sfocato (~30 km)
+      // per il chiarore che le citta' accendono sotto le nubi basse.
+      var LUCI_URL = "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?SERVICE=WMS&REQUEST=GetMap"
+        + "&VERSION=1.3.0&LAYERS=VIIRS_Black_Marble&STYLES=&CRS=EPSG:3857&FORMAT=image/jpeg";
+      function caricaLuciNotte(gl, strato, notteCentro) {
+        var luci = strato.luci;
+        if (!luci) {
+          var e = strato.epoca || Date.now(), latC = (DOMINIO.sud + DOMINIO.nord) / 2;
+          var buio = notteCentro > 0.001 || [DOMINIO.ovest, DOMINIO.est].some(function (lon) {
+            return posizioneSole(e, latC, lon).elevazione < 0.02;
+          });
+          if (!buio) return null;
+          luci = strato.luci = { pronte: false };
+          var r = riquadroMercatore(), w = QUALITA_VOLUME.luci;
+          var h = Math.round(w * (r.nord - r.sud) / (r.est - r.ovest));
+          var img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = function () { luci.immagine = img; if (map) map.triggerRepaint(); };
+          img.onerror = function () { luci.fallite = true; };
+          img.src = LUCI_URL + "&BBOX=" + [r.ovest, r.sud, r.est, r.nord].join(",") + "&WIDTH=" + w + "&HEIGHT=" + h;
+          return null;
+        }
+        if (luci.pronte) return luci;
+        if (!luci.immagine) return null;
+        try {
+          var nuova = function () {
+            var t = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, t);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            return t;
+          };
+          gl.activeTexture(gl.TEXTURE12);
+          gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+          luci.nitide = nuova();
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB8, gl.RGB, gl.UNSIGNED_BYTE, luci.immagine);
+          // Le mipmap: nelle viste oblique lontane le luci non sfarfallano.
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+          gl.generateMipmap(gl.TEXTURE_2D);
+          // L'alone: prima un rimpicciolimento a 512 (media), poi 128 sfocato.
+          var img2 = luci.immagine, meta = document.createElement("canvas");
+          meta.width = 512; meta.height = Math.max(8, Math.round(512 * img2.height / img2.width));
+          meta.getContext("2d").drawImage(img2, 0, 0, meta.width, meta.height);
+          var tela = document.createElement("canvas");
+          tela.width = 128; tela.height = Math.max(8, Math.round(128 * img2.height / img2.width));
+          var ctx = tela.getContext("2d");
+          ctx.filter = "blur(2px)";
+          ctx.drawImage(meta, 0, 0, tela.width, tela.height);
+          gl.activeTexture(gl.TEXTURE13);
+          luci.alone = nuova();
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB8, gl.RGB, gl.UNSIGNED_BYTE, tela);
+          gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+          luci.immagine = null;
+          luci.pronte = true;
+          return luci;
+        } catch (errore) {
+          console.error("Nubi 3D: luci delle citta' non disponibili", errore);
+          luci.immagine = null;
+          luci.fallite = true;
+          return null;
+        }
+      }
+
       StratoVolume.prototype.luceDiScena = function () {
         var gradi = this.sole.elevazione * 180 / Math.PI;
         var forza = limita((gradi - SOLE_MINIMO_GRADI) / 14, 0, 1);

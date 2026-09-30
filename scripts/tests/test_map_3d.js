@@ -2542,6 +2542,27 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   console.log("spessore dai livelli ICON-EU, copertura e cime dal satellite");
 }
 
+// LA NOTTE: la luna vera (effemeride e fase), il suolo spento punto per punto
+// e le luci delle citta' (Black Marble), il chiarore urbano sotto le nubi.
+{
+  const luna = new Function(implementazione("limita") + implementazione("posizioneSole") + implementazione("posizioneLuna")
+    + "\nreturn posizioneLuna;")();
+  const fase = (t) => luna(Date.parse(t), 41.9, 12.5).illuminata;
+  assert.ok(fase("2024-01-25T17:54:00Z") > 0.98, "luna piena del 25/1/2024 non riconosciuta");
+  assert.ok(fase("2024-02-09T22:59:00Z") < 0.02, "luna nuova del 9/2/2024 non riconosciuta");
+  assert.ok(Math.abs(fase("2024-02-16T15:01:00Z") - 0.5) < 0.05, "primo quarto del 16/2/2024 sbagliato");
+  assert.match(html, /var conLuna = lunaLuce > giorno \* 0\.5 && lunaLuce > 0\.004;/, "di notte la luna non diventa la luce delle nubi");
+  assert.match(html, /coloreLuce = \[0\.74, 0\.83, 1\.0\];/, "la luce lunare deve essere argentata");
+  assert.match(html, /LAYERS=VIIRS_Black_Marble/, "mancano le luci delle citta' (Black Marble)");
+  assert.match(html, /float sinEl = sin\(latN\) \* uSoleDecl\.x \+ cos\(latN\) \* uSoleDecl\.y \* cos\(uSoleOra \+ lonN\);/,
+    "il terminatore deve essere calcolato punto per punto");
+  assert.match(html, /notteA = trasmissione \* notte \* \(1\.0 - uLunaSuolo\);/, "di notte il suolo deve spegnersi fino al chiarore della luna");
+  assert.match(html, /ambiente \+= alone \* alone \* vec3\(1\.0, 0\.72, 0\.42\)/, "manca il chiarore delle citta' sotto le nubi");
+  assert.match(html, /colorePixel = vec4\(colore \+ canale \+ ombraC \+ notteC, min\(1\.0, max\(alfa, canaleAlfa\) \+ ombraA \+ notteA\)\);/,
+    "il suolo notturno non entra nel colore finale");
+  console.log("notte: luna vera, suolo spento punto per punto, luci delle citta'");
+}
+
 // L'ASSIMILAZIONE COLONNA PER COLONNA: il satellite corregge il volume ICON-EU.
 {
   const src = implementazione("assimilaVolume");
@@ -2744,8 +2765,8 @@ assert.match(fragment, /\* mix\(1\.0, sqrt\(cavita\), uCavita\);/, "manca la luc
 assert.match(fragment, /multipla \+= 0\.12 \* exp\(-tauSole \* 0\.12\) \* fase2;/, "manca la seconda ottava di diffusione multipla");
 assert.match(fragment, /fract\(sin\(dot\(gl_FragCoord\.xy \+ vec2\(17\.31, 41\.73\) \* uFotogramma/,
   "lo scarto del raggio non cambia piu' da un fotogramma all'altro: l'accumulo non converge");
-assert.match(html, /passiLuce: 4, passi: 128, qualita: 0, accumula: 0, latoForma: 64, vuoto: 192 \}/, "il telefono deve restare leggero");
-assert.match(html, /qualita: 1, accumula: 16, latoForma: 128, vuoto: 384 \}/, "sul PC manca l'accumulo dei fotogrammi");
+assert.match(html, /passiLuce: 4, passi: 128, qualita: 0, accumula: 0, latoForma: 64, vuoto: 192, luci: 2048 \}/, "il telefono deve restare leggero");
+assert.match(html, /qualita: 1, accumula: 16, latoForma: 128, vuoto: 384, luci: 4096 \}/, "sul PC manca l'accumulo dei fotogrammi");
 assert.match(html, /var lampiAccesi = /, "l'accumulo spalmerebbe i lampi");
 assert.match(fragment, /passo = min\(passo, max\(fine, \(fascia\.y - fascia\.x\) \/ salita \* 0\.25\)\);/,
   "il passo non segue piu' lo spessore della colonna");
@@ -2821,7 +2842,7 @@ def uf(n,*v):
 def ui(n,v):Uniform1i(GetUniformLocation(program,n.encode()),v)
 tex(np.zeros((1,1,1,4),np.uint8),6,3,mip=False)
 tex(np.zeros((1,1,1,4),np.uint8),9,3,mip=False)
-for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uAria',10),('uAriaMoto',11),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
+for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uAria',10),('uAriaMoto',11),('uLuci',12),('uLuciAlone',13),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
 uf('uVentoAlto',1.0,0.0);uf('uDebugTipi',0.0)
 for n,v in dict(uLatoForma=LF,uScalaFormaKm=12,uScalaMacroKm=96,uCopertura=.5,uContrasto=1.2,uDettaglioKm=1.2,uStiraBolle=1,uForzaMacro=.4,uBaseDura=.75,uNucleo=.65,uPolvere=1.3,uMultipla=1,uFoschiaKm=420,uSoleForza=1,uIncudineKm=7.5,uCavita=.7,uErosione=.9,uRigonfio=1.15,uCavolfiore=.8,uOmbra=1.5,uAmbiente=.75,uEsposizione=.55,uQualita=1).items():uf(n,v)
 unit=1/40075;esag=float(os.environ.get('CLOUD_QA_EXAGGERATION','1.6'))
@@ -2831,7 +2852,7 @@ import json
 for n,v in json.load(open('/tmp/cloud_settings.json')).items():uf(n,v)
 uf('uQualita',0 if mobile else 1)
 uf('uPassoScala',1)
-uf('uSemenza',.3,.6,.1);uf('uDominio',.5-20*unit,.5-20*unit,.5+20*unit,.5+20*unit);uf('uSole',.5,-.4,.768);uf('uCielo',.46,.58,.78);uf('uSuolo',.26,.25,.23);uf('uColoreSole',2.6,2.5,2.34);uf('uFoschia',.72,.81,.92)
+uf('uSemenza',.3,.6,.1);uf('uDominio',.5-20*unit,.5-20*unit,.5+20*unit,.5+20*unit);uf('uSole',.5,-.4,.768);uf('uSoleDecl',0.0,1.0);uf('uSoleOra',0.0);uf('uCielo',.46,.58,.78);uf('uSuolo',.26,.25,.23);uf('uColoreSole',2.6,2.5,2.34);uf('uFoschia',.72,.81,.92)
 x,y=np.meshgrid(np.linspace(-20,20,128),np.linspace(-20,20,128));r=np.hypot(x,y)
 def smooth(a,b,v):
  z=np.clip((v-a)/(b-a),0,1);return z*z*(3-2*z)
