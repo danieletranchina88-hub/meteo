@@ -7,7 +7,8 @@ name: Nubi OCA EUMETSAT
 # script dice solo se ci sono, mai il loro valore.
 on:
   # I prodotti escono circa 20 minuti dopo l'acquisizione; ogni giro prende
-  # quelli nuovi (al massimo 6) delle ultime 3 ore.
+  # quelli nuovi delle ultime 6 ore (al massimo 18): lo scheduler di GitHub
+  # a volte tarda di ore, e ogni giro deve poter ricostruire la finestra.
   schedule:
     - cron: '7,27,47 * * * *'
   workflow_dispatch:
@@ -24,7 +25,7 @@ concurrency:
 jobs:
   oca:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     permissions:
       contents: write
 
@@ -51,7 +52,7 @@ jobs:
           if [ "${{ inputs.sonda }}" = "true" ]; then
             python scripts/cloud_oca.py --probe
           else
-            python scripts/cloud_oca.py --out oca_out --hours 3 --max-new 6 \
+            python scripts/cloud_oca.py --out oca_out --hours 6 --max-new 18 \
               --index-url "https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/data_weather/cloud_oca/index.json"
           fi
 
