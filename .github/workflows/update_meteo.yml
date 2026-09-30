@@ -519,7 +519,7 @@ jobs:
           VECCHIO=$(mktemp -d)
           if git clone -q --depth 1 --filter=blob:none --sparse --branch gh-pages \
               "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" "$VECCHIO"; then
-            git -C "$VECCHIO" sparse-checkout set data_weather/cloud_env data_weather/cloud_eu data_weather/cloud_eu_vol
+            git -C "$VECCHIO" sparse-checkout set data_weather/cloud_env data_weather/cloud_eu data_weather/cloud_eu_vol data_weather/cloud_oca
             python scripts/merge_cloud_environment.py \
               --new data_weather/cloud_env --old "$VECCHIO/data_weather/cloud_env"
             # La copertura per livello di ICON-EU: stesse regole, stesso formato.
@@ -527,6 +527,11 @@ jobs:
               --new data_weather/cloud_eu --old "$VECCHIO/data_weather/cloud_eu"
             python scripts/merge_cloud_environment.py \
               --new data_weather/cloud_eu_vol --old "$VECCHIO/data_weather/cloud_eu_vol" --keep-hours 12
+            # Le osservazioni OCA le scrive il workflow cloud_oca (ogni 20
+            # minuti) sopra gh-pages: il commit orfano non deve cancellarle.
+            if [ -f "$VECCHIO/data_weather/cloud_oca/index.json" ]; then
+              cp -r "$VECCHIO/data_weather/cloud_oca" data_weather/
+            fi
           fi
 
       # Unica pubblicazione: commit orfano su gh-pages da un repository

@@ -6,6 +6,10 @@ name: Nubi OCA EUMETSAT
 # giorno. Le credenziali EUMETSAT restano nei segreti del repository e lo
 # script dice solo se ci sono, mai il loro valore.
 on:
+  # I prodotti escono circa 20 minuti dopo l'acquisizione; ogni giro prende
+  # quelli nuovi (al massimo 6) delle ultime 3 ore.
+  schedule:
+    - cron: '7,27,47 * * * *'
   workflow_dispatch:
     inputs:
       sonda:

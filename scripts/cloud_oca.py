@@ -214,8 +214,11 @@ def fase_ghiaccio(var):
         except (AttributeError, KeyError):
             return None, None
     ghiaccio = [v for v, n in zip(valori, nomi) if "ice" in n.lower()]
+    # Nube: acqua, ghiaccio, due strati. Non elaborato (sereno), polvere e
+    # cenere no. Nei due strati la cima e' quasi sempre ghiaccio.
     nuvola = [v for v, n in zip(valori, nomi)
-              if not any(s in n.lower() for s in ("clear", "undefined", "no_", "space", "missing", "unknown"))]
+              if any(s in n.lower() for s in ("water", "ice", "liquid"))
+              and not any(s in n.lower() for s in ("dust", "ash", "not processed", "clear"))]
     return ghiaccio, nuvola
 
 
@@ -243,6 +246,8 @@ def elabora(percorso: str, sonda: bool = False) -> bytes:
 
     v = ds.variables
     cot = lettura(v["retrieved_cloud_optical_thickness"], r0, r1, c0, c1, righe, colonne)
+    err = lettura(v["retrieval_error_cloud_optical_thickness"], r0, r1, c0, c1, righe, colonne) \
+        if "retrieval_error_cloud_optical_thickness" in v else np.zeros_like(cot)
     ctp = lettura(v["retrieved_cloud_top_pressure"], r0, r1, c0, c1, righe, colonne)
     cth = lettura(v["retrieved_cloud_top_height"], r0, r1, c0, c1, righe, colonne) \
         if "retrieved_cloud_top_height" in v else None
@@ -255,6 +260,11 @@ def elabora(percorso: str, sonda: bool = False) -> bytes:
     ds.close()
 
     cot1, cot2 = cot[0], cot[1] if cot.shape[0] > 1 else np.full_like(cot[0], np.nan)
+    # Lo spessore ottico conta solo dove e' misurato: errore entro un fattore
+    # 2 (0,3 in log10). Di notte, con il solo infrarosso, una nube spessa e'
+    # opaca e il suo tau non si recupera: copertura e quote restano.
+    err1 = err[0]
+    err2 = err[1] if err.shape[0] > 1 else np.full_like(err1, np.nan)
     ctp1, ctp2 = ctp[0], ctp[1] if ctp.shape[0] > 1 else np.full_like(ctp[0], np.nan)
     reff = reff.reshape(reff.shape[-2:]) if reff.ndim > 2 else reff
     fase = fase.reshape(fase.shape[-2:]) if fase.ndim > 2 else fase
@@ -289,8 +299,10 @@ def elabora(percorso: str, sonda: bool = False) -> bytes:
     n_visti, n_nubi, n_due = conta(visto), conta(nuvola), conta(due)
     with np.errstate(invalid="ignore", divide="ignore"):
         frac = np.where(n_visti > 0, n_nubi / np.maximum(n_visti, 1), np.nan)
-        tau1 = conta(nuvola, np.power(10.0, cot1)) / n_nubi
-        tau2 = conta(due, np.power(10.0, cot2)) / n_due
+        buono1 = nuvola & (np.nan_to_num(err1, nan=9.0) <= 0.3)
+        buono2 = due & (np.nan_to_num(err2, nan=9.0) <= 0.3)
+        tau1 = conta(buono1, np.power(10.0, cot1)) / conta(buono1)
+        tau2 = conta(buono2, np.power(10.0, cot2)) / conta(buono2)
         ml = np.where(n_nubi > 0, n_due / np.maximum(n_nubi, 1), np.nan)
         okz = nuvola & np.isfinite(zt1)
         z1 = conta(okz, zt1) / conta(okz)
@@ -302,8 +314,8 @@ def elabora(percorso: str, sonda: bool = False) -> bytes:
                   "zt1": z1, "zt2": z2, "reff": re, "ice": ice}
 
     if sonda:
-        log("pixel nel dominio: %d, visti %d, nuvolosi %d, due strati %d, ghiaccio %d" % (
-            dentro.sum(), visto.sum(), nuvola.sum(), due.sum(), ghiaccio.sum()))
+        log("pixel nel dominio: %d, visti %d, nuvolosi %d, due strati %d, ghiaccio %d, tau misurato %d" % (
+            dentro.sum(), visto.sum(), nuvola.sum(), due.sum(), ghiaccio.sum(), buono1.sum()))
         log("fase ghiaccio %s, nuvola %s; unita' reff '%s' ctp '%s' cth '%s'" % (
             ghiaccio_v, nuvola_v, unita_reff, unita_ctp, unita_cth))
         for k, val in valori.items():
