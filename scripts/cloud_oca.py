@@ -199,12 +199,20 @@ def descrivi(ds) -> None:
 
 
 def fase_ghiaccio(var):
-    """Dai flag della fase: quali valori sono ghiaccio (o strato alto di ghiaccio)."""
-    try:
-        valori = np.atleast_1d(var.getncattr("flag_values")).tolist()
-        nomi = str(var.getncattr("flag_meanings")).split()
-    except (AttributeError, KeyError):
-        return None, None
+    """Dai valori della fase: quali sono ghiaccio (o strato alto di ghiaccio).
+
+    Nel netCDF OCA la fase e' un tipo enum (nome -> valore); nei prodotti che
+    usano i flag CF ci sono flag_values e flag_meanings.
+    """
+    enum = getattr(getattr(var, "datatype", None), "enum_dict", None)
+    if enum:
+        nomi, valori = list(enum.keys()), list(enum.values())
+    else:
+        try:
+            valori = np.atleast_1d(var.getncattr("flag_values")).tolist()
+            nomi = str(var.getncattr("flag_meanings")).split()
+        except (AttributeError, KeyError):
+            return None, None
     ghiaccio = [v for v, n in zip(valori, nomi) if "ice" in n.lower()]
     nuvola = [v for v, n in zip(valori, nomi)
               if not any(s in n.lower() for s in ("clear", "undefined", "no_", "space", "missing", "unknown"))]
@@ -218,6 +226,8 @@ def elabora(percorso: str, sonda: bool = False) -> bytes:
     ds.set_auto_maskandscale(True)
     if sonda:
         descrivi(ds)
+        dt = getattr(ds.variables["retrieved_cloud_phase"], "datatype", None)
+        log("fase: " + str(getattr(dt, "enum_dict", dt)))
     x = np.asarray(ds.variables["x"][:], dtype=np.float64)
     y = np.asarray(ds.variables["y"][:], dtype=np.float64)
     righe = ds.variables["y"].dimensions[0]
@@ -269,7 +279,9 @@ def elabora(percorso: str, sonda: bool = False) -> bytes:
     nuvola = visto & np.isfinite(cot1)
     if nuvola_v:
         nuvola &= np.isin(fase, nuvola_v) | ~np.isfinite(fase)
-    due = nuvola & np.isfinite(cot2) & np.isfinite(ctp2)
+    # Il secondo strato solo sotto il primo (qualche recupero lo mette oltre
+    # i 16 km: non e' fisico).
+    due = nuvola & np.isfinite(cot2) & np.isfinite(ctp2) & (zt2 < zt1 - 1.0)
     ghiaccio = nuvola & np.isin(fase, ghiaccio_v or [])
 
     n = NY * NX
