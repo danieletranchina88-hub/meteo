@@ -10066,6 +10066,19 @@
       function modelloDalVolume(vol, w, h) {
         var clc = vol.campi.clc, qc = vol.campi.qcqi;
         if (!clc) return null;
+        // Il volume v2 porta acqua liquida e ghiaccio in g/m3 (LWC, IWC,
+        // quadratici fino a 3 e 1 g/m3): il condensato per lo shader e' la loro
+        // somma, nella stessa codifica di prima (quadratica fino a 2).
+        if (!qc && vol.campi.lwc && vol.campi.iwc) {
+          var lw = vol.campi.lwc, iw = vol.campi.iwc;
+          var sl = lw.specifica ? lw.specifica.scala : 3, si = iw.specifica ? iw.specifica.scala : 1;
+          qc = new Uint8Array(lw.length);
+          for (var q0 = 0; q0 < lw.length; q0++) {
+            if (lw[q0] === 255 || iw[q0] === 255) { qc[q0] = 255; continue; }
+            var gm3 = Math.pow(lw[q0] / 254, 2) * sl + Math.pow(iw[q0] / 254, 2) * si;
+            qc[q0] = Math.round(Math.sqrt(Math.min(gm3, 2) / 2) * 254);
+          }
+        }
         var n = w * h, dati = new Uint8Array(n * MODELLO_NZ), cond = new Uint8Array(n * MODELLO_NZ);
         var passoLat = (vol.nord - vol.sud) / Math.max(1, vol.ny - 1);
         var passoLon = (vol.est - vol.ovest) / Math.max(1, vol.nx - 1);

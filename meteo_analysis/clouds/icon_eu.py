@@ -293,11 +293,26 @@ NATIVE_FIRST_LEVEL = 14          # ~15-16 km: sopra non ci sono nubi del volume
 NATIVE_LAST_LEVEL = 74           # il livello piu' basso, sul suolo
 VOLUME_DZ_KM = 0.25              # la colonna ricampionata a quote regolari
 VOLUME_TOP_KM = 16.0
-VOLUME_METHOD = "icon-eu-cloud-volume-v1"
+VOLUME_METHOD = "icon-eu-cloud-volume-v2"
 VOLUME_MAGIC = b"NUBV"
 # Il contenuto d'acqua + ghiaccio (g/kg) in 8 bit: quadratico fino a 2 g/kg,
 # fine dove la nube e' tenue.
 CONDENSATE_MAX_G_KG = 2.0
+# LA NUBE FISICA (v2): per ogni voxel il contenuto d'acqua liquida e di
+# ghiaccio in g/m3 (q * densita' dell'aria), la temperatura (la fase), la
+# corrente verticale (dove sale l'aria: le cupole) e la turbolenza (quanto e'
+# frastagliato il bordo). In 8 bit:
+#  - LWC quadratico fino a 3 g/m3 (i cumuli arrivano a 1-3, gli strati 0,1-0,5);
+#  - IWC quadratico fino a 1 g/m3 (i cirri 0,001-0,1, le incudini fino a ~1);
+#  - T lineare a 0,5 K, da -90 a +37 C;
+#  - w lineare a 0,1 m/s, +-12,7 m/s (codice 127 = fermo);
+#  - TKE quadratica fino a 25 m2/s2.
+LWC_MAX_G_M3 = 3.0
+IWC_MAX_G_M3 = 1.0
+TKE_MAX = 25.0
+R_SECCA = 287.05       # J/(kg K), costante dei gas dell'aria secca
+VOLUME_FULL_VARS = ("CLC", "QC", "QI", "T", "P")
+VOLUME_HALF_VARS = ("W", "TKE")
 
 
 def model_level_url(run: datetime, step: int, level: int, var: str) -> str:
@@ -337,6 +352,64 @@ def resample_columns(values, heights_km, dz_km=VOLUME_DZ_KM, top_km=VOLUME_TOP_K
             out[j] = np.where(inside, v, out[j])
             found |= inside
     return zs, out
+
+
+def air_density(p_pa, t_k):
+    """Densita' dell'aria (kg/m3) dall'equazione di stato: rho = p / (R T).
+    (Il vapore la cambia di meno dell'1%: trascurato.)"""
+    t = np.maximum(np.asarray(t_k, dtype=np.float32), 150.0)
+    return np.asarray(p_pa, dtype=np.float32) / (R_SECCA * t)
+
+
+def half_to_full(half):
+    """Dai mezzi livelli (k+1, ...) ai livelli pieni (k, ...): la media dei
+    due mezzi livelli che racchiudono ogni livello pieno (W e TKE in ICON)."""
+    half = np.asarray(half, dtype=np.float32)
+    return 0.5 * (half[:-1] + half[1:])
+
+
+def encode_quadratic(values, maximum):
+    v = np.clip(np.nan_to_num(np.asarray(values, dtype=np.float32), nan=0.0), 0.0, maximum)
+    return np.round(np.sqrt(v / maximum) * 254).astype(np.uint8)
+
+
+def encode_linear(values, scale, offset):
+    v = np.nan_to_num(np.asarray(values, dtype=np.float32), nan=offset)
+    return np.clip(np.round((v - offset) / scale), 0, 254).astype(np.uint8)
+
+
+def physical_volume_fields(clc, qc, qi, t_k, p_pa, w_half, tke_half, heights_km):
+    """I campi fisici del volume, ricampionati ogni 250 m.
+
+    clc, qc, qi, t_k, p_pa: livelli pieni (k, ny, nx); w_half, tke_half:
+    mezzi livelli (k+1, ny, nx). Restituisce (quote, campi per volume_to_bytes).
+    """
+    rho = air_density(p_pa, t_k)
+    lwc = np.maximum(np.nan_to_num(qc), 0.0) * rho * 1000.0     # g/m3
+    iwc = np.maximum(np.nan_to_num(qi), 0.0) * rho * 1000.0
+    w = half_to_full(np.nan_to_num(w_half))
+    tke = half_to_full(np.maximum(np.nan_to_num(tke_half), 0.0))
+    zs, clc_z = resample_columns(np.nan_to_num(clc), heights_km)
+    _, lwc_z = resample_columns(lwc, heights_km)
+    _, iwc_z = resample_columns(iwc, heights_km)
+    _, t_z = resample_columns(np.nan_to_num(t_k - 273.15, nan=0.0), heights_km)
+    _, w_z = resample_columns(w, heights_km)
+    _, tke_z = resample_columns(tke, heights_km)
+    # Sotto il suolo la colonna ricampionata vale 0: la temperatura li' non ha
+    # senso, e 0 C sarebbe un falso zero termico. Si marca mancante (255).
+    sotto = np.zeros_like(t_z, dtype=bool)
+    sotto[:] = np.asarray(heights_km)[-1][None] > zs[:, None, None]
+    t_codes = encode_linear(t_z, 0.5, -90.0)
+    t_codes[sotto] = 255
+    fields = {
+        "clc": (0, np.clip(np.round(clc_z), 0, 100).astype(np.uint8), 1.0, 0.0),
+        "lwc": (1, encode_quadratic(lwc_z, LWC_MAX_G_M3), LWC_MAX_G_M3, 0.0),
+        "iwc": (1, encode_quadratic(iwc_z, IWC_MAX_G_M3), IWC_MAX_G_M3, 0.0),
+        "t": (0, t_codes, 0.5, -90.0),
+        "w": (0, encode_linear(w_z, 0.1, -12.7), 0.1, -12.7),
+        "tke": (1, encode_quadratic(tke_z, TKE_MAX), TKE_MAX, 0.0),
+    }
+    return zs, fields
 
 
 def encode_condensate(q_kg_kg):
@@ -425,25 +498,23 @@ class IconEuCloudVolume(IconEuCloudProfile):
             step = lead + offset
             if not 0 <= step <= MAX_STEP_HOURS:
                 continue
-            jobs = [(var, lv) for var in ("CLC", "QC", "QI") for lv in levels]
+            halves = levels + [NATIVE_LAST_LEVEL + 1]
+            jobs = ([(var, lv) for var in VOLUME_FULL_VARS for lv in levels]
+                    + [(var, lv) for var in VOLUME_HALF_VARS for lv in halves])
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 got = list(pool.map(lambda j: self._crop(self._get(model_level_url(run, step, j[1], j[0]))), jobs))
-            per = {var: [] for var in ("CLC", "QC", "QI")}
+            per = {var: [] for var in VOLUME_FULL_VARS + VOLUME_HALF_VARS}
             for (var, _), arr in zip(jobs, got):
                 per[var].append(arr)
-            if any(a is None for a in per["CLC"]):
+            # Senza copertura, temperatura o pressione la colonna non si ricostruisce.
+            if any(a is None for v in ("CLC", "T", "P") for a in per[v]):
                 continue
             zero = np.zeros_like(per["CLC"][0])
-            clc = np.stack(per["CLC"])
-            qc = np.stack([a if a is not None else zero for a in per["QC"]])
-            qi = np.stack([a if a is not None else zero for a in per["QI"]])
-            zs, clc_z = resample_columns(np.nan_to_num(clc), self.heights_km)
-            _, cond_z = resample_columns(qc + qi, self.heights_km)
+            pila = lambda v: np.stack([a if a is not None else zero for a in per[v]])
+            zs, fields = physical_volume_fields(
+                pila("CLC"), pila("QC"), pila("QI"), pila("T"), pila("P"),
+                pila("W"), pila("TKE"), self.heights_km)
             valid = target_run + timedelta(hours=lead)
-            fields = {
-                "clc": (0, np.clip(np.round(clc_z), 0, 100).astype(np.uint8), 1.0, 0.0),
-                "qcqi": (1, encode_condensate(cond_z), CONDENSATE_MAX_G_KG, 0.0),
-            }
             self.tiles[valid] = volume_to_bytes(valid, self.latitudes, self.longitudes, zs, fields)
             count += 1
         return count

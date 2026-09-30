@@ -1805,15 +1805,17 @@ def process_data():
     except Exception as icon_eu_error:
         print(f"2d. ICON-EU non disponibile: {icon_eu_error}", flush=True)
         icon_eu_clouds = None
-    # I livelli NATIVI di ICON-EU (una sessantina sotto i 15 km): copertura e
-    # acqua+ghiaccio di nube, ricampionati ogni 250 m. Le prime 20 ore (quelle
-    # che la timeline del satellite usa prima del run successivo).
+    # I livelli NATIVI di ICON-EU (una sessantina sotto i 15 km): copertura,
+    # acqua liquida e ghiaccio in g/m3, temperatura, corrente verticale e
+    # turbolenza, ricampionati ogni 250 m. Le prime 12 ore (quelle che la
+    # timeline del satellite usa prima del run successivo): con sei campi per
+    # voxel il sito deve restare sotto il limite di GitHub Pages (~1 GB).
     icon_eu_volume = None
     try:
         icon_eu_volume = IconEuCloudVolume(
             (ICON_EU_DOMAIN["south"], ICON_EU_DOMAIN["north"]),
             (ICON_EU_DOMAIN["west"], ICON_EU_DOMAIN["east"]), factor=3)
-        ore_volume = icon_eu_volume.download(run_dt, range(0, 21))
+        ore_volume = icon_eu_volume.download(run_dt, range(0, 13))
         print(f"2e. ICON-EU livelli nativi: {ore_volume} ore di volume dal run {icon_eu_volume.run}",
               flush=True)
         if not ore_volume:

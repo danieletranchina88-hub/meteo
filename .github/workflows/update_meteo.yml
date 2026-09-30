@@ -526,7 +526,7 @@ jobs:
             python scripts/merge_cloud_environment.py \
               --new data_weather/cloud_eu --old "$VECCHIO/data_weather/cloud_eu"
             python scripts/merge_cloud_environment.py \
-              --new data_weather/cloud_eu_vol --old "$VECCHIO/data_weather/cloud_eu_vol" --keep-hours 24
+              --new data_weather/cloud_eu_vol --old "$VECCHIO/data_weather/cloud_eu_vol" --keep-hours 12
           fi
 
       # Unica pubblicazione: commit orfano su gh-pages da un repository

@@ -472,3 +472,25 @@ l'ultimo campione vuoto e il primo pieno): superfici lisce a ogni densita'.
 Verificato sulla pagina vera: con la bisezione le terrazze spariscono; non
 dipendevano ne' dal rumore piegato vicino alla camera (hhf) ne' dalla scala
 del dettaglio.
+
+## La ricostruzione fisica dell'atmosfera (a fasi)
+
+L'obiettivo: la nube non la disegna il renderer, e' il risultato di un campo 3D
+di contenuto d'acqua liquida e di ghiaccio (g/m3) stimato fondendo il modello e
+le osservazioni; il renderer fa solo fisica (estinzione beta = 3 LWC /
+(2 rho r_e), fase dalla temperatura, diffusione multipla). Il rumore resta solo
+sotto la risoluzione dei dati, con l'ampiezza della turbolenza del modello.
+
+**Fase 1 (fatta): il volume fisico ICON-EU** (`cloud_eu_vol/`, formato NUBV,
+metodo `icon-eu-cloud-volume-v2`). Per ogni voxel (0,1875 gradi x 250 m, 0-16
+km): copertura CLC, **LWC e IWC in g/m3** (QC, QI per la densita' dell'aria
+p/(R T) dai livelli nativi P e T), **temperatura** (C; mancante sotto il suolo),
+**corrente verticale w** (m/s) e **TKE** (m2/s2), questi due dai mezzi livelli.
+Ore di previsione 0-12, 12 ore passate conservate: circa 4,3 MB l'ora, il sito
+resta sotto il limite di GitHub Pages (~1 GB). Il browser, per ora, ne usa
+copertura e condensato (LWC + IWC).
+
+Prossime fasi: il renderer legge LWC/IWC/T/w/TKE direttamente (niente profili
+per tipo); l'assimilazione colonna per colonna del satellite (maschera, cima,
+spessore ottico dal visibile o dall'Optimal Cloud Analysis di EUMETSAT, fase) e
+delle basi misurate dai ceilometri (METAR).

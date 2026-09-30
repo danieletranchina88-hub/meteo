@@ -260,6 +260,33 @@ def test_native_volume_resampling_format_and_merge():
         assert len(index["hours"]) == 2, "l'ora passata del volume si conserva"
 
 
+def test_physical_volume_fields():
+    """Il volume v2: LWC e IWC in g/m3 dalla densita' dell'aria, T in C, w e
+    TKE dai mezzi livelli; sotto il suolo la temperatura e' mancante."""
+    from meteo_analysis.clouds.icon_eu import (
+        air_density, half_to_full, physical_volume_fields, volume_from_bytes, volume_to_bytes)
+
+    # 1013 hPa e 15 C: 1,225 kg/m3 (atmosfera standard).
+    assert abs(float(air_density(101325.0, 288.15)) - 1.225) < 0.002
+    assert np.allclose(half_to_full(np.array([2.0, 4.0, 0.0])), [3.0, 2.0])
+    # Due livelli pieni a 3 e 1 km (terreno a 0,6 km), colonna 1x1.
+    heights = np.array([3.0, 1.0])[:, None, None]
+    one = lambda a: np.array(a, dtype=np.float32)[:, None, None]
+    zs, fields = physical_volume_fields(
+        clc=one([100, 50]), qc=one([0.0, 0.5e-3]), qi=one([0.2e-3, 0.0]),
+        t_k=one([253.15, 283.15]), p_pa=one([70000.0, 90000.0]),
+        w_half=one([0.0, 2.0, 0.0]), tke_half=one([0.0, 1.0, 1.0]), heights_km=heights)
+    back = volume_from_bytes(volume_to_bytes(RUN, np.array([40.0]), np.array([10.0]), zs, fields))["fields"]
+    at = lambda name, z: float(back[name][int(round(z / 0.25)), 0, 0])
+    rho_basso = 90000.0 / (287.05 * 283.15)            # ~1,108 kg/m3
+    assert abs(at("lwc", 1.0) - 0.5 * rho_basso) < 0.03, "LWC = qc * rho in g/m3"
+    assert abs(at("iwc", 3.0) - 0.2 * 70000.0 / (287.05 * 253.15)) < 0.01, "IWC = qi * rho"
+    assert abs(at("t", 3.0) - (-20.0)) < 0.3 and abs(at("t", 1.0) - 10.0) < 0.3
+    assert abs(at("w", 3.0) - 1.0) < 0.06, "w del livello pieno = media dei mezzi livelli"
+    assert np.isnan(back["t"][0, 0, 0]), "sotto il suolo la temperatura manca, non vale 0 C"
+    assert set(back) == {"clc", "lwc", "iwc", "t", "w", "tke"}
+
+
 def test_browser_fixture_matches_the_writer():
     """scripts/tests/fixtures_cloud_env.bin.gz e' la piastrella che legge
     test_nubi_icon.js: se il writer cambia formato, va rigenerata."""
