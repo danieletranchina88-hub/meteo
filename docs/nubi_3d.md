@@ -490,7 +490,49 @@ Ore di previsione 0-12, 12 ore passate conservate: circa 4,3 MB l'ora, il sito
 resta sotto il limite di GitHub Pages (~1 GB). Il browser, per ora, ne usa
 copertura e condensato (LWC + IWC).
 
-Prossime fasi: il renderer legge LWC/IWC/T/w/TKE direttamente (niente profili
-per tipo); l'assimilazione colonna per colonna del satellite (maschera, cima,
-spessore ottico dal visibile o dall'Optimal Cloud Analysis di EUMETSAT, fase) e
-delle basi misurate dai ceilometri (METAR).
+**Fase 2a (fatta): l'ottica dal volume.** Lo shader legge copertura, LWC, IWC
+e temperatura (texture RGBA8 sulla griglia nativa): estinzione beta = 3 W /
+(2 rho r_e) con il contenuto dentro la nube (media della cella / copertura),
+goccioline r_e 10 um, cristalli 20-60 um; fase = IWC / (LWC + IWC). Dove il
+modello non ha nube ma il satellite si', restano i valori tipici.
+
+**Fase 2b (fatta): la forma dal moto.** w e TKE in una seconda texture: dove
+l'aria sale la nube ribolle, dove scende si sfilaccia, la TKE rende il bordo
+liscio o frastagliato.
+
+**Fase 3a (fatta): l'assimilazione colonna per colonna** (`assimilaVolume`,
+nel browser, a ogni fotogramma satellitare). Per ogni colonna del volume, fra i
+pixel del campo satellitare che vi cadono:
+- meno del 5% nuvolosi: la colonna si svuota;
+- sopra la cima osservata non resta nube;
+- lo strato piu' alto del modello entro 1,5 km dalla cima osservata si sposta a
+  quella quota; altrimenti si crea uno strato fra cima e base osservate, fase
+  dalla temperatura del modello;
+- lo spessore ottico della colonna si porta a quello osservato (fattore fra 1/3
+  e 3): OCA quando c'e', altrimenti di giorno il visibile 0,6 um a due flussi,
+  tau = 2R / (0,15 (1 - R)), tolto il fondo sereno locale.
+Il visibile a piena risoluzione arriva spesso dopo 8 s: non trattiene il primo
+fotogramma, quando arriva rifa' fusione e assimilazione. Le ombre al suolo sono
+a due flussi, T = 1 / (1 + 0,75 (1 - g) tau), con la radianza di cammino
+dell'aria sotto la nube (niente macchie nere).
+
+**Fase 3b (fatta): OCA di EUMETSAT** (`scripts/cloud_oca.py`, workflow
+`cloud_oca.yml` ogni 20 minuti, `data_weather/cloud_oca/`). Il prodotto
+Optimal Cloud Analysis di MTG-FCI (EO:EUM:DAT:0684, ogni 10 minuti, 2 km, dati
+gratuiti) si scarica dal Data Store con i segreti `EUMETSAT_CONSUMER_KEY` /
+`EUMETSAT_CONSUMER_SECRET` (mai stampati): solo il netCDF, ~180 MB, ritagliato
+sul dominio. Sulle colonne del volume ICON-EU (0,1875 gradi, piastrella NUBV a
+un livello, ~150 KB, finestra di 3 ore): `frac` frazione nuvolosa, `cot1`/`cot2`
+log10 dello spessore ottico dei due strati (solo pixel con errore entro un
+fattore 2: di notte il tau delle nubi spesse non si misura), `ml` frazione a
+due strati, `zt1`/`zt2` quote delle cime, `reff` raggio efficace, `ice`
+frazione di ghiaccio. Nel browser lo spessore ottico misurato prende il posto
+del visibile, anche di notte; lo strato basso visto sotto uno alto si crea se
+il modello non l'ha; la fase delle nubi create segue le cime osservate (sotto
+-38 C solo ghiaccio, sopra 0 C solo acqua). La geometria geostazionaria segue
+il lettore satpy `fci_l2_nc` ed e' stata verificata contro la maschera nubi
+EUMETSAT dello stesso istante (`--probe` stampa struttura, statistiche e una
+mappa della copertura).
+
+Prossima fase: le basi misurate dai ceilometri (METAR); il raggio efficace
+OCA nello shader (oggi r_e segue la temperatura).
