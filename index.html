@@ -10584,6 +10584,11 @@
         "uniform float uPelleOk;       // 1 quando la fotografia della scena e' arrivata",
         "uniform float uFedelta;       // quanto la cima vista dall'alto prende il colore osservato",
         "uniform float uModelloNubi;    // 1: la frazione per quota c'e'",
+        "uniform highp sampler3D uAria; // ICON-EU nativo: R copertura %, G LWC, B IWC, A T (NUBV v2)",
+        "uniform float uAriaOk;         // 1: il volume fisico c'e'",
+        "uniform vec4 uAriaGeo;         // sud, nord, ovest, est (gradi)",
+        "uniform vec3 uAriaGriglia;     // nx, ny, nz",
+        "uniform vec2 uAriaZ;           // quota del primo strato e passo (km)",
         "uniform float uModelloPassoKm;",
         "uniform float uCondensatoNoto; // 1: il canale G ha acqua+ghiaccio di nube (livelli nativi)",
         "uniform sampler3D uVuoto;     // km minimi dalla nube piu' vicina (griglia grossa)",
@@ -10670,6 +10675,46 @@
         "// (Joseph et al. 1976): spessore efficace ~(1 - g^2) ~ 40% del nominale.",
         "float fattoreGhiaccioLuce(float ghiaccio, float convettivo) {",
         "  return fattoreGhiaccio(ghiaccio, convettivo) * (1.0 - 0.6 * ghiaccio);",
+        "}",
+        "// L'ARIA DEL MODELLO nel punto (ICON-EU, livelli nativi, griglia lat-lon):",
+        "// x copertura (0-1), y LWC e z IWC (g/m3, media della cella), w T (C;",
+        "// -999 se manca).",
+        "vec4 ariaDelModello(vec3 p, float altKm) {",
+        "  if (uAriaOk < 0.5) return vec4(0.0, 0.0, 0.0, -999.0);",
+        "  float lon = p.x * 360.0 - 180.0;",
+        "  float lat = degrees(atan(sinh(PI * (1.0 - 2.0 * p.y))));",
+        "  vec3 indice = vec3((lon - uAriaGeo.z) / (uAriaGeo.w - uAriaGeo.z) * (uAriaGriglia.x - 1.0),",
+        "    (lat - uAriaGeo.x) / (uAriaGeo.y - uAriaGeo.x) * (uAriaGriglia.y - 1.0),",
+        "    (altKm - uAriaZ.x) / uAriaZ.y);",
+        "  vec3 uvw = (indice + 0.5) / uAriaGriglia;",
+        "  if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return vec4(0.0, 0.0, 0.0, -999.0);",
+        "  vec4 c = texture(uAria, uvw) * 255.0;",
+        "  float lwc = pow(c.g / 254.0, 2.0) * 3.0, iwc = pow(c.b / 254.0, 2.0);",
+        "  return vec4(clamp(c.r / 100.0, 0.0, 1.0), lwc, iwc, c.a > 254.0 ? -999.0 : c.a * 0.5 - 90.0);",
+        "}",
+        "// L'ESTINZIONE FISICA (1/km a densita' piena) dall'acqua e dal ghiaccio",
+        "// DENTRO la nube del modello (media della cella / copertura):",
+        "// beta = 3 W / (2 rho r_e) (Stephens 1978), goccioline r_e 10 um, cristalli",
+        "// r_e 20-60 um, piu' grandi col caldo (Heymsfield et al. 2013). La fase e'",
+        "// quella del modello (IWC / (LWC + IWC)). Dove il modello non ha nube ma",
+        "// il satellite si': il valore tipico uSigma e la fase dalla temperatura.",
+        "// perLuce: per le ombre, il ghiaccio col delta-scaling del picco in avanti.",
+        "float estinzioneFisica(vec3 p, float altKm, float convettivo, out float ghiaccio, out float perLuce) {",
+        "  vec4 a = ariaDelModello(p, altKm);",
+        "  float ghT = a.w > -900.0 ? max(1.0 - smoothstep(-38.0, -5.0, a.w), gFibra) : ghiaccioA(altKm);",
+        "  float tipico = uSigma * fattoreGhiaccio(ghT, convettivo);",
+        "  float tipicoLuce = uSigma * fattoreGhiaccioLuce(ghT, convettivo);",
+        "  float peso = smoothstep(0.005, 0.03, a.y + a.z);",
+        "  ghiaccio = ghT;",
+        "  perLuce = tipicoLuce;",
+        "  if (peso <= 0.0) return tipico;",
+        "  float f = max(a.x, 0.1);",
+        "  float lwc = min(a.y / f, 3.0), iwc = min(a.z / f, 1.0);",
+        "  float reGhiaccio = mix(20.0, 60.0, smoothstep(-60.0, -10.0, a.w > -900.0 ? a.w : -20.0));",
+        "  float betaAcqua = 1500.0 * lwc / 10.0, betaGhiaccio = 1500.0 * iwc / (0.917 * reGhiaccio);",
+        "  ghiaccio = mix(ghT, iwc / max(lwc + iwc, 1e-6), peso);",
+        "  perLuce = mix(tipicoLuce, betaAcqua + 0.4 * betaGhiaccio, peso);",
+        "  return mix(tipico, betaAcqua + betaGhiaccio, peso);",
         "}",
         "",
         "// LA GEOMETRIA, come Nubis3 (Guerrilla, ''Nubis, Cubed'', SIGGRAPH 2023):",
@@ -11072,7 +11117,9 @@
         "    float h, c; vec2 f;",
         "    float dL = densita(q, lodCampo + 0.5 * float(i), lodRumore + 0.5 * float(i),",
         "      i >= (uQualita > 0.5 ? 2 : 1), h, c, f);",
-        "    tau += dL * fattoreGhiaccioLuce(ghiaccioA(q.z * kmPerUnita / uEsagerazione), c) * uSigma * uOmbra * lung;",
+        "    float ghL, betaL;",
+        "    estinzioneFisica(q, q.z * kmPerUnita / uEsagerazione, c, ghL, betaL);",
+        "    tau += dL * betaL * uOmbra * lung;",
         "    fatto += lung;",
         "    lung *= 2.0;",
         "  }",
@@ -11186,7 +11233,8 @@
         "    float d = densita(p, lodCampo, lodRumore, false, h, conv, fascia);",
         "    float cavita = gCavita;",
         "    float profiloQui = gProfilo;",
-        "    float ghiQui = ghiaccioA(p.z * kmPerUnita / uEsagerazione);",
+        "    float ghiQui, betaLuceQui;",
+        "    float betaQui = estinzioneFisica(p, p.z * kmPerUnita / uEsagerazione, conv, ghiQui, betaLuceQui);",
         "    // IL PASSO SEGUE LA COLONNA: dentro la fascia base-cima almeno quattro",
         "    // campioni nello spessore, sopra la fascia mai un salto che la",
         "    // scavalchi. Un velo sottile attraversato da un solo passo diventava",
@@ -11233,7 +11281,7 @@
         "      passo *= 1.0 + (1.0 - trasmissione);",
         "      int nLuce = trasmissione > 0.4 ? uPassiLuce : max(2, uPassiLuce - 2);",
         "      float passoKm = length(vec3(direzione.xy, direzione.z / uEsagerazione)) * passo * kmPerUnita;",
-        "      float estinzione = uSigma * d * fattoreGhiaccio(ghiQui, conv); // per km",
+        "      float estinzione = d * betaQui;                    // per km",
         "      float trasmPasso = exp(-estinzione * passoKm);     // Beer-Lambert sul raggio di vista",
         "",
         "      float tauSole = uForzaSole > 0.01 ? spessoreVersoSole(p, lodCampo, lodRumore, nLuce) : 0.0;",
@@ -11418,7 +11466,9 @@
         "        quotaPrima = quota;",
         "        // Solo la forma piena getta ombra: la forma grande senza erosione",
         "        // e' piu' larga della nube che si vede, e il velo tenue non scurisce.",
-        "        tauS += smoothstep(0.12, 0.55, dq) * fattoreGhiaccioLuce(ghiaccioA(quota), cq) * uSigma * 0.3 * strato / max(uSole.z, 0.15);",
+        "        float ghS, betaS;",
+        "        estinzioneFisica(q, quota, cq, ghS, betaS);",
+        "        tauS += smoothstep(0.12, 0.55, dq) * betaS * 0.3 * strato / max(uSole.z, 0.15);",
         "      }",
         "      float ombra = 1.0 - exp(-tauS);",
         "      ombraA = trasmissione * uOmbreSuolo * 0.78 * ombra;",
@@ -11779,6 +11829,17 @@
           gl.texParameteri(gl.TEXTURE_3D, k, gl.CLAMP_TO_EDGE);
         });
         this.modelloPronto = false;
+        // Il volume FISICO di ICON-EU sulla sua griglia nativa (NUBV v2).
+        this.texAria = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_3D, this.texAria);
+        gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA8, 1, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+        [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER].forEach(function (k) {
+          gl.texParameteri(gl.TEXTURE_3D, k, gl.LINEAR);
+        });
+        [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T, gl.TEXTURE_WRAP_R].forEach(function (k) {
+          gl.texParameteri(gl.TEXTURE_3D, k, gl.CLAMP_TO_EDGE);
+        });
+        this.ariaPronta = false;
 
         this.texCampo = gl.createTexture();
         this.texGeneri = gl.createTexture();
@@ -11810,6 +11871,35 @@
         this.campoPelle = campo;
         this.pelleOk = true;
         if (this.mappa) this.mappa.triggerRepaint();
+      };
+
+      // Il volume fisico ICON-EU (NUBV v2) in una texture RGBA8 sulla sua
+      // griglia lat-lon nativa: R copertura (%), G LWC e B IWC (codici
+      // quadratici fino a 3 e 1 g/m3), A temperatura (0,5 K da -90 C; 255 sotto
+      // il suolo). Senza i campi v2, o con una GPU che non regge la griglia,
+      // lo shader usa i valori tipici (uAriaOk = 0).
+      StratoVolume.prototype.pubblicaAria = function (gl, vol) {
+        if (vol === this.ariaVolume) return;
+        this.ariaVolume = vol;
+        this.ariaPronta = false;
+        var c = vol && vol.campi;
+        if (!c || !c.clc || !c.lwc || !c.iwc || !c.t) return;
+        var lato = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE) || 256;
+        if (vol.nx > lato || vol.ny > lato || vol.nz > lato) return;
+        var n = vol.nx * vol.ny * vol.nz, rgba = new Uint8Array(n * 4);
+        for (var i = 0; i < n; i++) {
+          rgba[4 * i] = c.clc[i] === 255 ? 0 : c.clc[i];
+          rgba[4 * i + 1] = c.lwc[i] === 255 ? 0 : c.lwc[i];
+          rgba[4 * i + 2] = c.iwc[i] === 255 ? 0 : c.iwc[i];
+          rgba[4 * i + 3] = c.t[i];
+        }
+        gl.bindTexture(gl.TEXTURE_3D, this.texAria);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA8, vol.nx, vol.ny, vol.nz, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+        this.ariaGeo = [vol.sud, vol.nord, vol.ovest, vol.est];
+        this.ariaGriglia = [vol.nx, vol.ny, vol.nz];
+        this.ariaZ = [vol.z0, vol.dz];
+        this.ariaPronta = true;
       };
 
       StratoVolume.prototype.pubblicaCampo = function (campo) {
@@ -11858,6 +11948,7 @@
               this.modelloPerVuoto = { dati: stato.modello.dati, larghezza: stato.larghezza,
                 altezza: stato.altezza, nz: stato.modello.nz, passoKm: stato.modello.passoKm };
             }
+            this.pubblicaAria(gl, campo.ambiente && campo.ambiente.volume);
             gl.bindTexture(gl.TEXTURE_2D, this.texMorfo1);
             gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stato.larghezza, stato.altezza, 0,
@@ -12433,6 +12524,15 @@
         gl.uniform1f(u("uModelloNubi"), this.modelloPronto ? 1 : 0);
         gl.uniform1f(u("uModelloPassoKm"), MODELLO_PASSO_KM);
         gl.uniform1f(u("uCondensatoNoto"), this.modelloPronto && this.condensatoNoto ? 1 : 0);
+        gl.activeTexture(gl.TEXTURE10);
+        gl.bindTexture(gl.TEXTURE_3D, this.texAria);
+        gl.uniform1i(u("uAria"), 10);
+        gl.uniform1f(u("uAriaOk"), this.ariaPronta ? 1 : 0);
+        if (this.ariaPronta) {
+          gl.uniform4fv(u("uAriaGeo"), this.ariaGeo);
+          gl.uniform3fv(u("uAriaGriglia"), this.ariaGriglia);
+          gl.uniform2fv(u("uAriaZ"), this.ariaZ);
+        }
         gl.activeTexture(gl.TEXTURE9);
         gl.bindTexture(gl.TEXTURE_2D, this.pelleOk ? this.texPelle : this.texMorfo1);
         gl.uniform1i(u("uPelle"), 9);
@@ -13819,6 +13919,10 @@
         notificaScarica: notificaScarica,
         // Per le prove e la console: cosa il motore ha inferito in un punto.
         ispeziona: function (lat, lon) { return descriviNube(lat, lon); },
+        // Il volume fisico ICON-EU caricato nello shader (per le prove e la console).
+        aria: function () {
+          return { pronta: !!volume.ariaPronta, griglia: volume.ariaGriglia || null, geo: volume.ariaGeo || null };
+        },
         // Lo stato del governatore dei 60 fps (per le prove e la console).
         governatore: function () {
           var g = volume.governatore;

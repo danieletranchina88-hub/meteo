@@ -2522,7 +2522,13 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.match(html, /float dettaglioKm = min\(uDettaglioKm, 0\.5 \* uScalaFormaKm\);/, "il dettaglio piu' grande della forma cancella le nubi osservate");
   // Il ghiaccio: estinzione, fase con gli aloni, delta-scaling per le ombre.
   assert.match(html, /return mix\(1\.0, mix\(0\.07, 0\.45, clamp\(convettivo, 0\.0, 1\.0\)\), ghiaccio\);/, "il ghiaccio attenua come l'acqua: i cirri non sono veli");
-  assert.match(html, /float estinzione = uSigma \* d \* fattoreGhiaccio\(ghiQui, conv\);/, "l'estinzione non distingue il ghiaccio");
+  // L'estinzione dall'acqua e dal ghiaccio del modello (volume NUBV v2).
+  assert.match(html, /float estinzione = d \* betaQui;/, "l'estinzione non viene dal volume fisico");
+  assert.match(html, /float betaAcqua = 1500\.0 \* lwc \/ 10\.0, betaGhiaccio = 1500\.0 \* iwc \/ \(0\.917 \* reGhiaccio\);/, "beta = 3 W / (2 rho r_e) cambiato");
+  // 0,3 g/m3 d'acqua a r_e 10 um: 45 /km; 0,02 g/m3 di ghiaccio a 30 um: ~1,1 /km.
+  assert.ok(Math.abs(1500 * 0.3 / 10 - 45) < 1e-9 && Math.abs(1500 * 0.02 / (0.917 * 30) - 1.09) < 0.01);
+  assert.match(html, /this\.pubblicaAria\(gl, campo\.ambiente && campo\.ambiente\.volume\);/, "il volume fisico non arriva allo shader");
+  assert.match(html, /if \(vol\.nx > lato \|\| vol\.ny > lato \|\| vol\.nz > lato\) return;/, "manca il controllo del lato massimo delle texture 3D");
   assert.match(html, /vec3 centro22 = vec3\(21\.7, 22\.0, 22\.4\)/, "manca l'alone di 22 gradi");
   assert.match(html, /return max\(1\.0 - smoothstep\(-38\.0, -5\.0, tC\), gFibra\);/, "la fase non segue la temperatura");
   assert.match(html, /b\[i \+ 3\] = Math\.round\(limita\(\(Number\.isFinite\(zeroQui\) \? zeroQui : 3\.0\) \/ 8, 0, 1\) \* 255\);/, "lo zero termico non arriva allo shader");
@@ -2745,7 +2751,7 @@ def uf(n,*v):
 def ui(n,v):Uniform1i(GetUniformLocation(program,n.encode()),v)
 tex(np.zeros((1,1,1,4),np.uint8),6,3,mip=False)
 tex(np.zeros((1,1,1,4),np.uint8),9,3,mip=False)
-for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
+for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uAria',10),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
 uf('uVentoAlto',1.0,0.0);uf('uDebugTipi',0.0)
 for n,v in dict(uLatoForma=LF,uScalaFormaKm=12,uScalaMacroKm=96,uCopertura=.5,uContrasto=1.2,uDettaglioKm=1.2,uStiraBolle=1,uForzaMacro=.4,uBaseDura=.75,uNucleo=.65,uPolvere=1.3,uMultipla=1,uFoschiaKm=420,uSoleForza=1,uIncudineKm=7.5,uCavita=.7,uErosione=.9,uRigonfio=1.15,uCavolfiore=.8,uOmbra=1.5,uAmbiente=.75,uEsposizione=.55,uQualita=1).items():uf(n,v)
 unit=1/40075;esag=float(os.environ.get('CLOUD_QA_EXAGGERATION','1.6'))
