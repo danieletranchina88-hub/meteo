@@ -536,3 +536,21 @@ mappa della copertura).
 
 Prossima fase: le basi misurate dai ceilometri (METAR); il raggio efficace
 OCA nello shader (oggi r_e segue la temperatura).
+
+## La notte: luna, suolo spento e luci delle citta'
+
+- **La luna** (`posizioneLuna`): effemeride a bassa precisione (~1 grado) e
+  frazione illuminata dall'elongazione. Quando e' piu' luminosa del sole
+  diventa la luce delle nubi: direzione vera, argento freddo, forza
+  0,22 x fase^2 (luna piena alta; la luminosita' cresce piu' in fretta della
+  frazione illuminata), ombre al suolo comprese.
+- **Il suolo di notte**, punto per punto nello shader: il terminatore dalla
+  declinazione e dall'angolo orario del sole, crepuscolo civile da +1 a -6
+  gradi. La fotografia del suolo resta al 3,5% (piu' il chiaro di luna,
+  fino a ~15% con la luna piena) e sopra si accendono le luci delle citta'
+  (NASA Black Marble 2016, VIIRS, via GIBS: un'immagine sul dominio, 4096 px
+  sul PC e 2048 sul telefono, scaricata solo quando nel dominio e' notte),
+  con una curva di tono che tiene i nuclei e abbassa il fondo diffuso. Le
+  luci si vedono attraverso le nubi con la trasmissione del raggio.
+- **Il chiarore delle citta'**: un alone sfocato (~30 km) delle stesse luci
+  accende di arancione le basi delle nubi basse (cala con la quota).
