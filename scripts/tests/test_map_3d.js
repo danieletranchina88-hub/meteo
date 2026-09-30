@@ -2510,7 +2510,7 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.equal(inc.base[0], 4.0, "sotto lo scudo dell'incudine la base non deve scendere col modello");
   // Niente torri e incudini predefinite: il temporale e' quello osservato.
   assert.match(html, /var OGGETTI_CONVETTIVI = false;/, "tornano le sagome predefinite di torri e incudini");
-  assert.match(html, /float accordo = smoothstep\(0\.1, 0\.3, nubeDelModello\(uv, max\(cimaKm - 0\.3, 0\.0\)\)\.x\);/, "la colonna non segue i livelli del modello");
+  assert.match(html, /float accordo = smoothstep\(0\.1, 0\.3, uAriaOk > 0\.5 \? ariaDelModello\(p, max\(cimaKm - 0\.3, 0\.0\)\)\.x/, "la colonna non segue i livelli del modello");
   assert.match(html, /float copertura = saturare\(1\.0 - aperta \* uCopertura \* 1\.6\);/, "i grappoli del rumore cambiano di nuovo la copertura del satellite");
   assert.match(html, /variaCime \*= 1\.0 - smoothstep\(2\.0, 6\.0, cellaKm\);/, "il rumore inventa cime dove l'infrarosso le ha misurate");
   assert.match(html, /copertura \*= mix\(1\.0, smoothstep\(0\.08, 0\.5, campo\.g\), cumulo\);/, "la frazione di nube non segue la densita' del satellite");
@@ -2529,6 +2529,10 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.ok(Math.abs(1500 * 0.3 / 10 - 45) < 1e-9 && Math.abs(1500 * 0.02 / (0.917 * 30) - 1.09) < 0.01);
   assert.match(html, /this\.pubblicaAria\(gl, campo\.ambiente && campo\.ambiente\.volume\);/, "il volume fisico non arriva allo shader");
   assert.match(html, /if \(vol\.nx > lato \|\| vol\.ny > lato \|\| vol\.nz > lato\) return;/, "manca il controllo del lato massimo delle texture 3D");
+  // Fase 2b: la forma dal moto dell'aria, niente doppio conto del condensato.
+  assert.match(html, /float sale = smoothstep\(0\.2, 1\.5, moto\.x\), scende = smoothstep\(0\.2, 1\.0, -moto\.x\);/, "la forma non segue la corrente verticale");
+  assert.match(html, /turbolenza = mix\(0\.6, 1\.25, smoothstep\(0\.05, 1\.5, moto\.y\)\);/, "il bordo non segue la turbolenza");
+  assert.match(html, /modello\.y >= 0\.0 && uAriaOk < 0\.5 \? mix\(0\.45, 1\.25/, "il condensato del modello e' contato due volte");
   assert.match(html, /vec3 centro22 = vec3\(21\.7, 22\.0, 22\.4\)/, "manca l'alone di 22 gradi");
   assert.match(html, /return max\(1\.0 - smoothstep\(-38\.0, -5\.0, tC\), gFibra\);/, "la fase non segue la temperatura");
   assert.match(html, /b\[i \+ 3\] = Math\.round\(limita\(\(Number\.isFinite\(zeroQui\) \? zeroQui : 3\.0\) \/ 8, 0, 1\) \* 255\);/, "lo zero termico non arriva allo shader");
@@ -2751,7 +2755,7 @@ def uf(n,*v):
 def ui(n,v):Uniform1i(GetUniformLocation(program,n.encode()),v)
 tex(np.zeros((1,1,1,4),np.uint8),6,3,mip=False)
 tex(np.zeros((1,1,1,4),np.uint8),9,3,mip=False)
-for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uAria',10),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
+for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uAria',10),('uAriaMoto',11),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
 uf('uVentoAlto',1.0,0.0);uf('uDebugTipi',0.0)
 for n,v in dict(uLatoForma=LF,uScalaFormaKm=12,uScalaMacroKm=96,uCopertura=.5,uContrasto=1.2,uDettaglioKm=1.2,uStiraBolle=1,uForzaMacro=.4,uBaseDura=.75,uNucleo=.65,uPolvere=1.3,uMultipla=1,uFoschiaKm=420,uSoleForza=1,uIncudineKm=7.5,uCavita=.7,uErosione=.9,uRigonfio=1.15,uCavolfiore=.8,uOmbra=1.5,uAmbiente=.75,uEsposizione=.55,uQualita=1).items():uf(n,v)
 unit=1/40075;esag=float(os.environ.get('CLOUD_QA_EXAGGERATION','1.6'))

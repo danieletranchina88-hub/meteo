@@ -10589,6 +10589,8 @@
         "uniform vec4 uAriaGeo;         // sud, nord, ovest, est (gradi)",
         "uniform vec3 uAriaGriglia;     // nx, ny, nz",
         "uniform vec2 uAriaZ;           // quota del primo strato e passo (km)",
+        "uniform highp sampler3D uAriaMoto; // stessa griglia: R corrente verticale w, G TKE",
+        "uniform float uAriaMotoOk;",
         "uniform float uModelloPassoKm;",
         "uniform float uCondensatoNoto; // 1: il canale G ha acqua+ghiaccio di nube (livelli nativi)",
         "uniform sampler3D uVuoto;     // km minimi dalla nube piu' vicina (griglia grossa)",
@@ -10691,6 +10693,20 @@
         "  vec4 c = texture(uAria, uvw) * 255.0;",
         "  float lwc = pow(c.g / 254.0, 2.0) * 3.0, iwc = pow(c.b / 254.0, 2.0);",
         "  return vec4(clamp(c.r / 100.0, 0.0, 1.0), lwc, iwc, c.a > 254.0 ? -999.0 : c.a * 0.5 - 90.0);",
+        "}",
+        "// Il MOTO dell'aria nel punto: x corrente verticale w (m/s, positiva in",
+        "// salita), y TKE (m2/s2); y = -1 se il volume non c'e'.",
+        "vec2 ariaMoto(vec3 p, float altKm) {",
+        "  if (uAriaMotoOk < 0.5) return vec2(0.0, -1.0);",
+        "  float lon = p.x * 360.0 - 180.0;",
+        "  float lat = degrees(atan(sinh(PI * (1.0 - 2.0 * p.y))));",
+        "  vec3 indice = vec3((lon - uAriaGeo.z) / (uAriaGeo.w - uAriaGeo.z) * (uAriaGriglia.x - 1.0),",
+        "    (lat - uAriaGeo.x) / (uAriaGeo.y - uAriaGeo.x) * (uAriaGriglia.y - 1.0),",
+        "    (altKm - uAriaZ.x) / uAriaZ.y);",
+        "  vec3 uvw = (indice + 0.5) / uAriaGriglia;",
+        "  if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) return vec2(0.0, -1.0);",
+        "  vec2 c = texture(uAriaMoto, uvw).rg * 255.0;",
+        "  return vec2(c.r * 0.1 - 12.7, pow(c.g / 254.0, 2.0) * 25.0);",
         "}",
         "// L'ESTINZIONE FISICA (1/km a densita' piena) dall'acqua e dal ghiaccio",
         "// DENTRO la nube del modello (media della cella / copertura):",
@@ -10995,16 +11011,21 @@
         "  // mai nelle torri); SOTTO la fascia -- dove il satellite non vede,",
         "  // coperto dalla nube alta -- disegna gli strati del modello.",
         "  vec2 modello = campo.g >= 0.004 ? nubeDelModello(uv, altKm) : vec2(-1.0);",
+        "  // Col volume fisico la copertura per quota si legge sulla sua griglia",
+        "  // nativa (piu' fine della griglia dello stato).",
+        "  if (uAriaOk > 0.5 && campo.g >= 0.004) modello.x = ariaDelModello(p, altKm).x;",
         "  float cm = modello.x;",
         "  // Quanto e' densa la nube del modello (acqua+ghiaccio): scala l'opacita'.",
-        "  float densitaModello = modello.y >= 0.0 ? mix(0.45, 1.25, smoothstep(0.0, 0.4, modello.y)) : 1.0;",
+        "  // Col volume fisico no: l'estinzione usa gia' LWC e IWC (niente doppio conto).",
+        "  float densitaModello = modello.y >= 0.0 && uAriaOk < 0.5 ? mix(0.45, 1.25, smoothstep(0.0, 0.4, modello.y)) : 1.0;",
         "  if (cm >= 0.0) {",
         "    if (altKm >= baseKm && pTorri < profilo + 1e-4) {",
         "      // LA COLONNA DAI LIVELLI: dove il modello ha nube alla quota della",
         "      // cima osservata (concorda col satellite), la massa in quota segue la",
         "      // sua copertura, non la sagoma di un archetipo; l'ultimo tratto",
         "      // sotto la cima resta al satellite.",
-        "      float accordo = smoothstep(0.1, 0.3, nubeDelModello(uv, max(cimaKm - 0.3, 0.0)).x);",
+        "      float accordo = smoothstep(0.1, 0.3, uAriaOk > 0.5 ? ariaDelModello(p, max(cimaKm - 0.3, 0.0)).x",
+        "        : nubeDelModello(uv, max(cimaKm - 0.3, 0.0)).x);",
         "      float dalModello = smoothstep(0.03, 0.45, cm) * (hRel > 0.0 ? 1.0 : 0.0);",
         "      float pesoModello = 0.8 * accordo * (1.0 - smoothstep(0.8, 1.0, hRel));",
         "      profilo = mix(profilo * mix(1.0, smoothstep(0.02, 0.35, cm), 0.55 * (1.0 - 0.7 * cumulo)),",
@@ -11014,6 +11035,19 @@
         "      if (strato > profilo) { profilo = strato; tipo = durezza * 0.8; }",
         "    }",
         "    fascia.x = 0.0;",
+        "  }",
+        "  // IL MOTO DELL'ARIA (ICON-EU): dove sale la nube ribolle in cupole e si",
+        "  // riempie; dove scende si sfilaccia e si assottiglia; la turbolenza",
+        "  // decide il bordo, liscio nell'aria calma, frastagliato in quella agitata.",
+        "  float turbolenza = 1.0;",
+        "  if (uAriaMotoOk > 0.5 && profilo > 0.0) {",
+        "    vec2 moto = ariaMoto(p, altKm);",
+        "    if (moto.y >= 0.0) {",
+        "      float sale = smoothstep(0.2, 1.5, moto.x), scende = smoothstep(0.2, 1.0, -moto.x);",
+        "      tipo = max(tipo, 0.8 * sale);",
+        "      profilo *= 1.0 - 0.35 * scende;",
+        "      turbolenza = mix(0.6, 1.25, smoothstep(0.05, 1.5, moto.y));",
+        "    }",
         "  }",
         "  profilo *= impronta * bordo;",
         "  gProfilo = profilo;",
@@ -11093,7 +11127,7 @@
         "  // La durezza (aria instabile e secca) fa i cavolfiori piu' netti; il CAPE",
         "  // li accende verso le cime, dove la corrente ascendente ribolle.",
         "  composto = mix(composto, billowy, 0.35 * campo.a * smoothstep(0.4, 1.0, hRel) * tipo);",
-        "  composto *= mix(uContrasto, uErosione, tipo) * mix(0.85, 1.2, durezza) * (1.0 - smoothstep(1.0, 3.5, lodDet));",
+        "  composto *= mix(uContrasto, uErosione, tipo) * mix(0.85, 1.2, durezza) * turbolenza * (1.0 - smoothstep(1.0, 3.5, lodDet));",
         "  float d = saturare(rimappa(base, composto, 1.0, 0.0, 1.0));",
         "  // Nitidezza di Nubis3: piu' marcata dove la nube e' tenue.",
         "  float ps = pow(scalaDensita, 4.0);",
@@ -11840,6 +11874,16 @@
           gl.texParameteri(gl.TEXTURE_3D, k, gl.CLAMP_TO_EDGE);
         });
         this.ariaPronta = false;
+        this.texAriaMoto = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_3D, this.texAriaMoto);
+        gl.texImage3D(gl.TEXTURE_3D, 0, gl.RG8, 1, 1, 1, 0, gl.RG, gl.UNSIGNED_BYTE, new Uint8Array(2));
+        [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER].forEach(function (k) {
+          gl.texParameteri(gl.TEXTURE_3D, k, gl.LINEAR);
+        });
+        [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T, gl.TEXTURE_WRAP_R].forEach(function (k) {
+          gl.texParameteri(gl.TEXTURE_3D, k, gl.CLAMP_TO_EDGE);
+        });
+        this.ariaMotoPronta = false;
 
         this.texCampo = gl.createTexture();
         this.texGeneri = gl.createTexture();
@@ -11882,6 +11926,7 @@
         if (vol === this.ariaVolume) return;
         this.ariaVolume = vol;
         this.ariaPronta = false;
+        this.ariaMotoPronta = false;
         var c = vol && vol.campi;
         if (!c || !c.clc || !c.lwc || !c.iwc || !c.t) return;
         var lato = gl.getParameter(gl.MAX_3D_TEXTURE_SIZE) || 256;
@@ -11900,6 +11945,18 @@
         this.ariaGriglia = [vol.nx, vol.ny, vol.nz];
         this.ariaZ = [vol.z0, vol.dz];
         this.ariaPronta = true;
+        // Il moto dell'aria: R corrente verticale (0,1 m/s da -12,7; 127 =
+        // ferma), G TKE (quadratica fino a 25 m2/s2).
+        if (c.w && c.tke) {
+          var rg = new Uint8Array(n * 2);
+          for (var j = 0; j < n; j++) {
+            rg[2 * j] = c.w[j] === 255 ? 127 : c.w[j];
+            rg[2 * j + 1] = c.tke[j] === 255 ? 0 : c.tke[j];
+          }
+          gl.bindTexture(gl.TEXTURE_3D, this.texAriaMoto);
+          gl.texImage3D(gl.TEXTURE_3D, 0, gl.RG8, vol.nx, vol.ny, vol.nz, 0, gl.RG, gl.UNSIGNED_BYTE, rg);
+          this.ariaMotoPronta = true;
+        }
       };
 
       StratoVolume.prototype.pubblicaCampo = function (campo) {
@@ -12528,6 +12585,11 @@
         gl.bindTexture(gl.TEXTURE_3D, this.texAria);
         gl.uniform1i(u("uAria"), 10);
         gl.uniform1f(u("uAriaOk"), this.ariaPronta ? 1 : 0);
+        gl.activeTexture(gl.TEXTURE11);
+        gl.bindTexture(gl.TEXTURE_3D, this.texAriaMoto);
+        gl.uniform1i(u("uAriaMoto"), 11);
+        gl.uniform1f(u("uAriaMotoOk"), this.ariaPronta && this.ariaMotoPronta ? 1 : 0);
+        gl.activeTexture(gl.TEXTURE10);
         if (this.ariaPronta) {
           gl.uniform4fv(u("uAriaGeo"), this.ariaGeo);
           gl.uniform3fv(u("uAriaGriglia"), this.ariaGriglia);
@@ -13921,7 +13983,8 @@
         ispeziona: function (lat, lon) { return descriviNube(lat, lon); },
         // Il volume fisico ICON-EU caricato nello shader (per le prove e la console).
         aria: function () {
-          return { pronta: !!volume.ariaPronta, griglia: volume.ariaGriglia || null, geo: volume.ariaGeo || null };
+          return { pronta: !!volume.ariaPronta, moto: !!volume.ariaMotoPronta,
+            griglia: volume.ariaGriglia || null, geo: volume.ariaGeo || null };
         },
         // Lo stato del governatore dei 60 fps (per le prove e la console).
         governatore: function () {
