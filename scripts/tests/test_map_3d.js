@@ -2659,6 +2659,17 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   // A mappa ferma non misura niente e non cambia.
   g.livello = 0.3; adesso += 16; g.aggiorna(gl, false); adesso += 40; g.aggiorna(gl, false);
   assert.equal(g.livello, 0.3, "a mappa ferma il governatore cambia qualita'");
+  // Senza timer della GPU, a 30 fps, la discesa e' rapida: lo zoom cambia il
+  // costo in pochi fotogrammi.
+  const r = new Governatore(gl);
+  for (let k = 0; k < 15; k++) { adesso += 33; r.aggiorna(gl, true); }
+  assert.ok(r.livello < 0.2, "a 30 fps il governatore scende troppo piano: " + r.livello);
+  // Movimento con isteresi e tela allocata una volta (niente scatti fra gli
+  // scatti della rotella).
+  assert.match(html, /this\.inMovimento = muove \|\| ora - \(this\.ultimoMoto \|\| -1e9\) < MOTO_ISTERESI_MS;/, "manca l'isteresi sul movimento");
+  assert.match(html, /var fermo = !this\.inMovimento;/, "l'accumulo riparte fra gli scatti dello zoom");
+  assert.match(html, /if \(this\.fbo && this\.misuraVolume\.allocL === aw && this\.misuraVolume\.allocA === ah\) \{/, "la tela si rifa' a ogni cambio di risoluzione");
+  assert.match(html, /"  vec2 uv = \(vNdc \* 0\.5 \+ 0\.5\) \* uParte;",/, "la stesura non legge la porzione disegnata");
   // Spento dal pannello: nessuna regolazione.
   const Spento = crea(() => false, { governatore: 0 }, { now: () => adesso });
   assert.equal(new Spento(gl).attivo(), false);

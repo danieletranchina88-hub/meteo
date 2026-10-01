@@ -7425,6 +7425,11 @@
       // che non c'e'.
       var SOLE_MINIMO_GRADI = -6;
 
+      // Quanto deve restare ferma la mappa prima di tornare alla qualita'
+      // piena (risoluzione intera e accumulo): copre le pause fra gli scatti
+      // della rotella e dei gesti di zoom.
+      var MOTO_ISTERESI_MS = 350;
+
       var RAGGIO_TERRA = 6378137;
       var CIRCONFERENZA = 2 * Math.PI * RAGGIO_TERRA;
 
@@ -11639,7 +11644,10 @@
         "out vec4 colorePixel;",
         "uniform sampler2D uVolume;",
         "uniform vec2 uTexel;",
+        "uniform vec2 uParte;   // la porzione della tela disegnata (risoluzione ridotta)",
         "uniform float uNitido;",
+        "// Le letture restano dentro la porzione disegnata: oltre c'e' tela vecchia.",
+        "vec4 leggi(vec2 q) { return texture(uVolume, min(q, uParte - 0.5 * uTexel)); }",
         "// Catmull-Rom in cinque letture bilineari: quando il governatore abbassa",
         "// la risoluzione i bordi delle nubi restano netti invece di sfocarsi.",
         "vec4 catmullRom(vec2 uv) {",
@@ -11652,23 +11660,23 @@
         "  vec2 w3 = f * f * (-0.5 + 0.5 * f);",
         "  vec2 w12 = w1 + w2;",
         "  vec2 t0 = (c - 1.0) * uTexel, t3 = (c + 2.0) * uTexel, t12 = (c + w2 / w12) * uTexel;",
-        "  vec4 r = texture(uVolume, vec2(t12.x, t0.y)) * (w12.x * w0.y)",
-        "    + texture(uVolume, vec2(t0.x, t12.y)) * (w0.x * w12.y)",
-        "    + texture(uVolume, t12) * (w12.x * w12.y)",
-        "    + texture(uVolume, vec2(t3.x, t12.y)) * (w3.x * w12.y)",
-        "    + texture(uVolume, vec2(t12.x, t3.y)) * (w12.x * w3.y);",
+        "  vec4 r = leggi(vec2(t12.x, t0.y)) * (w12.x * w0.y)",
+        "    + leggi(vec2(t0.x, t12.y)) * (w0.x * w12.y)",
+        "    + leggi(t12) * (w12.x * w12.y)",
+        "    + leggi(vec2(t3.x, t12.y)) * (w3.x * w12.y)",
+        "    + leggi(vec2(t12.x, t3.y)) * (w12.x * w3.y);",
         "  float n = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;",
         "  r = clamp(r / n, 0.0, 1.0);",
         "  return r;",
         "}",
         "void main() {",
-        "  vec2 uv = vNdc * 0.5 + 0.5;",
+        "  vec2 uv = (vNdc * 0.5 + 0.5) * uParte;",
         "  if (uNitido > 0.5) { colorePixel = catmullRom(uv); return; }",
         "  colorePixel = 0.25 * (",
-        "      texture(uVolume, uv + uTexel * vec2(-0.5, -0.5))",
-        "    + texture(uVolume, uv + uTexel * vec2(0.5, -0.5))",
-        "    + texture(uVolume, uv + uTexel * vec2(-0.5, 0.5))",
-        "    + texture(uVolume, uv + uTexel * vec2(0.5, 0.5)));",
+        "      leggi(uv + uTexel * vec2(-0.5, -0.5))",
+        "    + leggi(uv + uTexel * vec2(0.5, -0.5))",
+        "    + leggi(uv + uTexel * vec2(-0.5, 0.5))",
+        "    + leggi(uv + uTexel * vec2(0.5, 0.5)));",
         "}"
       ].join("\n");
 
@@ -12546,7 +12554,8 @@
         // Il tempo della GPU vale sempre; l'intervallo fra i fotogrammi solo
         // dentro un movimento continuo.
         var continuo = dt !== null && dt <= 250;
-        if (continuo) this.dtMs = this.dtMs === null ? dt : this.dtMs * 0.85 + dt * 0.15;
+        // Media corta: lo zoom cambia il costo in pochi fotogrammi.
+        if (continuo) this.dtMs = this.dtMs === null ? dt : this.dtMs * 0.7 + dt * 0.3;
         else if (gpu === null) { this.buoni = 0; return; }
         if (gpu !== null) {
           this.gpuMs = this.gpuMs === null ? gpu : this.gpuMs * 0.8 + gpu * 0.2;
@@ -12556,7 +12565,10 @@
           // Anche con la GPU in regola il fotogramma intero deve stare nei 60 fps.
           if (continuo && this.dtMs > 21) this.livello -= 0.02;
         } else if (this.dtMs > 18.5) {
-          this.livello -= 0.03;
+          // Senza il tempo della GPU (Firefox, Safari, molti telefoni) la
+          // discesa e' proporzionale a quanto si sfora: a 30 fps mezzo
+          // livello in una decina di fotogrammi, non in trenta.
+          this.livello -= Math.min(0.15, 0.03 + 0.12 * (this.dtMs / 16.7 - 1.1));
           // Si era appena saliti e si perdono fotogrammi: la prossima volta
           // si aspetta di piu' prima di riprovare.
           if (this.salito) { this.pazienza = Math.min(this.pazienza * 2, 480); this.salito = false; }
@@ -12579,16 +12591,40 @@
         // governatore, due terzi come prima. A mappa ferma si torna alla
         // risoluzione piena.
         this.governatore = this.governatore || new GovernatoreVolume(gl);
-        this.inMovimento = !!(this.mappa && this.mappa.isMoving && this.mappa.isMoving());
+        // IL MOVIMENTO CON ISTERESI: lo zoom con la rotella e' fatto di scatti,
+        // e fra uno e l'altro la mappa risulta ferma per qualche fotogramma.
+        // Prima la risoluzione piena e l'accumulo ripartivano proprio li': i
+        // fotogrammi piu' cari in mezzo allo zoom. Ora "fermo" vuol dire fermo
+        // da 350 ms; allora un fotogramma in piu' riporta la qualita' piena.
+        var ora = performance.now();
+        var muove = !!(this.mappa && this.mappa.isMoving && this.mappa.isMoving());
+        if (muove) this.ultimoMoto = ora;
+        this.inMovimento = muove || ora - (this.ultimoMoto || -1e9) < MOTO_ISTERESI_MS;
+        if (!muove && this.inMovimento && !this.attesaFermo && this.mappa) {
+          var mappaF = this.mappa, stratoF = this;
+          this.attesaFermo = setTimeout(function () {
+            stratoF.attesaFermo = null;
+            mappaF.triggerRepaint();
+          }, MOTO_ISTERESI_MS + 20 - (ora - this.ultimoMoto));
+        }
+        var pieno = scala;
         if (this.inMovimento) scala *= this.governatore.attivo() ? this.governatore.risoluzione() : 0.66;
         this.scalaTela = scala;
         var lw = Math.max(1, Math.round(w * scala)), lh = Math.max(1, Math.round(h * scala));
-        if (this.fbo && this.misuraVolume.larghezza === lw && this.misuraVolume.altezza === lh) {
+        // LA TELA SI ALLOCA UNA VOLTA, a risoluzione piena: a risoluzione
+        // ridotta si disegna in un angolo e la stesura legge solo quello.
+        // Rifare la texture a ogni gradino del governatore (e a ogni
+        // passaggio fra fermo e movimento) era un altro scatto.
+        var aw = Math.max(1, Math.round(w * pieno)), ah = Math.max(1, Math.round(h * pieno));
+        lw = Math.min(lw, aw); lh = Math.min(lh, ah);
+        if (this.fbo && this.misuraVolume.allocL === aw && this.misuraVolume.allocA === ah) {
+          this.misuraVolume.larghezza = lw;
+          this.misuraVolume.altezza = lh;
           return true;
         }
         if (!this.texVolume) this.texVolume = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, this.texVolume);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, lw, lh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, aw, ah, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -12606,7 +12642,7 @@
           this.senzaTela = true;
           return false;
         }
-        this.misuraVolume = { larghezza: lw, altezza: lh };
+        this.misuraVolume = { larghezza: lw, altezza: lh, allocL: aw, allocA: ah };
         return true;
       };
 
@@ -12624,7 +12660,7 @@
         gl.clear(gl.COLOR_BUFFER_BIT);
         gl.disable(gl.BLEND);
         this.accumulo = this.accumulo || { n: 0, firma: "" };
-        var fermo = !(this.mappa && this.mappa.isMoving && this.mappa.isMoving());
+        var fermo = !this.inMovimento;
         var matrice = this.matriceDi(argomenti);
         var firma = matrice ? Array.prototype.slice.call(matrice).join(",") + "|" + this.serieCampo
           + "|" + this.misuraVolume.larghezza + "x" + this.misuraVolume.altezza
@@ -12676,7 +12712,8 @@
       // precisione dove la GPU lo consente, perche' la media di dodici
       // fotogrammi a otto bit farebbe gradini nelle ombre.
       StratoVolume.prototype.preparaAccumulo = function (gl) {
-        var lw = this.misuraVolume.larghezza, lh = this.misuraVolume.altezza;
+        var lw = this.misuraVolume.allocL, lh = this.misuraVolume.allocA;
+        if (this.misuraVolume.larghezza !== lw || this.misuraVolume.altezza !== lh) return false;
         if (this.texAccumulo && this.misuraAccumulo === lw + "x" + lh) return true;
         var mezza = !!gl.getExtension("EXT_color_buffer_float");
         this.texAccumulo = this.texAccumulo || [gl.createTexture(), gl.createTexture()];
@@ -12721,8 +12758,11 @@
           gl.activeTexture(gl.TEXTURE0);
           gl.bindTexture(gl.TEXTURE_2D, this.texDaStendere || this.texVolume);
           gl.uniform1i(gl.getUniformLocation(this.programmaStesura, "uVolume"), 0);
-          gl.uniform2f(gl.getUniformLocation(this.programmaStesura, "uTexel"),
-            1 / this.misuraVolume.larghezza, 1 / this.misuraVolume.altezza);
+          var mv = this.misuraVolume, usata = this.texDaStendere && this.texDaStendere !== this.texVolume;
+          gl.uniform2f(gl.getUniformLocation(this.programmaStesura, "uTexel"), 1 / mv.allocL, 1 / mv.allocA);
+          // La parte della tela su cui si e' disegnato (l'accumulo e' sempre pieno).
+          gl.uniform2f(gl.getUniformLocation(this.programmaStesura, "uParte"),
+            usata ? 1 : mv.larghezza / mv.allocL, usata ? 1 : mv.altezza / mv.allocA);
           // Fra il 60% e il 90% della risoluzione dello schermo si stende in
           // bicubico (bordi netti); piu' in basso la media morbida, perche' il
           // bicubico ingrandirebbe la grana dei passi lunghi in quadretti.
