@@ -596,3 +596,25 @@ vento a 700 hPa oltre 8-15 m/s, N (dal gradiente 700-500 hPa) oltre
 bande perpendicolari al vento, lambda = 2 pi U / N. Lo shader modula la
 densita' con un coseno letto in otto versi fissi sfumati. Dati: u700, v700,
 u10, v10 nell'ambiente ICON-2I (`meteo_analysis/clouds/environment.py`).
+
+## La verifica con le misure indipendenti (`scripts/verify_clouds.py`)
+
+Sui dati di gh-pages (OCA, METAR, volume ICON-EU) e sui radiosondaggi
+italiani dell'Universita' del Wyoming (`--data <cartella con data_weather>`).
+Risultati del 5/10/2026 (03-10 UTC):
+
+| Base delle nubi contro i ceilometri METAR | n | errore medio assoluto | RMSE |
+|---|---|---|---|
+| Modello ICON-EU (lascia-fuori-uno) | 1020 | 432 m | 824 m |
+| Modello + METAR delle stazioni vicine | 1020 | 274 m | 601 m |
+| Adiabatico da OCA (stessi casi del modello) | 1056 | 1874 m | 2493 m |
+
+- La correzione con i METAR vicini (punto 2) riduce l'errore del 37% anche
+  dove la stazione non c'e' (stima dai soli vicini): resta attiva.
+- Lo spessore adiabatico peggiora le basi (+0,3/+2 km): spento
+  (`ADIABATICO_ATTIVO = false`). Le basi misurate stanno a ~300 m anche sotto
+  cime di 2-6 km: strati bassi sotto quello che il satellite vede; di notte il
+  tau delle nubi spesse non passa il filtro d'errore OCA.
+- Strati del volume ICON-EU contro i radiosondaggi (UR >= 95%, 0-12 km, passo
+  250 m): POD 0,51, FAR 0,44 su pochi strati nuvolosi (giornata anticiclonica):
+  da ripetere con piu' casi.
