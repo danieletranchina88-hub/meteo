@@ -34,7 +34,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          sparse-checkout: scripts/cloud_oca.py
+          sparse-checkout: |
+            scripts/cloud_oca.py
+            scripts/cloud_metar.py
           sparse-checkout-cone-mode: false
 
       - uses: actions/setup-python@v5
@@ -56,6 +58,15 @@ jobs:
               --index-url "https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/data_weather/cloud_oca/index.json"
           fi
 
+      # Le basi misurate dagli aeroporti (METAR, NOAA): ultime 10 ore sul
+      # dominio delle nubi 3D. Un errore qui non ferma la pubblicazione OCA.
+      - name: Basi delle nubi dai METAR
+        if: inputs.sonda != true
+        continue-on-error: true
+        run: |
+          mkdir -p oca_out
+          python scripts/cloud_metar.py --out oca_out/metar.json --hours 10
+
       # Come la corsia rapida: un commit sopra gh-pages, mai forzato. Si
       # aggiungono gli istanti nuovi e si tolgono quelli usciti dalla finestra.
       - name: Pubblica su gh-pages
@@ -67,7 +78,7 @@ jobs:
             const cartella = 'oca_out', base = 'data_weather/cloud_oca/';
             if (!fs.existsSync(cartella + '/index.json')) { core.info('Niente da pubblicare.'); return; }
             const indice = JSON.parse(fs.readFileSync(cartella + '/index.json', 'utf8'));
-            const tenere = new Set(indice.frames.map((f) => f.file).concat(['index.json']));
+            const tenere = new Set(indice.frames.map((f) => f.file).concat(['index.json', 'metar.json']));
             const owner = context.repo.owner, repo = context.repo.repo;
             const voci = [];
             for (const nome of fs.readdirSync(cartella)) {

@@ -567,3 +567,19 @@ temperatura del modello e alla pressione della nube (2,1 g/m3/km a 10 C e
 modello pesa per il 25%. Esclusi cumuli (base = livello di condensazione),
 ghiaccio, due strati, incudini. Sui dati del 5/10/2026 09 UTC: spessore
 mediano 308 m (p10 99 m, p90 973 m).
+
+## Le basi misurate dagli aeroporti (METAR)
+
+`scripts/cloud_metar.py`, nel workflow `cloud_oca.yml`, legge i file orari
+NOAA (tutti i METAR del mondo, 24 ore a rotazione) e l'elenco delle stazioni
+di aviationweather.gov, e pubblica `data_weather/cloud_oca/metar.json`: le
+ultime 10 ore delle ~900 stazioni del dominio (strati FEW/SCT/BKN/OVC con la
+base, CB/TCU, visibilita' verticale, temperatura e rugiada). Nel browser
+(`campiMetar`, griglia 0,1 gradi) per ogni stazione l'osservazione piu' vicina
+all'istante (entro un'ora) da' due campi in km sul mare: base dei cumuli
+(FEW/SCT piu' basso, o condensazione dal suolo, 125 m per grado fra T e Td) e
+strato coprente (BKN/OVC piu' basso, o il suolo nella nebbia). Valore
+interpolato con una gaussiana di 15 km, fiducia di 35 km (peso w/(w+0,35)).
+La base dei cumuli corregge il livello di condensazione prima
+dell'inferenza; lo strato coprente la base di St, Sc, Ns, As, Ac se
+plausibile sotto la cima del satellite.
