@@ -2602,6 +2602,36 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   console.log("METAR: basi dei cumuli, strati coprenti, pesi con la distanza");
 }
 
+// LE FORME DALLA FISICA: file di cumuli (rulli) e onde orografiche.
+{
+  const TIPO = { "Cu hum": 9, "Cu med": 10, "Sc": 8, "Ac": 5, "As": 4, "St": 7, "Cc": 3 };
+  const morf = new Function("TIPO", "limita", 'var TIPI_FILE = ["Cu hum", "Cu med", "Sc"], TIPI_ONDA = ["Ac", "As", "Sc", "St", "Cc"];\n'
+    + implementazione("morfologiaFisica") + "\nreturn morfologiaFisica;")(TIPO, (v, a, b) => Math.min(b, Math.max(a, v)));
+  assert.match(html, /var TIPI_FILE = \["Cu hum", "Cu med", "Sc"\], TIPI_ONDA = \["Ac", "As", "Sc", "St", "Cc"\];/);
+  // 40 x 1 celle da 2 km, vento da ovest: un rilievo di 1,5 km a ovest
+  // (x 0-4), sottovento un altocumulo; a est un cumulo humilis.
+  const w = 40, h = 1, n = w * h, cel = (v) => new Float32Array(n).fill(v);
+  const suolo = cel(0.2); for (let x = 0; x < 5; x++) suolo[x] = 1.7;
+  const tipo = new Uint8Array(n); tipo[12] = TIPO.Ac; tipo[35] = TIPO["Cu hum"];
+  const cima = cel(0); cima[12] = 4; cima[35] = 1.4;
+  const stato = { larghezza: w, altezza: h, tipo, cima };
+  const ing = { kmPerPixel: 2, suolo, u700: cel(15), v700: cel(0), stab: cel(4), u10: cel(8), v10: cel(0) };
+  morf(stato, ing);
+  // N = sqrt(9,81/265 * (9,76 - 4)/1000) = 0,0146 /s: lambda = 2 pi 15 / N = 6,5 km
+  assert.ok(stato.onde[12] > 0.5, "sottovento al rilievo con vento forte e aria stabile mancano le onde");
+  assert.ok(Math.abs(stato.lambdaKm[12] - 6.45) < 0.3, "lambda delle onde sbagliata: " + stato.lambdaKm[12]);
+  assert.ok(stato.file[35] > 0.5, "cumuli humilis con 8 m/s nello strato: mancano le file");
+  assert.ok(Math.abs(stato.lambdaKm[35] - 2.6 * 1.2) < 0.05, "distanza fra le file: 2,6 volte lo strato (1,2 km)");
+  assert.ok(Math.abs(stato.versoForma[12]) < 1e-6 || Math.abs(stato.versoForma[12] - Math.PI) < 1e-6, "verso del vento da ovest");
+  // Aria instabile (gradiente quasi adiabatico secco): niente onde.
+  const s2 = { larghezza: w, altezza: h, tipo, cima };
+  morf(s2, Object.assign({}, ing, { stab: cel(9.5) }));
+  assert.equal(s2.onde[12], 0, "in aria instabile non ci sono onde orografiche");
+  assert.match(html, /base \*= mix\(1\.0, smoothstep\(0\.2, 0\.8, fileQui\), m4\.r\) \* mix\(1\.0, smoothstep\(0\.3, 0\.7, ondeQui\), m4\.g\);/,
+    "le forme della fisica non entrano nella densita'");
+  console.log("forme dalla fisica: onde lambda = 2 pi U / N, file a 2,6 volte lo strato");
+}
+
 // L'ASSIMILAZIONE COLONNA PER COLONNA: il satellite corregge il volume ICON-EU.
 {
   const src = implementazione("assimilaVolume");
@@ -2892,7 +2922,7 @@ def uf(n,*v):
 def ui(n,v):Uniform1i(GetUniformLocation(program,n.encode()),v)
 tex(np.zeros((1,1,1,4),np.uint8),6,3,mip=False)
 tex(np.zeros((1,1,1,4),np.uint8),9,3,mip=False)
-for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uAria',10),('uAriaMoto',11),('uLuci',12),('uLuciAlone',13),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
+for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uAria',10),('uAriaMoto',11),('uLuci',12),('uLuciAlone',13),('uMorfo4',14),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
 uf('uVentoAlto',1.0,0.0);uf('uDebugTipi',0.0)
 for n,v in dict(uLatoForma=LF,uScalaFormaKm=12,uScalaMacroKm=96,uCopertura=.5,uContrasto=1.2,uDettaglioKm=1.2,uStiraBolle=1,uForzaMacro=.4,uBaseDura=.75,uNucleo=.65,uPolvere=1.3,uMultipla=1,uFoschiaKm=420,uSoleForza=1,uIncudineKm=7.5,uCavita=.7,uErosione=.9,uRigonfio=1.15,uCavolfiore=.8,uOmbra=1.5,uAmbiente=.75,uEsposizione=.55,uQualita=1).items():uf(n,v)
 unit=1/40075;esag=float(os.environ.get('CLOUD_QA_EXAGGERATION','1.6'))

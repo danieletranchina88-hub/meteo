@@ -10461,6 +10461,70 @@
         stato.baseMetar = fonte;
       }
 
+      // LE FORME DALLA FISICA DELL'ATMOSFERA (non sagome predefinite):
+      // - FILE DI CUMULI (rulli convettivi orizzontali, Etling e Brown 1993):
+      //   con vento nello strato rimescolato oltre 4-9 m/s i cumuli piccoli e
+      //   gli stratocumuli si allineano lungo il vento, in file distanti ~2,6
+      //   volte la profondita' dello strato (la cima dei cumuli sul suolo).
+      // - ONDE OROGRAFICHE (Scorer; Durran 1990): aria stabile che scavalca un
+      //   rilievo oscilla sottovento con lunghezza d'onda lambda = 2 pi U / N
+      //   (U vento a 700 hPa, N frequenza di Brunt-Vaisala dal gradiente
+      //   700-500 hPa): le nubi medie e basse si dispongono in bande
+      //   perpendicolari al vento, lisce (lenticolari).
+      // Per cella: forza delle file, forza delle onde, lambda e verso
+      // (assiale) della forma che prevale.
+      var TIPI_FILE = ["Cu hum", "Cu med", "Sc"], TIPI_ONDA = ["Ac", "As", "Sc", "St", "Cc"];
+      function morfologiaFisica(stato, ing) {
+        var w = stato.larghezza, h = stato.altezza, n = w * h;
+        stato.file = new Float32Array(n); stato.onde = new Float32Array(n);
+        stato.lambdaKm = new Float32Array(n).fill(8); stato.versoForma = new Float32Array(n);
+        var ls = function (a, b, x) { var t = limita((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+        var tipiFile = TIPI_FILE.map(function (s) { return TIPO[s]; }), tipiOnda = TIPI_ONDA.map(function (s) { return TIPO[s]; });
+        var kmpx = ing.kmPerPixel || 5, suolo = ing.suolo;
+        var conta = 0;
+        for (var y = 0; y < h; y++) {
+          for (var x = 0; x < w; x++) {
+            var k = y * w + x, t = stato.tipo[k];
+            if (!t) continue;
+            var file = 0, onde = 0, lamF = 8, lamO = 8, angF = 0, angO = 0;
+            if (tipiFile.indexOf(t) >= 0 && ing.u10 && ing.v10) {
+              var u = ing.u10[k], v = ing.v10[k], U = Math.hypot(u, v);
+              if (U > 3) {
+                var zi = limita(stato.cima[k] - (suolo ? suolo[k] : 0), 0.4, 3.0);
+                file = ls(4, 9, U);
+                lamF = 2.6 * zi;
+                angF = Math.atan2(-v, u);
+              }
+            }
+            if (tipiOnda.indexOf(t) >= 0 && ing.u700 && ing.v700 && ing.stab && suolo) {
+              var u7 = ing.u700[k], v7 = ing.v700[k], U7 = Math.hypot(u7, v7), gam = ing.stab[k];
+              var N2 = 9.81 / 265 * (9.76 - gam) / 1000, N = N2 > 0 ? Math.sqrt(N2) : 0;
+              if (U7 > 6 && N > 0.005) {
+                // il rilievo sopravento (5-60 km) sopra il punto
+                var dx = u7 / U7, dy = -v7 / U7, alto = -1e9;
+                for (var d = 5; d <= 60; d += 5) {
+                  var xs = Math.round(x - dx * d / kmpx), ys = Math.round(y - dy * d / kmpx);
+                  if (xs < 0 || ys < 0 || xs >= w || ys >= h) break;
+                  var hz = suolo[ys * w + xs];
+                  if (hz > alto) alto = hz;
+                }
+                var F = alto - suolo[k];
+                onde = ls(8, 15, U7) * ls(0.007, 0.012, N) * ls(0.3, 1.0, F);
+                lamO = limita(2 * Math.PI * U7 / N / 1000, 3, 40);
+                angO = Math.atan2(-v7, u7);
+              }
+            }
+            if (!(file > 0.01 || onde > 0.01)) continue;
+            stato.file[k] = file; stato.onde[k] = onde;
+            var a = onde >= file ? angO : angF;
+            stato.lambdaKm[k] = onde >= file ? lamO : lamF;
+            stato.versoForma[k] = ((a % Math.PI) + Math.PI) % Math.PI;   // assiale, [0, pi)
+            conta++;
+          }
+        }
+        stato.formeFisiche = conta;
+      }
+
       function costruisciStato(campo, precedenti) {
         var m = campo.classeMisura;
         if (!m || !campo.chi) return null;
@@ -10488,7 +10552,7 @@
           suolo: amb ? giu(amb.suolo) : null, hzero: hzero
         };
         ["cin", "rh850", "rh700", "rh500", "rgsp", "rcon", "u250", "v250", "u500", "v500", "shu", "shv",
-          "depth", "rhmid", "stab"]
+          "depth", "rhmid", "stab", "u700", "v700", "u10", "v10"]
           .forEach(function (nome) { if (ex[nome]) ingresso[nome] = giu(ex[nome]); });
         if (amb && amb.gradiente) ingresso.gradiente = giu(amb.gradiente);
         // LA SCALA DAI DATI anche fuori da ICON-2I: base e cima delle nubi
@@ -10524,6 +10588,7 @@
         try { spessoreAdiabatico(stato, amb && amb.oca, amb && amb.volume); } catch (errore) { stato.baseAdiabatica = null; }
         try { basiDaiMetar(stato, metar); } catch (errore) { stato.baseMetar = null; }
         stato.stazioniMetar = metar ? metar.stazioni : 0;
+        try { morfologiaFisica(stato, ingresso); } catch (errore) { stato.file = null; }
         var torri = trovaTorri(ingresso, stato, precedenti ? precedenti.torri : null,
           precedenti ? (campo.epoca - precedenti.epoca) / 60000 : 999, campo.torri || null);
         stato.ingresso = ingresso;
@@ -10548,7 +10613,7 @@
       //   2: R apertura, G pioggia, B tipo (indice), A fiducia
       function tessitureMorfologiche(stato) {
         var n = stato.larghezza * stato.altezza;
-        var a = new Uint8Array(n * 4), b = new Uint8Array(n * 4), c = new Uint8Array(n * 4);
+        var a = new Uint8Array(n * 4), b = new Uint8Array(n * 4), c = new Uint8Array(n * 4), d4 = new Uint8Array(n * 4);
         var lmin = Math.log(0.2), lmax = Math.log(50);
         for (var k = 0; k < n; k++) {
           var i = k * 4;
@@ -10569,8 +10634,16 @@
           c[i + 1] = Number.isFinite(pr) ? Math.max(1, Math.round(limita(pr / 16, 0, 1) * 255)) : 0;
           c[i + 2] = Math.round((stato.ventoX[k] * 0.5 + 0.5) * 255);
           c[i + 3] = Math.round((stato.ventoY[k] * 0.5 + 0.5) * 255);
+          // 4: le forme della fisica: R file di cumuli, G onde orografiche,
+          //    B lunghezza d'onda (log, 1-40 km), A verso assiale (0-pi)
+          if (stato.file) {
+            d4[i] = Math.round(limita(stato.file[k], 0, 1) * 255);
+            d4[i + 1] = Math.round(limita(stato.onde[k], 0, 1) * 255);
+            d4[i + 2] = Math.round(limita(Math.log(stato.lambdaKm[k]) / Math.log(40), 0, 1) * 255);
+            d4[i + 3] = Math.round(limita(stato.versoForma[k] / Math.PI, 0, 1) * 255);
+          }
         }
-        return { a: a, b: b, c: c };
+        return { a: a, b: b, c: c, d: d4 };
       }
 
       // Gli oggetti convettivi negli array di uniform dello shader, dalle
@@ -10900,6 +10973,7 @@
         "uniform float uDebugLod;      // 1: colora le nubi per lodDet (temporaneo)",
         "uniform vec3 uColoriTipi[16];",
         "uniform sampler2D uMorfo3;    // profilo ICON-2I: R durezza, G spessore (km/16), BA vento in quota",
+        "uniform sampler2D uMorfo4;    // forme della fisica: R file di cumuli, G onde, B lambda, A verso",
         "uniform sampler3D uNubiModello; // ICON-EU: frazione di nube per quota (0-16 km, 500 m)",
         "uniform sampler2D uPelle;     // la fotografia del satellite (GeoColour) sul dominio",
         "uniform float uPelleOk;       // 1 quando la fotografia della scena e' arrivata",
@@ -11427,6 +11501,25 @@
         "  // Nel nucleo (profilo pieno) la nube e' piena: gli ammassi scolpiscono",
         "  // la superficie, non bucano l'interno.",
         "  float base = saturare(rimappa(grumi, 1.0 - profilo, 1.0, 0.0, 1.0) + smoothstep(0.75, 1.0, profilo) * 0.6);",
+        "  // LE FORME DELLA FISICA (morfologiaFisica): file di cumuli lungo il vento",
+        "  // dello strato rimescolato, bande delle onde orografiche perpendicolari al",
+        "  // vento a 700 hPa. Come i cirri, in otto versi FISSI sfumati: niente",
+        "  // coordinate ruotate per pixel, niente anelli. Vale anche per la luce.",
+        "  vec4 m4 = textureLod(uMorfo4, uv, lodCampo);",
+        "  if (m4.r + m4.g > 0.02) {",
+        "    float lamKm = exp(m4.b * log(40.0));",
+        "    float settoreF = m4.a * 8.0;",
+        "    float sf0 = floor(settoreF), pf = settoreF - sf0;",
+        "    float fileQui = 0.0, ondeQui = 0.0;",
+        "    for (int k = 0; k < 2; k++) {",
+        "      float ang = (sf0 + float(k)) * PI / 8.0;",
+        "      vec2 dd = vec2(cos(ang), sin(ang));",
+        "      float pk = k == 0 ? 1.0 - pf : pf;",
+        "      fileQui += (0.5 + 0.5 * cos(2.0 * PI * dot(qn.xy, vec2(-dd.y, dd.x)) / lamKm)) * pk;",
+        "      ondeQui += (0.5 + 0.5 * cos(2.0 * PI * dot(qn.xy, dd) / lamKm)) * pk;",
+        "    }",
+        "    base *= mix(1.0, smoothstep(0.2, 0.8, fileQui), m4.r) * mix(1.0, smoothstep(0.3, 0.7, ondeQui), m4.g);",
+        "  }",
         "  // La luce lontana e il cielo leggono solo la forma grande (Horizon Zero",
         "  // Dawn: i campioni economici): un campione, niente dettaglio.",
         "  if (leggera) return base * uNucleo * scalaDensita;",
@@ -12218,6 +12311,7 @@
         this.texMorfo1 = morfo();
         this.texMorfo2 = morfo();
         this.texMorfo3 = morfo();
+        this.texMorfo4 = morfo();
         // La griglia del vuoto: finche' non c'e' un campo, una cella a zero
         // (nessun salto).
         this.texVuoto = gl.createTexture();
@@ -12611,6 +12705,9 @@
             gl.bindTexture(gl.TEXTURE_2D, this.texMorfo3);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stato.larghezza, stato.altezza, 0,
               gl.RGBA, gl.UNSIGNED_BYTE, tessere.c);
+            gl.bindTexture(gl.TEXTURE_2D, this.texMorfo4);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stato.larghezza, stato.altezza, 0,
+              gl.RGBA, gl.UNSIGNED_BYTE, tessere.d);
             // Niente sagome predefinite di torri e incudini (uguali per ogni
             // temporale): il temporale e' il nucleo freddo e lo scudo che il
             // satellite vede, con la cima dall'infrarosso e la colonna dai
@@ -13240,6 +13337,9 @@
         gl.activeTexture(gl.TEXTURE7);
         gl.bindTexture(gl.TEXTURE_2D, this.texMorfo3);
         gl.uniform1i(u("uMorfo3"), 7);
+        gl.activeTexture(gl.TEXTURE14);
+        gl.bindTexture(gl.TEXTURE_2D, this.texMorfo4);
+        gl.uniform1i(u("uMorfo4"), 14);
         gl.activeTexture(gl.TEXTURE8);
         gl.bindTexture(gl.TEXTURE_3D, this.texModello);
         gl.uniform1i(u("uNubiModello"), 8);
@@ -14744,7 +14844,8 @@
               if (b) for (var i = 0; i < b.length; i++) n += b[i];
               return st ? { stazioni: st.stazioniMetar || 0, lclCorretti: st.ingresso ? st.ingresso.lclMetar || 0 : 0,
                 basiCorrette: b ? n : 0 } : null;
-            })() };
+            })(),
+            formeFisiche: volume.campo && volume.campo.stato ? volume.campo.stato.formeFisiche || 0 : null };
         },
         // Lo stato del governatore dei 60 fps (per le prove e la console).
         governatore: function () {
