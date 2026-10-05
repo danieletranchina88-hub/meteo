@@ -2575,6 +2575,9 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.ok(sc > 300 && sc < 430, "uno stratocumulo tau 20, r_e 10 um deve essere spesso ~360 m: " + sc);
   assert.ok(f[1](80, 10, 283.15, 90000, 0.8) > f[1](20, 10, 283.15, 90000, 0.8) * 1.9, "lo spessore cresce con la radice di tau");
   assert.match(html, /try \{ spessoreAdiabatico\(stato, amb && amb\.oca, amb && amb\.volume\); \}/, "lo spessore adiabatico non entra nello stato");
+  // La verifica con i METAR lo ha bocciato: resta spento finche' una nuova
+  // verifica non dice il contrario.
+  assert.match(html, /var ADIABATICO_ATTIVO = false;/, "lo spessore adiabatico, bocciato dalla verifica, deve restare spento");
   assert.match(html, /var TIPI_ADIABATICI = \["St", "Sc", "Ac", "As"\];/, "il modello adiabatico vale solo per le nubi d'acqua stratiformi");
   console.log("spessore adiabatico: c_w dalla vera adiabatica, H da tau e r_e");
 }

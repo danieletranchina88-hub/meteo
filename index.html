@@ -10344,6 +10344,15 @@
       // strato: per i cumuli la base e' il livello di condensazione (gia'
       // usato), per ghiaccio, incudini e due strati la relazione non vale.
       var TIPI_ADIABATICI = ["St", "Sc", "Ac", "As"];
+      // SPENTO DALLA VERIFICA (scripts/verify_clouds.py, 5/10/2026, 1.056 casi
+      // con base misurata dai ceilometri METAR e entrambe le stime): base del
+      // modello ICON-EU errore mediano -40/-100 m per cime sotto i 4 km; base
+      // adiabatica +320 m (cime sotto 1,5 km) fino a +2 km. Le basi misurate
+      // stanno a ~300 m anche sotto cime di 2-6 km: spesso uno strato basso
+      // sotto quello che il satellite vede, e di notte il tau delle nubi
+      // spesse non passa il filtro d'errore (resta solo la parte sottile).
+      // Di giorno migliora (+440 m alle 8-10 UTC) ma resta peggio del modello.
+      var ADIABATICO_ATTIVO = false;
       function spessoreAdiabatico(stato, oca, volume) {
         stato.baseAdiabatica = null;
         if (!oca || !oca.campi || !oca.campi.cot1 || !oca.campi.reff || !stato.cima || !stato.base) return;
@@ -10585,7 +10594,9 @@
         stato.modello = (amb && amb.volume ? modelloDalVolume(amb.volume, w2, h2) : null)
           || nubiDelModello(ex, giu, w2 * h2);
         spessoreDalModello(stato);
-        try { spessoreAdiabatico(stato, amb && amb.oca, amb && amb.volume); } catch (errore) { stato.baseAdiabatica = null; }
+        if (ADIABATICO_ATTIVO) {
+          try { spessoreAdiabatico(stato, amb && amb.oca, amb && amb.volume); } catch (errore) { stato.baseAdiabatica = null; }
+        }
         try { basiDaiMetar(stato, metar); } catch (errore) { stato.baseMetar = null; }
         stato.stazioniMetar = metar ? metar.stazioni : 0;
         try { morfologiaFisica(stato, ingresso); } catch (errore) { stato.file = null; }
