@@ -2449,6 +2449,8 @@ def process_data():
                         extras = {
                             "cin": rischio("cin_ml"), "hzero": rischio("hzerocl"),
                             "u500": rischio("u500"), "v500": rischio("v500"),
+                            "u700": rischio("u700"), "v700": rischio("v700"),
+                            "u10": u_val, "v10": v_val,
                             "shear_u": rischio("wshear_u"), "shear_v": rischio("wshear_v"),
                             "t700": rischio("t700"), "q700": rischio("q700"),
                             "u250": nube("u250"), "v250": nube("v250"), "t250": nube("t250"),

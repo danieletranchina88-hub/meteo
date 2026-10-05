@@ -75,6 +75,10 @@ FIELDS = (
     ("v250", 0.01, 0.0),
     ("u500", 0.01, 0.0),      # vento a 500 hPa (moto dei sistemi), m/s
     ("v500", 0.01, 0.0),
+    ("u700", 0.01, 0.0),      # vento a 700 hPa (~3 km): onde orografiche, m/s
+    ("v700", 0.01, 0.0),
+    ("u10", 0.01, 0.0),       # vento a 10 m: le file di cumuli nello strato rimescolato
+    ("v10", 0.01, 0.0),
     ("shu", 0.01, 0.0),       # shear 0-6 km, m/s (inclinazione delle torri)
     ("shv", 0.01, 0.0),
     ("rh850", 0.01, 0.0),     # umidita' relativa, %

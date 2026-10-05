@@ -583,3 +583,16 @@ interpolato con una gaussiana di 15 km, fiducia di 35 km (peso w/(w+0,35)).
 La base dei cumuli corregge il livello di condensazione prima
 dell'inferenza; lo strato coprente la base di St, Sc, Ns, As, Ac se
 plausibile sotto la cima del satellite.
+
+## Le forme dalla fisica: file di cumuli e onde orografiche
+
+`morfologiaFisica` (griglia dello stato) e la quarta texture della morfologia
+(`uMorfo4`: forza delle file, forza delle onde, lambda log 1-40 km, verso
+assiale). File di cumuli (Etling e Brown 1993): Cu hum/med e Sc con vento a
+10 m oltre 4-9 m/s, file lungo il vento distanti 2,6 volte lo strato
+rimescolato. Onde orografiche (Scorer; Durran 1990): Ac, As, Sc, St, Cc con
+vento a 700 hPa oltre 8-15 m/s, N (dal gradiente 700-500 hPa) oltre
+0,007-0,012/s e un rilievo sopravento (5-60 km) piu' alto di 0,3-1 km:
+bande perpendicolari al vento, lambda = 2 pi U / N. Lo shader modula la
+densita' con un coseno letto in otto versi fissi sfumati. Dati: u700, v700,
+u10, v10 nell'ambiente ICON-2I (`meteo_analysis/clouds/environment.py`).
