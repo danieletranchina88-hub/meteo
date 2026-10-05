@@ -7753,6 +7753,10 @@
       // strati, quote delle cime, fase. Le scrive il workflow cloud_oca.
       var OCA_URL = "data_weather/cloud_oca/";
       var OCA_DISTANZA_MAX_MS = 10 * 60 * 1000;
+      // Le basi misurate dagli aeroporti (METAR), scritte dallo stesso
+      // workflow: le ultime ore sul dominio, ~900 stazioni.
+      var METAR_URL = OCA_URL + "metar.json";
+      var METAR_DISTANZA_MAX_MIN = 60;
       var ambienteIndici = {};
       var ambientePiastrelle = {}, ambienteOrdine = [];
 
@@ -7880,13 +7884,13 @@
       // (in Europa): senza ICON-2I resta ICON-EU da solo.
       function ambienteAllIstante(epoca) {
         return Promise.all([serieAllIstante(epoca, AMBIENTE_URL), serieAllIstante(epoca, NUBI_EU_URL),
-          volumeAllIstante(epoca), ocaAllIstante(epoca)])
+          volumeAllIstante(epoca), ocaAllIstante(epoca), metarAllIstante(epoca)])
           .then(function (d) {
-            var amb = d[0], eu = d[1], vol = d[2], oca = d[3];
-            if (amb) { amb.eu = eu; amb.vol = vol; amb.oca = oca; return amb; }
+            var amb = d[0], eu = d[1], vol = d[2], oca = d[3], metar = d[4];
+            if (amb) { amb.eu = eu; amb.vol = vol; amb.oca = oca; amb.metar = metar; return amb; }
             if (!eu && !vol) return null;
             var rif = eu || { modo: "vicino", run: null, distanza: 0 };
-            return { soloEU: true, eu: eu, vol: vol, oca: oca, modo: rif.modo, run: rif.run, distanza: rif.distanza };
+            return { soloEU: true, eu: eu, vol: vol, oca: oca, metar: metar, modo: rif.modo, run: rif.run, distanza: rif.distanza };
           }).catch(function () { return null; });
       }
 
@@ -7932,6 +7936,105 @@
             return t;
           });
         }).catch(function () { return null; });
+      }
+
+      // Le osservazioni METAR dell'istante: per ogni stazione quella piu'
+      // vicina entro un'ora. Il file si rilegge al massimo ogni 10 minuti.
+      var metarCache = null;
+      function metarAllIstante(epoca) {
+        var adesso = Date.now();
+        if (!metarCache || adesso - metarCache.epoca > 10 * 60 * 1000) {
+          metarCache = { epoca: adesso, promessa: fetch(METAR_URL + "?t=" + Math.floor(adesso / 600000))
+            .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }) };
+        }
+        return metarCache.promessa.then(function (d) {
+          if (!d || !d.stazioni || !d.oss) return null;
+          var minuti = epoca / 60000, migliori = {};
+          d.oss.forEach(function (o) {
+            var dist = Math.abs(o[1] - minuti);
+            if (dist > METAR_DISTANZA_MAX_MIN) return;
+            var m = migliori[o[0]];
+            if (!m || dist < m.dist) migliori[o[0]] = { dist: dist, o: o };
+          });
+          var stazioni = Object.keys(migliori).map(function (i) {
+            var st = d.stazioni[i], o = migliori[i].o;
+            return { icao: st[0], lat: st[1], lon: st[2], quotaKm: st[3] / 1000,
+              T: o[2], Td: o[3], vv: o[4], cavok: o[5], strati: o[6] || [] };
+          });
+          return stazioni.length ? stazioni : null;
+        }).catch(function () { return null; });
+      }
+
+      // I campi delle basi misurate su una griglia di 0,25 gradi: ogni
+      // stazione pesa con una gaussiana di 35 km (fino a 105 km). Tre campi,
+      // in km sul livello del mare:
+      //   cumulo:  la base dei cumuli -- lo strato FEW/SCT piu' basso (o TCU/CB)
+      //            misurato, altrimenti il livello di condensazione dal suolo,
+      //            125 m per grado fra temperatura e rugiada;
+      //   tetto:   la base dello strato coprente (BKN/OVC) piu' basso, o il
+      //            suolo nella nebbia (visibilita' verticale).
+      // Il valore si interpola stretto (15 km: ogni stazione domina la sua
+      // zona), la fiducia largo (35 km: quanto la misura corregge la stima).
+      var METAR_SIGMA_KM = 35, METAR_SIGMA_VALORE_KM = 15, METAR_PASSO = 0.1;
+      function campiMetar(stazioni) {
+        if (!stazioni) return null;
+        var nx = Math.round((DOMINIO.est - DOMINIO.ovest) / METAR_PASSO) + 1;
+        var ny = Math.round((DOMINIO.nord - DOMINIO.sud) / METAR_PASSO) + 1;
+        var campi = { nx: nx, ny: ny, cumulo: new Float32Array(nx * ny), pesoCumulo: new Float32Array(nx * ny),
+          tetto: new Float32Array(nx * ny), pesoTetto: new Float32Array(nx * ny), stazioni: stazioni.length };
+        var vCumulo = new Float32Array(nx * ny), vTetto = new Float32Array(nx * ny);
+        var raggio = 3 * METAR_SIGMA_KM;
+        stazioni.forEach(function (st) {
+          var cumulo = NaN, tetto = NaN;
+          st.strati.forEach(function (s) {
+            var base = st.quotaKm + s[1] * 0.0003048;
+            if ((s[0] <= 2 || s[2]) && s[1] <= 10000 && !(cumulo <= base)) cumulo = base;
+            if (s[0] >= 3 && !(tetto <= base)) tetto = base;
+          });
+          if (st.vv !== null && st.vv !== undefined) tetto = st.quotaKm + st.vv * 0.0003048;
+          if (!Number.isFinite(cumulo) && Number.isFinite(st.T) && Number.isFinite(st.Td) && st.T >= st.Td) {
+            cumulo = st.quotaKm + 0.125 * (st.T - st.Td);
+          }
+          var cosLat = Math.cos(st.lat * Math.PI / 180);
+          var dLat = raggio / 111.2, dLon = raggio / (111.2 * Math.max(0.2, cosLat));
+          var i0 = Math.max(0, Math.floor((st.lon - dLon - DOMINIO.ovest) / METAR_PASSO));
+          var i1 = Math.min(nx - 1, Math.ceil((st.lon + dLon - DOMINIO.ovest) / METAR_PASSO));
+          var j0 = Math.max(0, Math.floor((st.lat - dLat - DOMINIO.sud) / METAR_PASSO));
+          var j1 = Math.min(ny - 1, Math.ceil((st.lat + dLat - DOMINIO.sud) / METAR_PASSO));
+          for (var j = j0; j <= j1; j++) {
+            var la = DOMINIO.sud + j * METAR_PASSO;
+            for (var i = i0; i <= i1; i++) {
+              var lo = DOMINIO.ovest + i * METAR_PASSO;
+              var dy = (la - st.lat) * 111.2, dx = (lo - st.lon) * 111.2 * cosLat;
+              var d2 = dx * dx + dy * dy;
+              if (d2 > raggio * raggio) continue;
+              var w = Math.exp(-d2 / (2 * METAR_SIGMA_KM * METAR_SIGMA_KM)), q = j * nx + i;
+              var wv = Math.exp(-d2 / (2 * METAR_SIGMA_VALORE_KM * METAR_SIGMA_VALORE_KM)) + 1e-3 * w;
+              if (Number.isFinite(cumulo)) { campi.cumulo[q] += wv * cumulo; vCumulo[q] += wv; campi.pesoCumulo[q] += w; }
+              if (Number.isFinite(tetto)) { campi.tetto[q] += wv * tetto; vTetto[q] += wv; campi.pesoTetto[q] += w; }
+            }
+          }
+        });
+        for (var q = 0; q < nx * ny; q++) {
+          campi.cumulo[q] = campi.pesoCumulo[q] > 1e-3 ? campi.cumulo[q] / vCumulo[q] : NaN;
+          campi.tetto[q] = campi.pesoTetto[q] > 1e-3 ? campi.tetto[q] / vTetto[q] : NaN;
+        }
+        return campi;
+      }
+      // Un campo METAR in un punto (bilineare): [valore, peso]
+      function metarIn(campi, nome, lat, lon) {
+        var fx = (lon - DOMINIO.ovest) / METAR_PASSO, fy = (lat - DOMINIO.sud) / METAR_PASSO;
+        if (fx < 0 || fy < 0 || fx > campi.nx - 1 || fy > campi.ny - 1) return null;
+        var x0 = Math.min(campi.nx - 2, Math.floor(fx)), y0 = Math.min(campi.ny - 2, Math.floor(fy));
+        var tx = fx - x0, ty = fy - y0, v = campi[nome], p = campi["peso" + nome.charAt(0).toUpperCase() + nome.slice(1)];
+        var s = 0, sw = 0, pw = 0;
+        [[x0, y0, (1 - tx) * (1 - ty)], [x0 + 1, y0, tx * (1 - ty)], [x0, y0 + 1, (1 - tx) * ty], [x0 + 1, y0 + 1, tx * ty]]
+          .forEach(function (c) {
+            var q = c[1] * campi.nx + c[0];
+            pw += p[q] * c[2];
+            if (Number.isFinite(v[q])) { s += v[q] * c[2]; sw += c[2]; }
+          });
+        return sw > 0 ? [s / sw, pw] : null;
       }
 
       function serieAllIstante(epoca, url) {
@@ -8020,11 +8123,13 @@
           };
           solo.modo = amb.modo; solo.run = amb.run; solo.distanza = amb.distanza; solo.volume = amb.vol || null;
           solo.oca = amb.oca || null;
+          solo.metar = amb.metar || null;
           return solo;
         }
         var conEU = ambienteSulCampoIcon2I(amb, w, h);
         conEU.volume = amb.vol || null;
         conEU.oca = amb.oca || null;
+        conEU.metar = amb.metar || null;
         if (amb.eu) {
           var livelliEU = campiSulCampo(amb.eu, nomiEU, w, h);
           Object.keys(livelliEU).forEach(function (nome) { conEU.extra[nome] = livelliEU[nome]; });
@@ -10305,6 +10410,57 @@
         stato.baseAdiabatica = fonte;
       }
 
+      // LE BASI MISURATE DAGLI AEROPORTI. Vicino a una stazione la base misurata
+      // vale piu' di ogni stima (peso w / (w + 0,35): 74% sulla stazione,
+      // meta' a ~45 km, niente oltre ~100 km).
+      // - Prima dell'inferenza: il livello di condensazione dei cumuli diventa
+      //   la base dei cumuli misurata (o la condensazione dalle stazioni).
+      // - Dopo: la base delle nubi stratiformi si porta allo strato coprente
+      //   misurato, se e' plausibile sotto la cima vista dal satellite.
+      function pixelLatLon(w, h, x, y, r) {
+        var my = r.nord - (y + 0.5) / h * (r.nord - r.sud);
+        return [(2 * Math.atan(Math.exp(my / RAGGIO_TERRA)) - Math.PI / 2) * 180 / Math.PI,
+          DOMINIO.ovest + (x + 0.5) / w * (DOMINIO.est - DOMINIO.ovest)];
+      }
+      function lclDaiMetar(ingresso, campi) {
+        if (!campi || !ingresso.lcl) return 0;
+        var w = ingresso.larghezza, h = ingresso.altezza, r = riquadroMercatore(), n = 0;
+        for (var y = 0; y < h; y++) {
+          for (var x = 0; x < w; x++) {
+            var ll = pixelLatLon(w, h, x, y, r), m = metarIn(campi, "cumulo", ll[0], ll[1]);
+            if (!m || m[1] < 0.02) continue;
+            var k = y * w + x, peso = m[1] / (m[1] + 0.35);
+            var prima = Number.isFinite(ingresso.lcl[k]) ? ingresso.lcl[k] : m[0];
+            ingresso.lcl[k] = prima + (m[0] - prima) * peso;
+            n++;
+          }
+        }
+        return n;
+      }
+      var TIPI_TETTO = ["St", "Sc", "Ns", "As", "Ac"];
+      function basiDaiMetar(stato, campi) {
+        stato.baseMetar = null;
+        if (!campi || !stato.base || !stato.cima) return;
+        var w = stato.larghezza, h = stato.altezza, r = riquadroMercatore();
+        var tipi = TIPI_TETTO.map(function (s) { return TIPO[s]; }), fonte = new Uint8Array(w * h);
+        for (var y = 0; y < h; y++) {
+          for (var x = 0; x < w; x++) {
+            var k = y * w + x;
+            if (tipi.indexOf(stato.tipo[k]) < 0) continue;
+            var ll = pixelLatLon(w, h, x, y, r), m = metarIn(campi, "tetto", ll[0], ll[1]);
+            if (!m || m[1] < 0.02) continue;
+            var cima = stato.cima[k];
+            // Uno strato coprente misurato molto sotto la cima (oltre 3,5 km)
+            // e' un'altra nube, sotto quella che il satellite vede.
+            if (!(m[0] < cima - 0.05 && m[0] > cima - 3.5)) continue;
+            var peso = 0.9 * m[1] / (m[1] + 0.35);
+            stato.base[k] = stato.base[k] + (m[0] - stato.base[k]) * peso;
+            fonte[k] = 1;
+          }
+        }
+        stato.baseMetar = fonte;
+      }
+
       function costruisciStato(campo, precedenti) {
         var m = campo.classeMisura;
         if (!m || !campo.chi) return null;
@@ -10354,6 +10510,11 @@
           var e = campo.evidenzaSat;
           ingresso.nebbia = ricampiona(e.basseAcqua, e.larghezza, e.altezza, w2, h2);
         }
+        var metar = null;
+        try {
+          metar = amb && amb.metar ? campiMetar(amb.metar) : null;
+          ingresso.lclMetar = metar ? lclDaiMetar(ingresso, metar) : 0;
+        } catch (errore) { metar = null; }
         var stato = inferisciStati(ingresso);
         // Il modello per quota: il volume sui livelli nativi di ICON-EU se c'e',
         // altrimenti i livelli isobarici.
@@ -10361,6 +10522,8 @@
           || nubiDelModello(ex, giu, w2 * h2);
         spessoreDalModello(stato);
         try { spessoreAdiabatico(stato, amb && amb.oca, amb && amb.volume); } catch (errore) { stato.baseAdiabatica = null; }
+        try { basiDaiMetar(stato, metar); } catch (errore) { stato.baseMetar = null; }
+        stato.stazioniMetar = metar ? metar.stazioni : 0;
         var torri = trovaTorri(ingresso, stato, precedenti ? precedenti.torri : null,
           precedenti ? (campo.epoca - precedenti.epoca) / 60000 : 999, campo.torri || null);
         stato.ingresso = ingresso;
@@ -14574,6 +14737,13 @@
               var st = volume.campo && volume.campo.stato, b = st && st.baseAdiabatica, n = 0;
               if (b) for (var i = 0; i < b.length; i++) n += b[i];
               return b ? n : null;
+            })(),
+            // le basi misurate dagli aeroporti: stazioni usate e pixel corretti
+            metar: (function () {
+              var st = volume.campo && volume.campo.stato, b = st && st.baseMetar, n = 0;
+              if (b) for (var i = 0; i < b.length; i++) n += b[i];
+              return st ? { stazioni: st.stazioniMetar || 0, lclCorretti: st.ingresso ? st.ingresso.lclMetar || 0 : 0,
+                basiCorrette: b ? n : 0 } : null;
             })() };
         },
         // Lo stato del governatore dei 60 fps (per le prove e la console).

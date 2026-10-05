@@ -2579,6 +2579,29 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   console.log("spessore adiabatico: c_w dalla vera adiabatica, H da tau e r_e");
 }
 
+// LE BASI MISURATE DAGLI AEROPORTI (METAR): campi gaussiani di base dei
+// cumuli (strato FEW/SCT o condensazione dal suolo) e di strato coprente.
+{
+  const DOM = { ovest: -23.5, sud: 29.5, est: 42.0, nord: 66.0 };
+  const ctx = new Function("DOMINIO", "METAR_SIGMA_KM", "METAR_SIGMA_VALORE_KM", "METAR_PASSO",
+    implementazione("campiMetar") + implementazione("metarIn") + "\nreturn [campiMetar, metarIn];")(DOM, 35, 15, 0.1);
+  const [campiMetar, metarIn] = ctx;
+  // Linate: 18/11 senza nubi -> condensazione a 0,109 + 0,125*7 = 0,984 km;
+  // Malpensa: OVC 1200 ft a 221 m -> tetto 0,587 km.
+  const c = campiMetar([
+    { lat: 45.461, lon: 9.263, quotaKm: 0.109, T: 18, Td: 11, vv: null, cavok: 0, strati: [] },
+    { lat: 45.631, lon: 8.728, quotaKm: 0.221, T: 12, Td: 11, vv: null, cavok: 0, strati: [[4, 1200, 0]] }]);
+  const lin = metarIn(c, "cumulo", 45.461, 9.263);
+  assert.ok(lin && Math.abs(lin[0] - 0.984) < 0.08, "base dei cumuli dalla condensazione a Linate: " + (lin && lin[0]));
+  const mxp = metarIn(c, "tetto", 45.631, 8.728);
+  assert.ok(mxp && Math.abs(mxp[0] - 0.587) < 0.03, "tetto OVC012 a Malpensa: " + (mxp && mxp[0]));
+  assert.ok(mxp[1] > 0.7, "il peso sulla stazione deve essere pieno");
+  assert.equal(metarIn(c, "tetto", 41.9, 12.5), null, "a Roma (400 km) i METAR del Nord non devono valere");
+  assert.match(html, /try \{ basiDaiMetar\(stato, metar\); \}/, "le basi misurate non correggono lo stato");
+  assert.match(html, /ingresso\.lclMetar = metar \? lclDaiMetar\(ingresso, metar\) : 0;/, "la condensazione delle stazioni non entra nell'inferenza");
+  console.log("METAR: basi dei cumuli, strati coprenti, pesi con la distanza");
+}
+
 // L'ASSIMILAZIONE COLONNA PER COLONNA: il satellite corregge il volume ICON-EU.
 {
   const src = implementazione("assimilaVolume");
@@ -2636,7 +2659,7 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   assert.ok(colO("iwc", 3, 1).some(v => v > 0), "a -43 C la cima e' ghiaccio anche se OCA dice acqua");
   // Il lettore NUBV conserva l'offset (i log10 di tau partono da -1).
   assert.match(html, /offset: v\.getFloat32\(pos \+ 13, true\)/, "il lettore NUBV perde l'offset dei campi");
-  assert.match(html, /volumeAllIstante\(epoca\), ocaAllIstante\(epoca\)\]/, "l'OCA dell'istante non viene caricato");
+  assert.match(html, /volumeAllIstante\(epoca\), ocaAllIstante\(epoca\), metarAllIstante\(epoca\)\]/, "l'OCA dell'istante non viene caricato");
   assert.match(html, /raggio: RAGGIO_TERRA \}, oca\) : null;/, "l'OCA non arriva all'assimilazione");
   // Il visibile a piena risoluzione arriva spesso dopo 8 s: non deve essere
   // scartato, ma rifare la fusione (e l'assimilazione) quando arriva.
@@ -2735,7 +2758,7 @@ assert.match(fragment, /float profiloVerticale\(float hf, float cumulo, float sv
 // durezza, vento in quota della cella, domain warp contro il tiling.
 assert.match(html, /var DOMINIO = \{ ovest: -23\.5, sud: 29\.5, est: 42\.0, nord: 66\.0 \};/, "il volume deve coprire il satellite dove c'e' ICON-EU");
 assert.match(html, /var NUBI_EU_URL = "data_weather\/cloud_eu\/";/, "manca la serie ICON-EU per livello");
-assert.match(html, /return Promise\.all\(\[serieAllIstante\(epoca, AMBIENTE_URL\), serieAllIstante\(epoca, NUBI_EU_URL\),\s*volumeAllIstante\(epoca\), ocaAllIstante\(epoca\)\]\)/, "ICON-2I, ICON-EU e il volume nativo devono arrivare insieme");
+assert.match(html, /return Promise\.all\(\[serieAllIstante\(epoca, AMBIENTE_URL\), serieAllIstante\(epoca, NUBI_EU_URL\),\s*volumeAllIstante\(epoca\), ocaAllIstante\(epoca\), metarAllIstante\(epoca\)\]\)/, "ICON-2I, ICON-EU e il volume nativo devono arrivare insieme");
 // I LIVELLI NATIVI: colonna ogni 250 m con acqua+ghiaccio; scala delle torri
 // da HBAS/HTOP fuori da ICON-2I; rumore guidato da durezza, CAPE e shear.
 assert.match(html, /var VOLUME_EU_URL = "data_weather\/cloud_eu_vol\/";/, "manca il volume sui livelli nativi");
