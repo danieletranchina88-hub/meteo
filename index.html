@@ -10212,6 +10212,99 @@
         stato.baseDalModello = fonte;
       }
 
+      // LO SPESSORE DALLA FISICA DELLA NUBE (modello adiabatico, Brenguier et
+      // al. 2000; Grosvenor et al. 2018). In una nube d'acqua il contenuto
+      // cresce con la quota sopra la base quasi come l'adiabatica satura:
+      // LWC(z) = f_ad * c_w * z. Lo spessore ottico e il raggio efficace che
+      // il satellite misura (OCA) danno il contenuto integrato,
+      // LWP = 5/9 rho_w tau r_e, e quindi lo spessore geometrico
+      // H = sqrt(2 LWP / (f_ad c_w)): la base viene dalla cima, misurata.
+      // c_w (g/m3 per metro) e' quello della vera adiabatica satura alla
+      // temperatura e pressione della nube, non una costante.
+      function condensazioneAdiabatica(tK, pPa) {
+        var Lv = 2.501e6, cp = 1005, Rd = 287.05, Rv = 461.5, g = 9.81;
+        var es = 611.2 * Math.exp(17.67 * (tK - 273.15) / (tK - 29.65));
+        var rs = 0.622 * es / Math.max(pPa - es, 1);
+        var gm = g * (1 + Lv * rs / (Rd * tK)) / (cp + Lv * Lv * rs / (Rv * tK * tK));
+        var dws = (cp / Lv) * (g / cp - gm);            // kg/kg per metro
+        return Math.max(0, dws * pPa / (Rd * tK) * 1000); // g/m3 per metro
+      }
+      function spessoreAdiabaticoKm(tau, reUm, tK, pPa, fAd) {
+        var lwp = 5 / 9 * tau * reUm;                    // g/m2 (rho_w 1e6 g/m3, r_e in um)
+        var cw = condensazioneAdiabatica(tK, pPa);
+        if (!(lwp > 0) || !(cw > 1e-5)) return NaN;
+        return Math.sqrt(2 * lwp / (fAd * cw)) / 1000;
+      }
+      // Sulla griglia dello stato, per le sole nubi d'acqua stratiformi a uno
+      // strato: per i cumuli la base e' il livello di condensazione (gia'
+      // usato), per ghiaccio, incudini e due strati la relazione non vale.
+      var TIPI_ADIABATICI = ["St", "Sc", "Ac", "As"];
+      function spessoreAdiabatico(stato, oca, volume) {
+        stato.baseAdiabatica = null;
+        if (!oca || !oca.campi || !oca.campi.cot1 || !oca.campi.reff || !stato.cima || !stato.base) return;
+        var c = oca.campi, nx = oca.nx, ny = oca.ny;
+        var val = function (nome, k) {
+          var a = c[nome];
+          if (!a || a[k] === 255) return NaN;
+          return a[k] * a.specifica.scala + (a.specifica.offset || 0);
+        };
+        // Lo spessore per colonna OCA (0,1875 gradi), poi interpolato.
+        var H = new Float32Array(nx * ny).fill(NaN);
+        var tv = volume && volume.campi && volume.campi.t && volume.nx === nx && volume.ny === ny ? volume.campi.t : null;
+        for (var k = 0; k < nx * ny; k++) {
+          var tau = Math.pow(10, val("cot1", k)), re = val("reff", k), ice = val("ice", k);
+          var ml = val("ml", k), zt = val("zt1", k), fr = val("frac", k);
+          if (!(tau > 0.5 && tau < 150) || !(re >= 3 && re <= 30) || !(ice < 0.3) || ml > 0.3 || !(fr > 0.3) || !(zt > 0.2)) continue;
+          // temperatura e pressione a meta' nube (atmosfera standard, la
+          // temperatura del modello alla cima dove c'e')
+          var zMid = Math.max(0.1, zt - 0.3);
+          var tK = 288.15 - 6.5 * zMid, z0 = volume ? volume.z0 : 0, dz = volume ? volume.dz : 0.25;
+          if (tv) {
+            var iz = Math.max(0, Math.min(volume.nz - 1, Math.round((zt - z0) / dz)));
+            var cod = tv[iz * nx * ny + k];
+            if (cod !== 255) tK = cod * 0.5 - 90 + 273.15 + 2;
+          }
+          if (tK < 248) continue;                         // sotto -25 C: non e' acqua sopraffusa a lungo
+          var pPa = 101325 * Math.pow(1 - zMid / 44.33, 5.255);
+          H[k] = spessoreAdiabaticoKm(tau, re, tK, pPa, 0.8);
+        }
+        var w = stato.larghezza, h = stato.altezza, n = w * h;
+        var r = riquadroMercatore(), fonte = new Uint8Array(n);
+        var passoLat = (oca.nord - oca.sud) / Math.max(1, ny - 1), passoLon = (oca.est - oca.ovest) / Math.max(1, nx - 1);
+        var tipi = TIPI_ADIABATICI.map(function (s) { return TIPO[s]; });
+        for (var y = 0; y < h; y++) {
+          var my = r.nord - (y + 0.5) / h * (r.nord - r.sud);
+          var lat = (2 * Math.atan(Math.exp(my / RAGGIO_TERRA)) - Math.PI / 2) * 180 / Math.PI;
+          var fy = (lat - oca.sud) / passoLat;
+          if (fy < 0 || fy > ny - 1) continue;
+          var y0 = Math.min(ny - 2, Math.floor(fy)), ty = fy - y0;
+          for (var x = 0; x < w; x++) {
+            var q = y * w + x;
+            if (tipi.indexOf(stato.tipo[q]) < 0 || !(stato.cima[q] > 0.3)) continue;
+            var lon = DOMINIO.ovest + (x + 0.5) / w * (DOMINIO.est - DOMINIO.ovest);
+            var fx = (lon - oca.ovest) / passoLon;
+            if (fx < 0 || fx > nx - 1) continue;
+            var x0 = Math.min(nx - 2, Math.floor(fx)), tx = fx - x0;
+            // bilineare sulle sole colonne valide: niente gradini di 20 km
+            var somma = 0, peso = 0;
+            [[x0, y0, (1 - tx) * (1 - ty)], [x0 + 1, y0, tx * (1 - ty)], [x0, y0 + 1, (1 - tx) * ty], [x0 + 1, y0 + 1, tx * ty]]
+              .forEach(function (v) {
+                var hv = H[v[1] * nx + v[0]];
+                if (Number.isFinite(hv) && v[2] > 0) { somma += hv * v[2]; peso += v[2]; }
+              });
+            if (peso < 0.25) continue;
+            var spessore = limita(somma / peso, 0.08, 3.0);
+            var baseAd = Math.max(0, stato.cima[q] - spessore);
+            // L'osservazione pesa piu' del modello (tau e r_e hanno
+            // incertezza: lo spessore va con la radice, ~40% a tau doppio).
+            var b = stato.baseDalModello && stato.baseDalModello[q] ? 0.75 * baseAd + 0.25 * stato.base[q] : baseAd;
+            stato.base[q] = limita(b, 0, Math.max(0, stato.cima[q] - 0.08));
+            fonte[q] = 1;
+          }
+        }
+        stato.baseAdiabatica = fonte;
+      }
+
       function costruisciStato(campo, precedenti) {
         var m = campo.classeMisura;
         if (!m || !campo.chi) return null;
@@ -10267,6 +10360,7 @@
         stato.modello = (amb && amb.volume ? modelloDalVolume(amb.volume, w2, h2) : null)
           || nubiDelModello(ex, giu, w2 * h2);
         spessoreDalModello(stato);
+        try { spessoreAdiabatico(stato, amb && amb.oca, amb && amb.volume); } catch (errore) { stato.baseAdiabatica = null; }
         var torri = trovaTorri(ingresso, stato, precedenti ? precedenti.torri : null,
           precedenti ? (campo.epoca - precedenti.epoca) / 60000 : 999, campo.torri || null);
         stato.ingresso = ingresso;
@@ -14474,7 +14568,13 @@
         aria: function () {
           return { pronta: !!volume.ariaPronta, moto: !!volume.ariaMotoPronta,
             griglia: volume.ariaGriglia || null, geo: volume.ariaGeo || null,
-            assimilazione: volume.assimilazione ? volume.assimilazione.conteggi : null };
+            assimilazione: volume.assimilazione ? volume.assimilazione.conteggi : null,
+            // pixel dello stato con la base dallo spessore adiabatico (OCA)
+            basiAdiabatiche: (function () {
+              var st = volume.campo && volume.campo.stato, b = st && st.baseAdiabatica, n = 0;
+              if (b) for (var i = 0; i < b.length; i++) n += b[i];
+              return b ? n : null;
+            })() };
         },
         // Lo stato del governatore dei 60 fps (per le prove e la console).
         governatore: function () {
