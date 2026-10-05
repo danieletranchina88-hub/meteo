@@ -554,3 +554,16 @@ OCA nello shader (oggi r_e segue la temperatura).
   luci si vedono attraverso le nubi con la trasmissione del raggio.
 - **Il chiarore delle citta'**: un alone sfocato (~30 km) delle stesse luci
   accende di arancione le basi delle nubi basse (cala con la quota).
+
+## Lo spessore delle nubi d'acqua dal modello adiabatico
+
+Per le nubi d'acqua stratiformi a uno strato (St, Sc, Ac, As) la base viene
+dalla cima osservata meno lo spessore imposto dalle misure OCA di spessore
+ottico tau e raggio efficace r_e (`spessoreAdiabatico`): LWP = 5/9 rho_w tau r_e,
+LWC(z) = f_ad c_w z, H = sqrt(2 LWP / (f_ad c_w)) (Brenguier et al. 2000;
+Grosvenor et al. 2018), f_ad = 0,8, c_w dalla vera adiabatica satura alla
+temperatura del modello e alla pressione della nube (2,1 g/m3/km a 10 C e
+900 hPa). Interpolato bilineare fra le colonne OCA; dove c'e' la base del
+modello pesa per il 25%. Esclusi cumuli (base = livello di condensazione),
+ghiaccio, due strati, incudini. Sui dati del 5/10/2026 09 UTC: spessore
+mediano 308 m (p10 99 m, p90 973 m).
