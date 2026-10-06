@@ -10534,6 +10534,35 @@
         stato.formeFisiche = conta;
       }
 
+      // LA DERIVA DELLE NUBI: ogni cella si sposta col vento della sua quota
+      // (a meta' fra base e cima, il vento che "guida" la nube: un
+      // cumulonembo va col vento medio, non con quello della sua incudine):
+      // 10 m rinforzato fino a 2 km (lo strato rimescolato), poi
+      // 700, 500 e 250 hPa. km/h verso est e verso sud (Mercatore). Serve solo
+      // alle sezioni che animano il tempo (Atmosfera viva); a riposo non sposta.
+      var DERIVA_MAX_KMH = 200;
+      function derivaDelleNubi(stato, ing) {
+        var n = stato.larghezza * stato.altezza;
+        stato.derivaX = new Float32Array(n); stato.derivaY = new Float32Array(n);
+        var livelli = [[2, "u10", "v10", 1.4], [4.5, "u700", "v700", 1], [8.5, "u500", "v500", 1], [99, "u250", "v250", 1]];
+        var conta = 0;
+        for (var k = 0; k < n; k++) {
+          if (!stato.tipo[k]) continue;
+          var b = stato.base ? stato.base[k] : NaN;
+          var z = Number.isFinite(b) && b < stato.cima[k] ? (b + stato.cima[k]) / 2 : stato.cima[k], u = NaN, v = NaN;
+          for (var i = 0; i < livelli.length && !Number.isFinite(u); i++) {
+            var L = livelli[i];
+            if (z > L[0] || !ing[L[1]] || !ing[L[2]]) continue;
+            u = ing[L[1]][k] * L[3]; v = ing[L[2]][k] * L[3];
+          }
+          if (!Number.isFinite(u) && ing.u500 && ing.v500) { u = ing.u500[k]; v = ing.v500[k]; }
+          if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
+          stato.derivaX[k] = u * 3.6; stato.derivaY[k] = -v * 3.6;
+          conta++;
+        }
+        stato.celleDeriva = conta;
+      }
+
       function costruisciStato(campo, precedenti) {
         var m = campo.classeMisura;
         if (!m || !campo.chi) return null;
@@ -10600,6 +10629,7 @@
         try { basiDaiMetar(stato, metar); } catch (errore) { stato.baseMetar = null; }
         stato.stazioniMetar = metar ? metar.stazioni : 0;
         try { morfologiaFisica(stato, ingresso); } catch (errore) { stato.file = null; }
+        try { derivaDelleNubi(stato, ingresso); } catch (errore) { stato.derivaX = null; }
         var torri = trovaTorri(ingresso, stato, precedenti ? precedenti.torri : null,
           precedenti ? (campo.epoca - precedenti.epoca) / 60000 : 999, campo.torri || null);
         stato.ingresso = ingresso;
@@ -10625,6 +10655,7 @@
       function tessitureMorfologiche(stato) {
         var n = stato.larghezza * stato.altezza;
         var a = new Uint8Array(n * 4), b = new Uint8Array(n * 4), c = new Uint8Array(n * 4), d4 = new Uint8Array(n * 4);
+        var e5 = new Uint8Array(n * 4);
         var lmin = Math.log(0.2), lmax = Math.log(50);
         for (var k = 0; k < n; k++) {
           var i = k * 4;
@@ -10654,7 +10685,14 @@
             d4[i + 3] = Math.round(limita(stato.versoForma[k] / Math.PI, 0, 1) * 255);
           }
         }
-        return { a: a, b: b, c: c, d: d4 };
+        // 5: la deriva col vento (RG: km/h verso est e verso sud, +-DERIVA_MAX_KMH)
+        for (var q5 = 0; q5 < n; q5++) {
+          var dx5 = stato.derivaX ? stato.derivaX[q5] : 0, dy5 = stato.derivaY ? stato.derivaY[q5] : 0;
+          e5[q5 * 4] = Math.round(limita(dx5 / DERIVA_MAX_KMH * 0.5 + 0.5, 0, 1) * 255);
+          e5[q5 * 4 + 1] = Math.round(limita(dy5 / DERIVA_MAX_KMH * 0.5 + 0.5, 0, 1) * 255);
+          e5[q5 * 4 + 2] = 0; e5[q5 * 4 + 3] = 255;
+        }
+        return { a: a, b: b, c: c, d: d4, e: e5 };
       }
 
       // Gli oggetti convettivi negli array di uniform dello shader, dalle
@@ -10985,6 +11023,8 @@
         "uniform vec3 uColoriTipi[16];",
         "uniform sampler2D uMorfo3;    // profilo ICON-2I: R durezza, G spessore (km/16), BA vento in quota",
         "uniform sampler2D uMorfo4;    // forme della fisica: R file di cumuli, G onde, B lambda, A verso",
+        "uniform sampler2D uDeriva;    // deriva col vento: RG km/h verso est e sud",
+        "uniform float uOre, uDerivaMax; // ore di deriva (0 = la nube osservata, ferma)",
         "uniform sampler3D uNubiModello; // ICON-EU: frazione di nube per quota (0-16 km, 500 m)",
         "uniform sampler2D uPelle;     // la fotografia del satellite (GeoColour) sul dominio",
         "uniform float uPelleOk;       // 1 quando la fotografia della scena e' arrivata",
@@ -11299,6 +11339,13 @@
         "float densita(vec3 p, float lodCampo, float lodRumore, bool leggera,",
         "              out float hRel, out float conv, out vec2 fascia) {",
         "  hRel = 0.0; conv = 0.0; fascia = vec2(-1.0); gCavita = 0.0; gProfilo = 0.0;",
+        "  // IL TEMPO CHE SCORRE: la nube (forma, dettaglio, ombre) si sposta col",
+        "  // vento della sua quota; si legge il campo dove la nube era (all'indietro).",
+        "  if (uOre != 0.0) {",
+        "    vec2 uv0 = vec2((p.x - uDominio.x) / (uDominio.z - uDominio.x), (p.y - uDominio.y) / (uDominio.w - uDominio.y));",
+        "    vec2 dKm = (textureLod(uDeriva, uv0, 0.0).rg * 2.0 - 1.0) * uDerivaMax * uOre;",
+        "    p.xy -= dKm / (uCircKm * cosLatDa(p.y));",
+        "  }",
         "  vec2 uv = vec2((p.x - uDominio.x) / (uDominio.z - uDominio.x),",
         "                 (p.y - uDominio.y) / (uDominio.w - uDominio.y));",
         "  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 0.0;",
@@ -12323,6 +12370,7 @@
         this.texMorfo2 = morfo();
         this.texMorfo3 = morfo();
         this.texMorfo4 = morfo();
+        this.texDeriva = morfo();
         // La griglia del vuoto: finche' non c'e' un campo, una cella a zero
         // (nessun salto).
         this.texVuoto = gl.createTexture();
@@ -12721,6 +12769,9 @@
             gl.bindTexture(gl.TEXTURE_2D, this.texMorfo4);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stato.larghezza, stato.altezza, 0,
               gl.RGBA, gl.UNSIGNED_BYTE, tessere.d);
+            gl.bindTexture(gl.TEXTURE_2D, this.texDeriva);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stato.larghezza, stato.altezza, 0,
+              gl.RGBA, gl.UNSIGNED_BYTE, tessere.e);
             // Niente sagome predefinite di torri e incudini (uguali per ogni
             // temporale): il temporale e' il nucleo freddo e lo scudo che il
             // satellite vede, con la cima dall'infrarosso e la colonna dai
@@ -12964,7 +13015,7 @@
         // fotogrammi piu' cari in mezzo allo zoom. Ora "fermo" vuol dire fermo
         // da 350 ms; allora un fotogramma in piu' riporta la qualita' piena.
         var ora = performance.now();
-        var muove = !!(this.mappa && this.mappa.isMoving && this.mappa.isMoving());
+        var muove = !!(this.mappa && this.mappa.isMoving && this.mappa.isMoving()) || !!this.animazione;
         if (muove) this.ultimoMoto = ora;
         this.inMovimento = muove || ora - (this.ultimoMoto || -1e9) < MOTO_ISTERESI_MS;
         if (!muove && this.inMovimento && !this.attesaFermo && this.mappa) {
@@ -13018,7 +13069,7 @@
       // Cio' che decide se il fotogramma del volume e' ancora quello giusto.
       StratoVolume.prototype.firmaScena = function (matrice) {
         return matrice ? Array.prototype.slice.call(matrice).join(",") + "|" + this.serieCampo
-          + "|" + (this.versioneDati || 0)
+          + "|" + (this.versioneDati || 0) + "|" + (this.derivaOre || 0)
           + "|" + this.misuraVolume.larghezza + "x" + this.misuraVolume.altezza
           + "|" + JSON.stringify(REGOLA) : "";
       };
@@ -13375,6 +13426,11 @@
         gl.activeTexture(gl.TEXTURE14);
         gl.bindTexture(gl.TEXTURE_2D, this.texMorfo4);
         gl.uniform1i(u("uMorfo4"), 14);
+        gl.activeTexture(gl.TEXTURE15);
+        gl.bindTexture(gl.TEXTURE_2D, this.texDeriva);
+        gl.uniform1i(u("uDeriva"), 15);
+        gl.uniform1f(u("uOre"), this.derivaOre || 0);
+        gl.uniform1f(u("uDerivaMax"), DERIVA_MAX_KMH);
         gl.activeTexture(gl.TEXTURE8);
         gl.bindTexture(gl.TEXTURE_3D, this.texModello);
         gl.uniform1i(u("uNubiModello"), 8);
@@ -14899,6 +14955,13 @@
         },
         // Una sezione animata chiede di riusare il volume a mappa ferma.
         riusaFermo: function (si) { volume.riusaFermo = !!si; },
+        // Una sezione che anima il tempo: le nubi spostate di "ore" col vento;
+        // "animando" le tratta come in movimento (risoluzione del governatore).
+        deriva: function (ore, animando) {
+          volume.derivaOre = Number.isFinite(ore) ? ore : 0;
+          volume.animazione = !!animando;
+          if (map) map.triggerRepaint();
+        },
         // Lo stato del governatore dei 60 fps (per le prove e la console).
         governatore: function () {
           var g = volume.governatore;
@@ -23981,10 +24044,12 @@
     <script src="modern-ui.js"></script>
     <!-- ===== INIZIO SEZIONE: ATMOSFERA VIVA (beta) =================================
          Una sezione a parte sopra le nubi 3D: la pioggia e la neve vere che
-         cadono dalle basi delle nubi. Si accende con il suo pulsante (in basso a
+         cadono dalle basi delle nubi, e le nubi in movimento col vento fra
+         un'immagine del satellite e l'altra (pulsante ▶). Si accende con il suo pulsante (in basso a
          destra, sopra lo zoom) e solo con le nubi 3D attive. Per toglierla:
          cancellare da qui a "FINE SEZIONE: ATMOSFERA VIVA". Il resto del sito non
-         dipende da questo blocco; dalle nubi legge solo NubiVolumetriche.scena().
+         dipende da questo blocco; dalle nubi usa solo NubiVolumetriche (scena,
+         riusaFermo, deriva, aggiorna) e l'istante scelto cloudTimeSelected.
     ============================================================================== -->
     <script>
     (function () {
@@ -24354,10 +24419,146 @@
       };
       Controllo.prototype.onRemove = function () {};
 
+      // ---- IL TEMPO CHE SCORRE: le nubi in movimento --------------------
+      // Le immagini del satellite arrivano ogni 10 minuti. Fra l'una e
+      // l'altra le nubi si spostano col vento del loro livello (ICON-EU:
+      // NubiVolumetriche.deriva); quando l'immagine dopo e' pronta il volume
+      // la prende e lo spostamento riparte dal resto. Si guardano le ultime
+      // ore in giro continuo. Toccando la barra del satellite si ferma.
+      var PASSO_MS = 10 * 60 * 1000, FINESTRA_PASSI = 18;
+      var SECONDI_PER_PASSO = 2.5, DERIVA_MAX_ORE = 15 / 60, ATTESA_MAX_MS = 60000;
+      var moto = { attivo: false, bersaglio: 0, ultimo: 0, inizio: 0, ore: 0, chiesto: 0,
+        richiestoA: 0, ultimoFotogramma: 0, raf: 0, pulsante: null, etichetta: null };
+
+      function tempoScelto(t) {
+        try { cloudTimeSelected = t; } catch (e) { return false; }
+        try { if (typeof updateSatelliteScrubLabel === "function") updateSatelliteScrubLabel(); } catch (e) { /* facoltativo */ }
+        return true;
+      }
+      function chiedi(t) {
+        var nubi = leNubi();
+        moto.chiesto = t; moto.richiestoA = performance.now();
+        if (tempoScelto(t) && nubi && nubi.aggiorna) nubi.aggiorna();
+      }
+      function scriviEtichetta() {
+        if (!moto.etichetta) return;
+        if (!moto.attivo) { moto.etichetta.style.display = "none"; return; }
+        var quando = moto.bersaglio ? new Date(moto.bersaglio + moto.ore * 3600000) : null;
+        var ora = quando ? (typeof formatClockTime === "function" ? formatClockTime(quando)
+          : quando.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })) : "";
+        moto.etichetta.textContent = moto.bersaglio ? "Nubi in movimento · " + ora : "Nubi in movimento · carico…";
+        moto.etichetta.style.display = "block";
+      }
+      function passo(adesso) {
+        if (!moto.attivo) return;
+        moto.raf = requestAnimationFrame(passo);
+        var nubi = leNubi(), sc = nubi && nubi.scena ? nubi.scena() : null;
+        var dt = moto.ultimoFotogramma ? Math.min(0.1, (adesso - moto.ultimoFotogramma) / 1000) : 0;
+        moto.ultimoFotogramma = adesso;
+        var epoca = sc && sc.epoca;
+        if (moto.bersaglio && epoca === moto.chiesto && moto.chiesto !== moto.bersaglio) {
+          // e' arrivata l'immagine successiva: si riparte dal resto dello spostamento
+          moto.ore = Math.max(0, moto.ore - (moto.chiesto - moto.bersaglio) / 3600000);
+          moto.bersaglio = moto.chiesto;
+        } else if (!moto.bersaglio && epoca === moto.chiesto) {
+          moto.bersaglio = epoca; moto.ore = 0;
+        }
+        if (!moto.bersaglio) {
+          // la prima immagine non arriva: si salta avanti
+          if (adesso - moto.richiestoA > ATTESA_MAX_MS) chiedi(Math.min(moto.ultimo, moto.chiesto + PASSO_MS));
+          scriviEtichetta();
+          return;
+        }
+        moto.ore = Math.min(DERIVA_MAX_ORE, moto.ore + dt * (PASSO_MS / 3600000) / SECONDI_PER_PASSO);
+        if (moto.ore >= PASSO_MS / 3600000 && moto.chiesto === moto.bersaglio) {
+          if (moto.bersaglio + PASSO_MS > moto.ultimo) {
+            // in fondo alla finestra: si ricomincia dall'inizio
+            moto.bersaglio = 0; moto.ore = 0;
+            chiedi(moto.inizio);
+          } else {
+            chiedi(moto.bersaglio + PASSO_MS);
+          }
+        } else if (moto.chiesto !== moto.bersaglio && adesso - moto.richiestoA > ATTESA_MAX_MS) {
+          // l'immagine dopo non arriva: si passa alla successiva
+          chiedi(Math.min(moto.ultimo, moto.chiesto + PASSO_MS));
+        }
+        if (nubi && nubi.deriva) nubi.deriva(moto.ore, true);
+        scriviEtichetta();
+      }
+      function avviaMoto(si) {
+        var nubi = leNubi(), sc = nubi && nubi.scena ? nubi.scena() : null;
+        if (si && (!sc || !sc.epoca)) {
+          // servono le nubi 3D accese e pronte
+          if (moto.pulsante) {
+            moto.pulsante.title = "Accendi prima le nubi 3D";
+            setTimeout(function () { if (moto.pulsante) moto.pulsante.title = TITOLO_MOTO; }, 3000);
+          }
+          return;
+        }
+        moto.attivo = !!si;
+        if (moto.pulsante) {
+          moto.pulsante.textContent = si ? "⏸" : "▶";
+          moto.pulsante.setAttribute("aria-pressed", si ? "true" : "false");
+          moto.pulsante.style.background = si ? "#3d8bfd" : "";
+          moto.pulsante.style.color = si ? "#fff" : "";
+        }
+        if (moto.raf) { cancelAnimationFrame(moto.raf); moto.raf = 0; }
+        if (si) {
+          moto.ultimo = Math.floor(sc.epoca / PASSO_MS) * PASSO_MS;
+          moto.inizio = moto.ultimo - FINESTRA_PASSI * PASSO_MS;
+          moto.bersaglio = 0; moto.ore = 0; moto.ultimoFotogramma = 0;
+          chiedi(moto.inizio);
+          moto.raf = requestAnimationFrame(passo);
+        } else {
+          moto.bersaglio = 0; moto.ore = 0;
+          if (nubi && nubi.deriva) nubi.deriva(0, false);
+          chiedi(0);
+        }
+        scriviEtichetta();
+      }
+      var TITOLO_MOTO = "Nubi in movimento (beta): le ultime 3 ore, spostate dal vento fra un'immagine e l'altra";
+
+      function ControlloMoto() {}
+      ControlloMoto.prototype.onAdd = function (mappa) {
+        var div = document.createElement("div");
+        div.className = "maplibregl-ctrl maplibregl-ctrl-group";
+        var b = document.createElement("button");
+        b.type = "button";
+        b.title = TITOLO_MOTO;
+        b.setAttribute("aria-label", "Nubi in movimento");
+        b.setAttribute("aria-pressed", "false");
+        b.textContent = "▶";
+        b.style.fontSize = "14px";
+        b.addEventListener("click", function () { avviaMoto(!moto.attivo); });
+        div.appendChild(b);
+        moto.pulsante = b;
+        var e = document.createElement("div");
+        e.style.cssText = "position:absolute;left:50%;bottom:64px;transform:translateX(-50%);display:none;"
+          + "padding:4px 10px;border-radius:12px;background:rgba(10,20,35,.72);color:#fff;"
+          + "font:600 13px system-ui,sans-serif;pointer-events:none;z-index:5;white-space:nowrap";
+        mappa.getContainer().appendChild(e);
+        moto.etichetta = e;
+        return div;
+      };
+      ControlloMoto.prototype.onRemove = function () {};
+
       function avvia() {
         var mappa = laMappa();
         if (!mappa || !mappa.addControl || typeof maplibregl === "undefined") { setTimeout(avvia, 500); return; }
         mappa.addControl(new Controllo(), "bottom-right");
+        mappa.addControl(new ControlloMoto(), "bottom-right");
+        // Chi muove a mano la barra del satellite riprende il tempo: il moto si ferma.
+        document.addEventListener("input", function (ev) {
+          if (moto.attivo && ev.target && ev.target.id === "satellite-scrub") {
+            moto.attivo = false;
+            if (moto.raf) { cancelAnimationFrame(moto.raf); moto.raf = 0; }
+            var nubi = leNubi();
+            if (nubi && nubi.deriva) nubi.deriva(0, false);
+            if (moto.pulsante) { moto.pulsante.textContent = "▶"; moto.pulsante.setAttribute("aria-pressed", "false");
+              moto.pulsante.style.background = ""; moto.pulsante.style.color = ""; }
+            scriviEtichetta();
+          }
+        }, true);
         // Se lo stile cambia, i livelli personalizzati spariscono: si rimette.
         mappa.on("styledata", function () { if (acceso) aggiungiLivello(mappa); });
         var pronto = function () { imposta(mappa, acceso); };
@@ -24366,7 +24567,12 @@
       // Per le prove e la console.
       window.AtmosferaViva = {
         stato: function () { return { acceso: acceso, gocce: stato.gocce, cortine: (stato.cortine || 0) / 6 }; },
-        accendi: function (si) { if (laMappa()) imposta(laMappa(), si !== false); }
+        accendi: function (si) { if (laMappa()) imposta(laMappa(), si !== false); },
+        moto: function (si) {
+          if (si !== undefined) avviaMoto(!!si);
+          return { attivo: moto.attivo, bersaglio: moto.bersaglio, chiesto: moto.chiesto, ore: moto.ore,
+            inizio: moto.inizio, ultimo: moto.ultimo };
+        }
       };
       avvia();
     })();

@@ -2657,6 +2657,37 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   console.log("Atmosfera viva: sezione separata, sola lettura dalle nubi, Marshall-Palmer");
 }
 
+// IL TEMPO CHE SCORRE: le nubi spostate dal vento fra due immagini.
+{
+  const a = html.indexOf("function derivaDelleNubi"), b = html.indexOf("function costruisciStato");
+  const deriva = new Function(html.slice(a, b) + "\nreturn derivaDelleNubi;")();
+  const n = 4;
+  const stato = { larghezza: 4, altezza: 1, tipo: new Uint8Array([0, 1, 1, 1]),
+    base: new Float32Array([0, 0.5, 3, 1]), cima: new Float32Array([0, 1.5, 5, 11]) };
+  const pieno = (x) => new Float32Array(n).fill(x);
+  const ing = { u10: pieno(5), v10: pieno(0), u700: pieno(10), v700: pieno(10),
+    u500: pieno(20), v500: pieno(0), u250: pieno(50), v250: pieno(0) };
+  deriva(stato, ing);
+  assert.strictEqual(stato.derivaX[0], 0, "senza nube niente deriva");
+  assert.ok(Math.abs(stato.derivaX[1] - 5 * 1.4 * 3.6) < 1e-4, "strato basso: vento a 10 m rinforzato");
+  assert.ok(Math.abs(stato.derivaX[2] - 36) < 1e-4 && Math.abs(stato.derivaY[2] + 36) < 1e-4,
+    "nube media: vento a 700 hPa, verso nord = y negativa");
+  assert.ok(Math.abs(stato.derivaX[3] - 72) < 1e-4, "cumulonembo 1-11 km: vento medio (500 hPa), non quello dell'incudine");
+  assert.strictEqual(stato.celleDeriva, 3);
+  // Nel volume: la deriva entra nella firma, nello shader e nell'API.
+  assert.match(html, /uniform sampler2D uDeriva;/);
+  assert.match(html, /p\.xy -= dKm \/ \(uCircKm \* cosLatDa\(p\.y\)\);/);
+  assert.match(html, /deriva: function \(ore, animando\) \{/);
+  assert.match(html, /\+ "\|" \+ \(this\.derivaOre \|\| 0\)/, "la deriva deve cambiare la firma della scena");
+  // Il moto vive nella sezione a parte, che il resto del sito non conosce.
+  const i = html.indexOf("INIZIO SEZIONE: ATMOSFERA VIVA"), j = html.lastIndexOf("FINE SEZIONE: ATMOSFERA VIVA");
+  const sezione = html.slice(i, j), resto = html.slice(0, i) + html.slice(j);
+  assert.match(sezione, /function avviaMoto\(si\)/);
+  assert.match(sezione, /ev\.target\.id === "satellite-scrub"/, "toccando la barra del satellite il moto si ferma");
+  assert.ok(!/avviaMoto|ControlloMoto/.test(resto));
+  console.log("Tempo fluido: deriva col vento a meta' nube, shader, firma, controllo nella sezione");
+}
+
 // L'ASSIMILAZIONE COLONNA PER COLONNA: il satellite corregge il volume ICON-EU.
 {
   const src = implementazione("assimilaVolume");
@@ -2947,7 +2978,7 @@ def uf(n,*v):
 def ui(n,v):Uniform1i(GetUniformLocation(program,n.encode()),v)
 tex(np.zeros((1,1,1,4),np.uint8),6,3,mip=False)
 tex(np.zeros((1,1,1,4),np.uint8),9,3,mip=False)
-for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uAria',10),('uAriaMoto',11),('uLuci',12),('uLuciAlone',13),('uMorfo4',14),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
+for n,v in [('uCampo',0),('uPerlin',1),('uWorley',2),('uForma',3),('uMorfo1',4),('uMorfo2',5),('uVuoto',6),('uNubiModello',9),('uAria',10),('uAriaMoto',11),('uLuci',12),('uLuciAlone',13),('uMorfo4',14),('uDeriva',15),('uPassiLuce',4 if mobile else 6),('uPassi',128 if mobile else 256),('uQuantiLampi',0)]:ui(n,v)
 uf('uVentoAlto',1.0,0.0);uf('uDebugTipi',0.0)
 for n,v in dict(uLatoForma=LF,uScalaFormaKm=12,uScalaMacroKm=96,uCopertura=.5,uContrasto=1.2,uDettaglioKm=1.2,uStiraBolle=1,uForzaMacro=.4,uBaseDura=.75,uNucleo=.65,uPolvere=1.3,uMultipla=1,uFoschiaKm=420,uSoleForza=1,uIncudineKm=7.5,uCavita=.7,uErosione=.9,uRigonfio=1.15,uCavolfiore=.8,uOmbra=1.5,uAmbiente=.75,uEsposizione=.55,uQualita=1).items():uf(n,v)
 unit=1/40075;esag=float(os.environ.get('CLOUD_QA_EXAGGERATION','1.6'))
