@@ -2635,6 +2635,28 @@ console.log("nubi in volume: maschera CLM, quota CTH, opacita', generi, sabbia, 
   console.log("forme dalla fisica: onde lambda = 2 pi U / N, file a 2,6 volte lo strato");
 }
 
+// ATMOSFERA VIVA: una sezione a parte, rimovibile senza toccare il resto.
+{
+  const i = html.indexOf("INIZIO SEZIONE: ATMOSFERA VIVA"), j = html.lastIndexOf("FINE SEZIONE: ATMOSFERA VIVA");
+  assert.ok(i > 0 && j > i, "la sezione Atmosfera viva deve essere delimitata");
+  const sezione = html.slice(i, j);
+  // Il resto del sito non deve dipendere dalla sezione.
+  const resto = html.slice(0, i) + html.slice(j);
+  assert.ok(!/AtmosferaViva/.test(resto), "il sito non deve dipendere da Atmosfera viva");
+  // Dalle nubi legge solo l'API in sola lettura (e chiede il riuso a mappa ferma).
+  assert.match(html, /scena: function \(\) \{/, "manca NubiVolumetriche.scena()");
+  assert.match(html, /riusaFermo: function \(si\) \{ volume\.riusaFermo = !!si; \}/);
+  // Il riuso del volume a mappa ferma e' spento finche' la sezione non lo chiede.
+  assert.match(html, /if \(this\.riusaFermo && giaSteso && !this\.inMovimento && this\.accumulo\) \{/);
+  assert.ok(!/window\.map\b|window\.NubiVolumetriche/.test(sezione), "map e NubiVolumetriche sono globali lessicali, non di window");
+  // La pioggia di Marshall-Palmer: 30 dBZ ~ 2,7 mm/h.
+  const intensita = new Function(sezione.slice(sezione.indexOf("function intensita"), sezione.indexOf("// Le gocce:")) + "\nreturn intensita;")();
+  const r = intensita({ larghezza: 1, altezza: 1, dbz: new Float32Array([30]), pioggia: new Float32Array([0]) }, 0);
+  assert.ok(Math.abs(r - 2.73) < 0.05, "Z = 200 R^1,6: 30 dBZ devono dare ~2,7 mm/h, non " + r);
+  new Function(sezione.slice(sezione.indexOf("<script>") + 8, sezione.lastIndexOf("</script>")));
+  console.log("Atmosfera viva: sezione separata, sola lettura dalle nubi, Marshall-Palmer");
+}
+
 // L'ASSIMILAZIONE COLONNA PER COLONNA: il satellite corregge il volume ICON-EU.
 {
   const src = implementazione("assimilaVolume");

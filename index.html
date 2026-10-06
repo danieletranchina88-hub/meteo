@@ -12390,6 +12390,7 @@
         gl.bindTexture(gl.TEXTURE_2D, this.texPelle);
         gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, pixel.width, pixel.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixel.data);
+        this.versioneDati = (this.versioneDati || 0) + 1;
         gl.generateMipmap(gl.TEXTURE_2D);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -12613,6 +12614,7 @@
       StratoVolume.prototype.pubblicaAria = function (gl, vol) {
         if (vol === this.ariaVolume) return;
         this.ariaVolume = vol;
+        this.versioneDati = (this.versioneDati || 0) + 1;
         this.ariaPronta = false;
         this.ariaMotoPronta = false;
         var c = vol && vol.campi;
@@ -13013,10 +13015,32 @@
 
       // Prima del passaggio principale MapLibre lascia disegnare dove si
       // vuole: qui il volume va nella sua texture.
+      // Cio' che decide se il fotogramma del volume e' ancora quello giusto.
+      StratoVolume.prototype.firmaScena = function (matrice) {
+        return matrice ? Array.prototype.slice.call(matrice).join(",") + "|" + this.serieCampo
+          + "|" + (this.versioneDati || 0)
+          + "|" + this.misuraVolume.larghezza + "x" + this.misuraVolume.altezza
+          + "|" + JSON.stringify(REGOLA) : "";
+      };
+
       StratoVolume.prototype.prerender = function (gl, argomenti) {
+        var giaSteso = this.disegnatoInTela && this.ultimoSteso;
         this.disegnatoInTela = false;
         if (!this.pronto || !this.acceso || this.senzaTela) return;
         if (!this.preparaTela(gl)) return;
+        // RIUSO A MAPPA FERMA, solo se lo chiede un livello animato sopra le
+        // nubi (Atmosfera viva): la mappa si ridisegna a ogni fotogramma per
+        // la pioggia, ma se vista, dati e regole non sono cambiati e l'accumulo
+        // e' finito, il volume e' gia' quello: lo si ristende senza rifarlo.
+        if (this.riusaFermo && giaSteso && !this.inMovimento && this.accumulo) {
+          var lampiOra = (this.lampi || []).some(function (l) { return l.intensita > 0.004; });
+          var massimo = REGOLA.accumula > 0 ? Math.round(REGOLA.accumula) : QUALITA_VOLUME.accumula;
+          if (!lampiOra && this.accumulo.n >= massimo && this.firmaScena(this.matriceDi(argomenti)) === this.accumulo.firma) {
+            this.disegnatoInTela = true;
+            this.texDaStendere = this.ultimoSteso;
+            return;
+          }
+        }
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
         gl.viewport(0, 0, this.misuraVolume.larghezza, this.misuraVolume.altezza);
         gl.disable(gl.SCISSOR_TEST);
@@ -13027,9 +13051,7 @@
         this.accumulo = this.accumulo || { n: 0, firma: "" };
         var fermo = !this.inMovimento;
         var matrice = this.matriceDi(argomenti);
-        var firma = matrice ? Array.prototype.slice.call(matrice).join(",") + "|" + this.serieCampo
-          + "|" + this.misuraVolume.larghezza + "x" + this.misuraVolume.altezza
-          + "|" + JSON.stringify(REGOLA) : "";
+        var firma = this.firmaScena(matrice);
         // Si ricomincia quando cambia la vista, il campo o ci sono lampi accesi
         // (un lampo e' un istante: la media lo spalmerebbe).
         var lampiAccesi = (this.lampi || []).some(function (l) { return l.intensita > 0.004; });
@@ -13044,6 +13066,7 @@
         governatore.finisci(gl, misura);
         if (governatore.attivo()) governatore.aggiorna(gl, this.inMovimento);
         this.texDaStendere = this.texVolume;
+        this.ultimoSteso = this.texVolume;
         if (this.disegnatoInTela && this.programmaAccumula && fermo && !lampiAccesi
             && this.preparaAccumulo(gl)) {
           var n = this.accumulo.n;
@@ -13064,6 +13087,7 @@
           this.accumulo.indice = a;
           this.accumulo.n = n + 1;
           this.texDaStendere = this.texAccumulo[a];
+          this.ultimoSteso = this.texAccumulo[a];
           if (this.accumulo.n < (REGOLA.accumula > 0 ? Math.round(REGOLA.accumula) : QUALITA_VOLUME.accumula)
               && this.mappa) {
             var mappa = this.mappa;
@@ -13460,6 +13484,7 @@
           gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
           luci.immagine = null;
           luci.pronte = true;
+          strato.versioneDati = (strato.versioneDati || 0) + 1;
           return luci;
         } catch (errore) {
           console.error("Nubi 3D: luci delle citta' non disponibili", errore);
@@ -14858,6 +14883,22 @@
             })(),
             formeFisiche: volume.campo && volume.campo.stato ? volume.campo.stato.formeFisiche || 0 : null };
         },
+        // PER LE SEZIONI AGGIUNTIVE (Atmosfera viva): la scena in sola lettura.
+        // Griglia dello stato in Mercatore sul DOMINIO, riga 0 = nord.
+        scena: function () {
+          var st = volume.campo && volume.campo.stato;
+          if (!attiva || !st) return null;
+          var ing = st.ingresso || {};
+          return { epoca: volume.epoca || null, larghezza: st.larghezza, altezza: st.altezza,
+            dominio: { ovest: DOMINIO.ovest, sud: DOMINIO.sud, est: DOMINIO.est, nord: DOMINIO.nord },
+            tipo: st.tipo, pioggia: st.pioggia, base: st.base, cima: st.cima,
+            dbz: ing.dbz || null, hzero: ing.hzero || null, suolo: ing.suolo || null,
+            esagerazione: volume.esagerazione || 1,
+            sole: volume.sole ? { elevazione: volume.sole.elevazione, azimut: volume.sole.azimut } : null,
+            luna: volume.luna || null };
+        },
+        // Una sezione animata chiede di riusare il volume a mappa ferma.
+        riusaFermo: function (si) { volume.riusaFermo = !!si; },
         // Lo stato del governatore dei 60 fps (per le prove e la console).
         governatore: function () {
           var g = volume.governatore;
@@ -23938,5 +23979,398 @@
       setupMap();
     </script>
     <script src="modern-ui.js"></script>
+    <!-- ===== INIZIO SEZIONE: ATMOSFERA VIVA (beta) =================================
+         Una sezione a parte sopra le nubi 3D: la pioggia e la neve vere che
+         cadono dalle basi delle nubi. Si accende con il suo pulsante (in basso a
+         destra, sopra lo zoom) e solo con le nubi 3D attive. Per toglierla:
+         cancellare da qui a "FINE SEZIONE: ATMOSFERA VIVA". Il resto del sito non
+         dipende da questo blocco; dalle nubi legge solo NubiVolumetriche.scena().
+    ============================================================================== -->
+    <script>
+    (function () {
+      "use strict";
+      var CHIAVE = "atmosfera-viva-v1";
+      var acceso = false;
+      try { acceso = localStorage.getItem(CHIAVE) === "1"; } catch (e) { acceso = false; }
+      var MOBILE = typeof isMobile === "function" && isMobile();
+      var MAX_GOCCE = MOBILE ? 18000 : 60000;
+      var CIRC_KM = 40075.017;
+      var stato = { strato: null, gocce: 0, firma: "", buffer: null, pulsante: null };
+      // map e NubiVolumetriche sono globali lessicali (let/const della pagina):
+      // si leggono per nome, non come proprieta' di window.
+      function laMappa() { return typeof map !== "undefined" ? map : null; }
+      function leNubi() { return typeof NubiVolumetriche !== "undefined" ? NubiVolumetriche : null; }
+
+      // L'INTENSITA' DELLA PRECIPITAZIONE per cella: dal radar dove c'e'
+      // (Marshall-Palmer, Z = 200 R^1,6), altrimenti dalla pioggia che il
+      // motore delle nubi ha inferito (0-1, come mm/h tipici). Ritorna mm/h.
+      function intensita(sc, k) {
+        if (sc.dbz && sc.dbz.length === sc.larghezza * sc.altezza && Number.isFinite(sc.dbz[k]) && sc.dbz[k] >= 12) {
+          return Math.pow(Math.pow(10, sc.dbz[k] / 10) / 200, 1 / 1.6);
+        }
+        var p = sc.pioggia ? sc.pioggia[k] : 0;
+        return p > 0.15 ? p * 6 : 0;
+      }
+
+      // Le gocce: posizioni a caso pesate dall'intensita', nelle celle che si
+      // vedono. Per ogni goccia due vertici (la scia): x, y (Mercatore
+      // unitario), quota della base e dello zero termico (km), seme,
+      // intensita', capo (0 testa, 1 coda).
+      function costruisci(sc, mappa) {
+        var w = sc.larghezza, h = sc.altezza, d = sc.dominio;
+        var b = mappa.getBounds(), ovest = b.getWest(), est = b.getEast(), sud = b.getSouth(), nord = b.getNorth();
+        var mY = function (lat) { var f = lat * Math.PI / 180; return Math.log(Math.tan(Math.PI / 4 + f / 2)); };
+        var yN = mY(d.nord), yS = mY(d.sud);
+        var celle = [], pesi = [], somma = 0;
+        for (var y = 0; y < h; y++) {
+          var my = yN - (y + 0.5) / h * (yN - yS);
+          var lat = (2 * Math.atan(Math.exp(my)) - Math.PI / 2) * 180 / Math.PI;
+          if (lat < sud - 0.5 || lat > nord + 0.5) continue;
+          for (var x = 0; x < w; x++) {
+            var lon = d.ovest + (x + 0.5) / w * (d.est - d.ovest);
+            if (lon < ovest - 0.5 || lon > est + 0.5) continue;
+            var k = y * w + x;
+            if (!sc.tipo || !sc.tipo[k] || !(sc.base[k] > 0.05)) continue;
+            var r = intensita(sc, k);
+            if (!(r > 0.2)) continue;
+            celle.push(k); pesi.push(Math.min(r, 60)); somma += Math.min(r, 60);
+          }
+        }
+        if (!celle.length) return null;
+        // quante gocce: proporzionali alla pioggia che si vede, fino al tetto
+        var n = Math.min(MAX_GOCCE, Math.round(somma * 40));
+        var cum = new Float64Array(celle.length), acc = 0;
+        for (var i = 0; i < celle.length; i++) { acc += pesi[i]; cum[i] = acc; }
+        var dati = new Float32Array(n * 2 * 7);
+        for (var g = 0; g < n; g++) {
+          var u = Math.random() * acc, lo = 0, hi = celle.length - 1;
+          while (lo < hi) { var m = (lo + hi) >> 1; if (cum[m] < u) lo = m + 1; else hi = m; }
+          var kc = celle[lo], cx = kc % w, cy = Math.floor(kc / w);
+          var lonG = d.ovest + (cx + Math.random()) / w * (d.est - d.ovest);
+          var myG = yN - (cy + Math.random()) / h * (yN - yS);
+          var xU = (lonG + 180) / 360, yU = 0.5 - myG / (2 * Math.PI);
+          var base = Math.max(0.2, sc.base[kc]);
+          var zero = sc.hzero && Number.isFinite(sc.hzero[kc]) ? sc.hzero[kc] : 3;
+          var forza = Math.min(1, Math.sqrt(pesi[lo] / 8));
+          var seme = Math.random();
+          for (var c = 0; c < 2; c++) {
+            var o = (g * 2 + c) * 7;
+            dati[o] = xU; dati[o + 1] = yU; dati[o + 2] = base; dati[o + 3] = zero;
+            dati[o + 4] = seme; dati[o + 5] = forza; dati[o + 6] = c;
+          }
+        }
+        return { dati: dati, n: n };
+      }
+
+      // LE CORTINE: da lontano la pioggia non si vede a gocce ma come veli
+      // grigi che scendono dalle basi. Per ogni cella che piove (a passo, fino
+      // a ~6000) due veli verticali incrociati, dalla base al suolo; dentro,
+      // striature che scorrono: veloci la pioggia, lente la neve sopra lo zero.
+      // Per vertice: x, y, base, zero, forza, lato (km), u (-1..1), v (0 basso, 1 alto), asse.
+      var MAX_CORTINE = MOBILE ? 2500 : 6000;
+      function costruisciCortine(sc, mappa) {
+        var w = sc.larghezza, h = sc.altezza, d = sc.dominio;
+        var b2 = mappa.getBounds();
+        var mY = function (lat) { var f = lat * Math.PI / 180; return Math.log(Math.tan(Math.PI / 4 + f / 2)); };
+        var yN = mY(d.nord), yS = mY(d.sud);
+        var lista = [];
+        for (var y = 0; y < h; y++) {
+          var my = yN - (y + 0.5) / h * (yN - yS);
+          var lat = (2 * Math.atan(Math.exp(my)) - Math.PI / 2) * 180 / Math.PI;
+          if (lat < b2.getSouth() - 1 || lat > b2.getNorth() + 1) continue;
+          for (var x = 0; x < w; x++) {
+            var lon = d.ovest + (x + 0.5) / w * (d.est - d.ovest);
+            if (lon < b2.getWest() - 1 || lon > b2.getEast() + 1) continue;
+            var k = y * w + x;
+            if (!sc.tipo || !sc.tipo[k] || !(sc.base[k] > 0.05)) continue;
+            var r = intensita(sc, k);
+            if (r > 0.3) lista.push([x, y, k, r]);
+          }
+        }
+        if (!lista.length) return null;
+        var passo = Math.max(1, Math.ceil(Math.sqrt(lista.length / MAX_CORTINE)));
+        var scelte = lista.filter(function (c) { return c[0] % passo === 0 && c[1] % passo === 0; });
+        var latoKm = (d.est - d.ovest) / w * 111.2 * passo;
+        var dati = new Float32Array(scelte.length * 6 * 9), o = 0;
+        var angoli = [[-1, 0], [1, 0], [1, 1], [-1, 0], [1, 1], [-1, 1]];
+        scelte.forEach(function (c) {
+          var lonC = d.ovest + (c[0] + 0.5) / w * (d.est - d.ovest);
+          var myC = yN - (c[1] + 0.5) / h * (yN - yS);
+          var xU = (lonC + 180) / 360, yU = 0.5 - myC / (2 * Math.PI);
+          var base = Math.max(0.2, sc.base[c[2]]);
+          var zero = sc.hzero && Number.isFinite(sc.hzero[c[2]]) ? sc.hzero[c[2]] : 3;
+          var forza = Math.min(1, Math.sqrt(Math.min(c[3], 60) / 10));
+          // una lama sola, larga quasi il doppio della spaziatura: le vicine si
+          // fondono in un velo; lo shader la gira verso la camera
+          var largo = latoKm * (1.6 + 0.4 * Math.random()), fase = Math.random();
+          angoli.forEach(function (a) {
+            dati[o++] = xU; dati[o++] = yU; dati[o++] = base; dati[o++] = zero; dati[o++] = forza;
+            dati[o++] = largo; dati[o++] = a[0]; dati[o++] = a[1]; dati[o++] = fase;
+          });
+        });
+        return { dati: dati, n: scelte.length * 6 };
+      }
+      var VERTICE_CORTINA = [
+        "#version 300 es",
+        "precision highp float;",
+        "in vec2 aXY; in vec3 aCol; in vec4 aForma;",
+        "uniform mat4 uMatrice; uniform float uEsag, uCirc; uniform vec2 uCamera;",
+        "out vec2 vUV; out float vForza, vQuota, vZero, vCima, vLato;",
+        "const float PI = 3.14159265359;",
+        "void main() {",
+        "  float cima = aCol.x, zero = aCol.y, forza = aCol.z, lato = aForma.x, u = aForma.y, v = aForma.z, fase = aForma.w;",
+        "  float cosLat = 1.0 / cosh(PI * (1.0 - 2.0 * aXY.y));",
+        "  float kmU = 1.0 / (uCirc * cosLat);",
+        "  // la lama si gira verso la camera (attorno alla verticale)",
+        "  vec2 vista = aXY - uCamera;",
+        "  vec2 dir = dot(vista, vista) > 1e-14 ? normalize(vec2(-vista.y, vista.x)) : vec2(1.0, 0.0);",
+        "  vec2 xy = aXY + dir * u * 0.5 * lato * kmU;",
+        "  float z = v * cima;",
+        "  gl_Position = uMatrice * vec4(xy, z * uEsag * kmU, 1.0);",
+        "  vUV = vec2(u, v); vForza = forza; vQuota = z + fase * 0.37; vZero = zero + fase * 0.37; vCima = cima; vLato = lato;",
+        "}"
+      ].join("\n");
+      var FRAMMENTO_CORTINA = [
+        "#version 300 es",
+        "precision highp float;",
+        "in vec2 vUV; in float vForza, vQuota, vZero, vCima, vLato;",
+        "uniform float uTempo, uLuce;",
+        "out vec4 colore;",
+        "float caso(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
+        "float rumore(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+        "  return mix(mix(caso(i), caso(i + vec2(1, 0)), f.x), mix(caso(i + vec2(0, 1)), caso(i + vec2(1, 1)), f.x), f.y); }",
+        "void main() {",
+        "  bool neve = vQuota > vZero;",
+        "  // striature: fitte e allungate per la pioggia, a fiocchi lenti per la neve",
+        "  float scorre = neve ? 0.15 : 1.2;",
+        "  vec2 q = neve ? vec2(vUV.x * vLato * 3.0, vQuota * 6.0 + uTempo * scorre)",
+        "                : vec2(vUV.x * vLato * 6.0, vQuota * 1.5 + uTempo * scorre);",
+        "  float righe = 0.55 + 0.45 * rumore(q);",
+        "  float lati = exp(-3.0 * vUV.x * vUV.x);",
+        "  // piena sotto la base, sfumata in cima e appena sopra il suolo",
+        "  float alto = smoothstep(vCima, vCima * 0.8, vQuota) * smoothstep(0.0, 0.1, vUV.y);",
+        "  // la cortina di pioggia vista da fuori e' piu' scura del cielo dietro;",
+        "  // la neve e' un velo chiaro",
+        "  float a = vForza * (neve ? 0.4 : 0.55) * righe * lati * alto;",
+        "  vec3 c = (neve ? vec3(0.9, 0.92, 0.96) : vec3(0.36, 0.4, 0.47)) * uLuce;",
+        "  colore = vec4(c * a, a);",
+        "}"
+      ].join("\n");
+
+      var VERTICE = [
+        "#version 300 es",
+        "precision highp float;",
+        "in vec2 aXY; in vec4 aDati; in float aCapo;",
+        "uniform mat4 uMatrice; uniform float uTempo, uEsag, uCirc, uLuce;",
+        "out float vAlfa; out vec3 vColore;",
+        "const float PI = 3.14159265359;",
+        "void main() {",
+        "  float cima = aDati.x, zero = clamp(aDati.y, 0.0, cima), seme = aDati.z, forza = aDati.w;",
+        "  // Velocita' di caduta in tempo accelerato (la scena e' un fotogramma",
+        "  // satellitare): pioggia ~9 volte la neve, come in natura (7 m/s contro 0,8).",
+        "  float vPioggia = 0.9, vNeve = 0.1;",
+        "  float tNeve = (cima - zero) / vNeve, tPioggia = zero / vPioggia, totale = tNeve + tPioggia;",
+        "  float tau = mod(seme * totale * 7.0 + uTempo, max(totale, 0.01));",
+        "  bool neve = tau < tNeve;",
+        "  float z = neve ? cima - tau * vNeve : zero - (tau - tNeve) * vPioggia;",
+        "  float cosLat = 1.0 / cosh(PI * (1.0 - 2.0 * aXY.y));",
+        "  float kmU = 1.0 / (uCirc * cosLat);",
+        "  vec2 xy = aXY;",
+        "  float lungo = neve ? 0.012 : 0.07;",
+        "  if (neve) {",
+        "    // la neve ondeggia scendendo",
+        "    xy += vec2(sin(uTempo * 1.7 + seme * 61.0), cos(uTempo * 1.3 + seme * 37.0)) * 0.03 * kmU;",
+        "  }",
+        "  float zz = z + aCapo * lungo;",
+        "  gl_Position = uMatrice * vec4(xy, zz * uEsag * kmU, 1.0);",
+        "  float bordo = smoothstep(0.0, 0.08, z) * smoothstep(cima, cima - 0.15, z);",
+        "  vAlfa = (neve ? 0.75 : 0.32 * (1.0 - aCapo)) * forza * bordo;",
+        "  vColore = (neve ? vec3(0.96, 0.97, 1.0) : vec3(0.72, 0.78, 0.88)) * uLuce;",
+        "  gl_PointSize = neve ? 2.0 : 1.0;",
+        "}"
+      ].join("\n");
+      var FRAMMENTO = [
+        "#version 300 es",
+        "precision mediump float;",
+        "in float vAlfa; in vec3 vColore;",
+        "out vec4 colore;",
+        "void main() { colore = vec4(vColore * vAlfa, vAlfa); }"
+      ].join("\n");
+
+      function compila(gl, vsrc, fsrc) {
+        vsrc = vsrc || VERTICE; fsrc = fsrc || FRAMMENTO;
+        var sh = function (tipo, src) {
+          var o = gl.createShader(tipo); gl.shaderSource(o, src); gl.compileShader(o);
+          if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+          return o;
+        };
+        var p = gl.createProgram();
+        gl.attachShader(p, sh(gl.VERTEX_SHADER, vsrc));
+        gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fsrc));
+        gl.linkProgram(p);
+        if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+        return p;
+      }
+
+      function matriceDi(a) {
+        if (!a) return null;
+        if (a.length === 16) return a;
+        if (a.defaultProjectionData && a.defaultProjectionData.mainMatrix) return a.defaultProjectionData.mainMatrix;
+        return null;
+      }
+
+      var livello = {
+        id: "atmosfera-precipitazione", type: "custom", renderingMode: "3d",
+        onAdd: function (mappa, gl) {
+          this.mappa = mappa;
+          try { this.programma = compila(gl); } catch (errore) { console.error("Atmosfera viva:", errore); this.programma = null; }
+          try { this.programmaCortina = compila(gl, VERTICE_CORTINA, FRAMMENTO_CORTINA); } catch (errore) {
+            console.error("Atmosfera viva (cortine):", errore); this.programmaCortina = null;
+          }
+          this.vao = gl.createVertexArray();
+          this.vbo = gl.createBuffer();
+          this.vaoC = gl.createVertexArray();
+          this.vboC = gl.createBuffer();
+          this.inizio = performance.now();
+        },
+        render: function (gl, argomenti) {
+          if (!acceso || !this.programma) return;
+          var nubi = leNubi(), sc = nubi && nubi.scena ? nubi.scena() : null;
+          if (!sc) return;
+          var mappa = this.mappa, b = mappa.getBounds();
+          var firma = sc.epoca + "|" + [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]
+            .map(function (v) { return v.toFixed(2); }).join(",") + "|" + sc.larghezza + "|" + (mappa.getZoom() >= 8);
+          var vicino = mappa.getZoom() >= 8;
+          if (firma !== stato.firma && !(mappa.isMoving && mappa.isMoving())) {
+            stato.firma = firma;
+            var cortine = this.programmaCortina ? costruisciCortine(sc, mappa) : null;
+            stato.cortine = cortine ? cortine.n : 0;
+            if (cortine) {
+              gl.bindVertexArray(this.vaoC);
+              gl.bindBuffer(gl.ARRAY_BUFFER, this.vboC);
+              gl.bufferData(gl.ARRAY_BUFFER, cortine.dati, gl.STATIC_DRAW);
+              var pc = this.programmaCortina, passoC = 9 * 4;
+              [["aXY", 2, 0], ["aCol", 3, 2], ["aForma", 4, 5]].forEach(function (a) {
+                var l = gl.getAttribLocation(pc, a[0]);
+                if (l < 0) return;
+                gl.enableVertexAttribArray(l);
+                gl.vertexAttribPointer(l, a[1], gl.FLOAT, false, passoC, a[2] * 4);
+              });
+              gl.bindVertexArray(null);
+            }
+            // le gocce solo da vicino: da lontano sarebbero puntini
+            var nuove = vicino ? costruisci(sc, mappa) : null;
+            stato.gocce = nuove ? nuove.n : 0;
+            if (nuove) {
+              gl.bindVertexArray(this.vao);
+              gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+              gl.bufferData(gl.ARRAY_BUFFER, nuove.dati, gl.STATIC_DRAW);
+              var p = this.programma, passo = 7 * 4;
+              var attr = function (nome, n, off) {
+                var l = gl.getAttribLocation(p, nome);
+                if (l < 0) return;
+                gl.enableVertexAttribArray(l);
+                gl.vertexAttribPointer(l, n, gl.FLOAT, false, passo, off * 4);
+              };
+              attr("aXY", 2, 0); attr("aDati", 4, 2); attr("aCapo", 1, 6);
+              gl.bindVertexArray(null);
+            }
+          }
+          if (!stato.gocce && !stato.cortine) return;
+          var matrice = matriceDi(argomenti);
+          if (!matrice) return;
+          // luce della scena: sole (crepuscolo compreso), un filo di luna di notte
+          var el = sc.sole ? sc.sole.elevazione * 180 / Math.PI : 30;
+          var luce = Math.max(0.12 + (sc.luna && sc.luna.luce ? sc.luna.luce : 0), Math.min(1, (el + 6) / 16));
+          var tempo = (performance.now() - this.inizio) / 1000;
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.disable(gl.DEPTH_TEST);
+          gl.disable(gl.CULL_FACE);
+          if (stato.cortine && this.programmaCortina) {
+            var pc2 = this.programmaCortina;
+            gl.useProgram(pc2);
+            gl.uniformMatrix4fv(gl.getUniformLocation(pc2, "uMatrice"), false, matrice);
+            gl.uniform1f(gl.getUniformLocation(pc2, "uEsag"), sc.esagerazione);
+            gl.uniform1f(gl.getUniformLocation(pc2, "uCirc"), CIRC_KM);
+            gl.uniform1f(gl.getUniformLocation(pc2, "uTempo"), tempo);
+            gl.uniform1f(gl.getUniformLocation(pc2, "uLuce"), luce);
+            var cam = mappa.getFreeCameraOptions ? mappa.getFreeCameraOptions().position : null;
+            gl.uniform2f(gl.getUniformLocation(pc2, "uCamera"), cam ? cam.x : 0.5, cam ? cam.y : 0.5);
+            gl.bindVertexArray(this.vaoC);
+            gl.drawArrays(gl.TRIANGLES, 0, stato.cortine);
+            gl.bindVertexArray(null);
+          }
+          if (!stato.gocce || !vicino) { mappa.triggerRepaint(); return; }
+          gl.useProgram(this.programma);
+          gl.uniformMatrix4fv(gl.getUniformLocation(this.programma, "uMatrice"), false, matrice);
+          gl.uniform1f(gl.getUniformLocation(this.programma, "uTempo"), tempo);
+          gl.uniform1f(gl.getUniformLocation(this.programma, "uEsag"), sc.esagerazione);
+          gl.uniform1f(gl.getUniformLocation(this.programma, "uCirc"), CIRC_KM);
+          gl.uniform1f(gl.getUniformLocation(this.programma, "uLuce"), luce);
+          gl.bindVertexArray(this.vao);
+          gl.drawArrays(gl.LINES, 0, stato.gocce * 2);
+          gl.bindVertexArray(null);
+          mappa.triggerRepaint();
+        }
+      };
+
+      function aggiungiLivello(mappa) {
+        if (mappa.getLayer(livello.id)) return;
+        try {
+          mappa.addLayer(livello, mappa.getLayer("volume-nubi") ? "volume-nubi" : undefined);
+        } catch (errore) { console.error("Atmosfera viva:", errore); }
+      }
+
+      function imposta(mappa, si) {
+        acceso = si;
+        try { localStorage.setItem(CHIAVE, si ? "1" : "0"); } catch (e) { /* facoltativo */ }
+        var nubi = leNubi();
+        if (nubi && nubi.riusaFermo) nubi.riusaFermo(si);
+        if (stato.pulsante) {
+          stato.pulsante.setAttribute("aria-pressed", si ? "true" : "false");
+          stato.pulsante.style.background = si ? "#ff7a45" : "";
+          stato.pulsante.style.color = si ? "#fff" : "";
+        }
+        if (si) aggiungiLivello(mappa);
+        stato.firma = "";
+        mappa.triggerRepaint();
+      }
+
+      function Controllo() {}
+      Controllo.prototype.onAdd = function (mappa) {
+        var div = document.createElement("div");
+        div.className = "maplibregl-ctrl maplibregl-ctrl-group";
+        var b = document.createElement("button");
+        b.type = "button";
+        b.title = "Atmosfera viva (beta): pioggia e neve che cadono dalle nubi 3D";
+        b.setAttribute("aria-label", b.title);
+        b.textContent = "☔";
+        b.style.fontSize = "16px";
+        b.addEventListener("click", function () { imposta(mappa, !acceso); });
+        div.appendChild(b);
+        stato.pulsante = b;
+        return div;
+      };
+      Controllo.prototype.onRemove = function () {};
+
+      function avvia() {
+        var mappa = laMappa();
+        if (!mappa || !mappa.addControl || typeof maplibregl === "undefined") { setTimeout(avvia, 500); return; }
+        mappa.addControl(new Controllo(), "bottom-right");
+        // Se lo stile cambia, i livelli personalizzati spariscono: si rimette.
+        mappa.on("styledata", function () { if (acceso) aggiungiLivello(mappa); });
+        var pronto = function () { imposta(mappa, acceso); };
+        if (mappa.loaded && mappa.loaded()) pronto(); else mappa.once("load", pronto);
+      }
+      // Per le prove e la console.
+      window.AtmosferaViva = {
+        stato: function () { return { acceso: acceso, gocce: stato.gocce, cortine: (stato.cortine || 0) / 6 }; },
+        accendi: function (si) { if (laMappa()) imposta(laMappa(), si !== false); }
+      };
+      avvia();
+    })();
+    </script>
+    <!-- ===== FINE SEZIONE: ATMOSFERA VIVA =========================================== -->
   </body>
 </html>
