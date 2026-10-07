@@ -153,6 +153,46 @@ if not (
     print("FAIL: near-pass ML conservativo non applicato")
     ok = False
 
+# The rescue must survive a purely positional offset: the physics may legally
+# draw its line on the edge of the model's 40-km probability corridor, where
+# the vertex median and support fraction read low while the corridor core is
+# confident.  corridorMax carries that core; the verdict must be identical.
+offset = dict(near)
+offset_gate = dict(near_gate)
+offset_assisted, offset_assisted_gate = fuse_candidate(
+    offset, offset_gate,
+    {"median": 0.10, "q75": 0.9, "supportFraction": 0.10,
+     "corridorMax": 0.85},
+    model_threshold=0.30,
+)
+print("near-pass da corridoio:", offset_assisted["fusionDecision"],
+      offset_assisted_gate["gateStatus"])
+if not (
+    offset_assisted_gate["continuationPass"]
+    and offset_assisted["mlAssisted"]
+    and offset_assisted["fusionDecision"] == "ml-assisted-physical-near-pass"
+):
+    print("FAIL: il rescue deve leggere il corridoio, non solo i vertici")
+    ok = False
+
+# The confirmation branch may NOT use the corridor: there the model is
+# confirming this exact line, so a confident core 40 km away must not add
+# bonus to a line whose own vertices do not see it.
+confirm_gate = {
+    "continuationPass": True, "strongPass": True, "gateStatus": "strong",
+    "rejectionReasons": [], "diagnosis": "synoptic-front",
+}
+confirmed, _ = fuse_candidate(
+    dict(strong), confirm_gate,
+    {"median": 0.05, "q75": 0.05, "supportFraction": 0.0,
+     "corridorMax": 0.95},
+    model_threshold=0.30,
+)
+print("conferma senza corridoio, bonus:", confirmed["fusionEvidenceBonus"])
+if confirmed["fusionEvidenceBonus"] != 0.0:
+    print("FAIL: il bonus di conferma non deve leggere il corridoio")
+    ok = False
+
 if not ok:
     raise SystemExit(1)
 print("OK: termodinamica ML e guardrail di fusione verificati.")

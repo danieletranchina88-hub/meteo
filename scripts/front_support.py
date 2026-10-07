@@ -223,9 +223,15 @@ def physical_support_field(
     # Geometry must stay on the warm edge of a dry, synoptic thermal zone.
     # Dynamics and PMSL remain valuable evidence that a front exists, but
     # their extrema are routinely displaced from the analysed surface line.
+    # The theta-e gradient sharpens the position only where the dry thermal
+    # contrast confirms a real air-mass boundary: there it is the moisture
+    # *of the same* front.  On its own it is a dryline and is already
+    # penalised above, so it never reaches the geometry unconditioned --
+    # Hewson's own distinction between a front and a moisture boundary.
     geometry_positive = (
         0.28 * thermal + 0.24 * abz_support + 0.24 * tfp_support
         + 0.16 * dry_thermal + 0.08 * synoptic
+        + 0.08 * moisture * dry_thermal
     )
     geometry_penalty = np.clip(
         0.65 * terrain_penalty + 0.95 * edge_penalty

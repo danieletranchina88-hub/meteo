@@ -642,7 +642,16 @@ Per essere pubblicata una traccia deve avere:
 La classificazione confronta tre famiglie indipendenti:
 
 1. spostamento geometrico orario verso il lato caldo/freddo;
-2. velocità di fase `-d(theta_w)/dt / |grad(theta_w)|`;
+2. famiglia di fase: velocità `-d(theta_w)/dt / |grad(theta_w)|`, arbitrata
+   da due testimoni fisici dello stesso spostamento — la memoria isallobarica
+   (la pressione scende davanti a un fronte freddo che avanza e sale dietro;
+   il differenziale freddo−caldo a ±100 km, tarato su 0,32 hPa/3 h alla soglia
+   di Hewson) e il contrasto di avvezione termica fra i due lati (un fronte
+   freddo raffredda entrambi i fianchi, più sul lato freddo; la differenza
+   caldo−freddo è positiva — regola di Petterssen letta attraverso la linea,
+   perché sulla linea il flusso quasi-geostrofico è parallelo alle isoterme e
+   l'avvezione si annulla). Due letture mobili in contraddizione = confine che
+   si *riforma*, non che trasla: la famiglia si astiene;
 3. famiglia del vento: velocità OFA
    `V · grad|grad(theta_w)| / |grad|grad(theta_w)||` e componente del vento
    normale al confine delle masse d'aria. Dove possibile si usa il vento a
@@ -651,8 +660,11 @@ La classificazione confronta tre famiglie indipendenti:
 Con soglia 1,5 m/s (5,4 km/h), moto verso l'aria calda = fronte freddo,
 moto verso l'aria fredda = fronte caldo, altrimenti stazionario. Un tipo
 mobile richiede almeno due famiglie concordi e nessun voto opposto. Una
-contraddizione forte del vento rende la traccia `uncertain`, anche quando la
-linea termica sembra muoversi correttamente.
+contraddizione *interna* alla famiglia del vento (OFA contro flusso di massa)
+non è un voto: la famiglia si astiene e non trascina la traccia in
+`uncertain` quando geometria e fase concordano. Resta invece `uncertain` una
+contraddizione *fra* famiglie — geometria fredda con vento coerentemente
+caldo non si pubblica.
 
 **Stabilità temporale del tipo (Viterbi/HMM).** La classificazione oraria
 locale coglie l'evoluzione reale di un fronte, ma il moto geometrico che

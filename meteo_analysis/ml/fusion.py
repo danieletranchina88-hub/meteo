@@ -64,11 +64,15 @@ def fuse_candidate(metrics, gates, ml_stats, *, model_threshold):
     median = _finite(ml_stats.get("median"), np.nan)
     support = _finite(ml_stats.get("supportFraction"), np.nan)
     q75 = _finite(ml_stats.get("q75"), np.nan)
+    corridor_max = _finite(ml_stats.get("corridorMax"), np.nan)
     available = bool(np.isfinite(median) and np.isfinite(support))
     metrics.update({
         "mlFrontProbability": None if not available else round(median, 4),
         "mlFrontProbabilityQ75": None if not available else round(q75, 4),
         "mlSupportFraction": None if not available else round(support, 3),
+        "mlCorridorMaxProbability": (
+            None if not np.isfinite(corridor_max) else round(corridor_max, 4)
+        ),
         "physicalCandidateEvidence": metrics.get("candidateEvidence"),
     })
     decision = "physics-only"
@@ -98,12 +102,26 @@ def fuse_candidate(metrics, gates, ml_stats, *, model_threshold):
     elif available and not gates.get("continuationPass"):
         reasons = set(gates.get("rejectionReasons") or [])
         diagnosis = gates.get("diagnosis")
+        # A line drawn by the physics on the edge of the ML corridor is the
+        # same boundary the model sees: its vertices may read low while the
+        # corridor core is confident.  The rescue, which exists exactly for
+        # the near-pass the physics almost made, may therefore read the
+        # corridor maximum in place of the vertex median *and* the vertex
+        # support fraction; the confirmation branch above may not, because
+        # there the model is confirming this exact line, not a nearby one.
+        positional_median = (
+            corridor_max if np.isfinite(corridor_max) else median
+        )
+        positional_support = (
+            1.0 if np.isfinite(corridor_max)
+            and corridor_max >= RESCUE_MIN_PROBABILITY else support
+        )
         high_ml = (
-            median >= model_threshold
+            positional_median >= model_threshold
             and q75 >= max(
                 RESCUE_MIN_PROBABILITY, model_threshold * 3.0
             )
-            and support >= RESCUE_MIN_SUPPORT
+            and positional_support >= RESCUE_MIN_SUPPORT
         )
         no_hard_conflict = not (reasons & HARD_REJECTIONS)
         only_known_reasons = reasons <= SOFT_REJECTIONS
@@ -182,19 +200,54 @@ class MLFrontGuidance:
                     bounds_error=False, fill_value=np.nan,
                 )
         if interpolator is None:
-            return {"median": np.nan, "q75": np.nan, "supportFraction": np.nan}
+            return {"median": np.nan, "q75": np.nan, "supportFraction": np.nan,
+                    "corridorMax": np.nan}
         coordinates = np.asarray(coordinates, float)
         values = interpolator(np.column_stack((
             coordinates[:, 1], coordinates[:, 0]
         )))
         finite = values[np.isfinite(values)]
         if not finite.size:
-            return {"median": np.nan, "q75": np.nan, "supportFraction": np.nan}
-        return {
+            return {"median": np.nan, "q75": np.nan, "supportFraction": np.nan,
+                    "corridorMax": np.nan}
+        result = {
             "median": float(np.median(finite)),
             "q75": float(np.quantile(finite, 0.75)),
             "supportFraction": float(np.mean(finite >= self.threshold)),
         }
+        # The physics may legally draw its line up to a few tens of km from
+        # the ML probability core: the label buffer itself is 40 km wide, so a
+        # line on the corridor edge is still the same boundary.  The rescue
+        # below needs to know whether *any* point of the corridor is inside
+        # the model's confident region, not only whether the published
+        # vertices are.  Sampled on a parallel pair at +/-40 km, same metric
+        # as the training buffer; it never moves the line and never adds
+        # evidence, it only un-blocks a rescue that was rejected for a purely
+        # positional reason.
+        result["corridorMax"] = float(np.max(finite))
+        try:
+            delta = coordinates[1:] - coordinates[:-1]
+            length = np.hypot(delta[:, 0], delta[:, 1])
+            normal = np.column_stack((-delta[:, 1], delta[:, 0]))
+            normal /= np.maximum(length, 1.0e-9)[:, None]
+            normal = np.vstack((normal, normal[-1]))
+            mean_lat = np.deg2rad(float(np.mean(coordinates[:, 1])))
+            dlat = 40.0 / 110.57
+            dlon = 40.0 / (111.32 * max(np.cos(mean_lat), 0.1))
+            side = np.column_stack((normal[:, 0] * dlon, normal[:, 1] * dlat))
+            for sign in (1.0, -1.0):
+                shifted = coordinates + sign * side
+                extra = interpolator(np.column_stack((
+                    shifted[:, 1], shifted[:, 0]
+                )))
+                extra = extra[np.isfinite(extra)]
+                if extra.size:
+                    result["corridorMax"] = float(
+                        max(result["corridorMax"], np.max(extra))
+                    )
+        except (IndexError, ValueError, FloatingPointError):
+            pass
+        return result
 
     def evaluate(self, hour, coordinates, metrics, gates):
         return fuse_candidate(

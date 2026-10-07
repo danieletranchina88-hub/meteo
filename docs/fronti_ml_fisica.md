@@ -107,7 +107,14 @@ La fusione è intenzionalmente asimmetrica:
 5. è recuperabile soltanto un *near-pass* termico: ogni ingrediente deve
    raggiungere almeno l'80% della propria soglia, il supporto sinottico deve
    già superare il gate, l'evidenza fisica deve essere almeno 0,40 e la
-   probabilità ML mediana almeno 0,65 con il 55% della linea sopra soglia;
+   probabilità ML mediana almeno 0,65 con il 55% della linea sopra soglia.
+   Poiché la fisica può legittimamente tracciare la linea sul bordo del
+   corridoio di probabilità da 40 km — la stessa larghezza del buffer con cui
+   il modello è stato addestrato — il recupero legge la probabilità massima
+   nel corridoio (`corridorMax`), non solo i vertici: un disallineamento
+   puramente posizionale non può bocciare un near-pass che il modello vede.
+   Il bonus di *conferma*, al contrario, resta sui vertici, perché lì il
+   modello sta confermando questa linea esatta, non una vicina;
 6. anche un near-pass resta `ml-assisted-continuation`: non è una rilevazione
    forte e può essere pubblicato soltanto dentro una traccia con un'ancora
    fisica forte, almeno tre ore di vita e classificazione coerente.

@@ -405,5 +405,105 @@ if not 17.0 <= shift_km <= 19.0:
     print("  FAIL: lo steering deve valere un quarto del vento di strato")
     ok = False
 
+# U) Internal wind conflict: the family abstains, it does not veto ---------
+# OFA and air-mass flow reading opposite moving types is a family that cannot
+# read itself, not a verdict against the front.  With geometry and phase
+# agreeing, the track must still classify.
+internal_conflict = moving_front_candidates(lambda h: 45.0 - (h - 6) * 0.20)
+for candidates in internal_conflict.values():
+    for candidate in candidates:
+        candidate["ofaSpeedMps"] = -20.0 / 3.6   # cold
+        candidate["airmassMotionKmh"] = -22.0    # warm (opposite of OFA)
+tr_internal = ft.track_fronts(
+    internal_conflict, window_hours=1, min_lifetime_hours=6
+)
+print(f"U) conflitto interno del vento: "
+      f"{tr_internal[0]['frontType'] if tr_internal else 'nessuna traccia'} "
+      f"(voti: {tr_internal[0]['motionVotes'] if tr_internal else {}})")
+if not tr_internal or tr_internal[0]["frontType"] != "cold":
+    print("  FAIL: il conflitto interno del vento deve far astenere la famiglia, "
+          "non trascinare la traccia in uncertain")
+    ok = False
+if tr_internal and tr_internal[0]["motionVotes"].get("wind") is not None:
+    print("  FAIL: la famiglia vento in conflitto interno deve astenersi (None)")
+    ok = False
+if tr_internal and not tr_internal[0]["windMotionConflict"]:
+    print("  FAIL: il conflitto interno deve restare dichiarato")
+    ok = False
+
+# V) The isallobaric differential is a physical arbiter of type ------------
+# Pressure falls ahead of an advancing cold front and rises behind it: the
+# cold-warm tendency differential carries the same sign as the motion.  With
+# no other phase signal it must break the tie toward the moving type.
+isallobaric = moving_front_candidates(lambda h: 45.0 - (h - 6) * 0.05)
+for candidates in isallobaric.values():
+    for candidate in candidates:
+        # Remove every wind/phase reading, leave only the baric differential
+        # of a front advancing at ~5.5 km/h (0.9 - (-0.6) = 1.5 hPa/3h).
+        candidate.pop("ofaSpeedMps", None)
+        candidate.pop("airmassMotionKmh", None)
+        candidate.pop("tendencyMotionKmh", None)
+        candidate["coldPressureTendencyHpa3h"] = 0.9
+        candidate["warmPressureTendencyHpa3h"] = -0.6
+tr_isallobaric = ft.track_fronts(
+    isallobaric, window_hours=1, min_lifetime_hours=6
+)
+print(f"V) arbitro isallobarico: "
+      f"{tr_isallobaric[0]['frontType'] if tr_isallobaric else 'nessuna traccia'}")
+if not tr_isallobaric or tr_isallobaric[0]["frontType"] != "cold":
+    print("  FAIL: la tendenza barica differenziale deve votare nella famiglia di fase")
+    ok = False
+if tr_isallobaric and tr_isallobaric[0]["motionVotes"].get("phase") != "cold":
+    print("  FAIL: la fase deve leggere il differenziale isallobarico come cold")
+    ok = False
+
+# W) Phase speed and isallobaric memory contradicting each other -----------
+# A tendency reading of warm advance with a cold-side pressure rise is the
+# signature of a reshaping boundary: the phase family must abstain rather
+# than guess, and the verdict follows geometry and wind.
+reshaping = moving_front_candidates(lambda h: 45.0 - (h - 6) * 0.20)
+for candidates in reshaping.values():
+    for candidate in candidates:
+        candidate["tendencyMotionKmh"] = -12.0   # phase reads warm
+        candidate["coldPressureTendencyHpa3h"] = 1.2
+        candidate["warmPressureTendencyHpa3h"] = -0.8   # isallobaric reads cold
+tr_reshaping = ft.track_fronts(
+    reshaping, window_hours=1, min_lifetime_hours=6
+)
+print(f"W) fase contro isallobarica: "
+      f"{tr_reshaping[0]['frontType'] if tr_reshaping else 'nessuna traccia'} "
+      f"(voto di fase: {tr_reshaping[0]['motionVotes'].get('phase') if tr_reshaping else None})")
+if not tr_reshaping or tr_reshaping[0]["frontType"] != "cold":
+    print("  FAIL: con fase astenuta devono decidere geometria e vento")
+    ok = False
+if tr_reshaping and tr_reshaping[0]["motionVotes"].get("phase") is not None:
+    print("  FAIL: la famiglia di fase in contraddizione interna deve astenersi")
+    ok = False
+
+# X) Cross-front advection is a witness inside the phase family ------------
+# Cold advection on the cold side with the warm side sheltered is the
+# Petterssen signature of an advancing cold front.  With no other phase
+# signal it must vote; contradicting the tendency it must force abstention.
+advective = moving_front_candidates(lambda h: 45.0 - (h - 6) * 0.05)
+for candidates in advective.values():
+    for candidate in candidates:
+        candidate.pop("ofaSpeedMps", None)
+        candidate.pop("airmassMotionKmh", None)
+        candidate.pop("tendencyMotionKmh", None)
+        # Both flanks cooling, hardest on the cold side: warm-minus-cold
+        # advection differential is positive, the Petterssen signature of an
+        # advancing cold front.
+        candidate["coldSideAdvection3h"] = -1.4
+        candidate["warmSideAdvection3h"] = 0.1
+tr_advective = ft.track_fronts(
+    advective, window_hours=1, min_lifetime_hours=6
+)
+print(f"X) testimone advettivo: "
+      f"{tr_advective[0]['frontType'] if tr_advective else 'nessuna traccia'} "
+      f"(fase: {tr_advective[0]['motionVotes'].get('phase') if tr_advective else None})")
+if not tr_advective or tr_advective[0]["motionVotes"].get("phase") != "cold":
+    print("  FAIL: il contrasto di avvezione fredda deve votare nella famiglia di fase")
+    ok = False
+
 print("\nESITO:", "SUPERATO" if ok else "DA RIVEDERE")
 raise SystemExit(0 if ok else 1)

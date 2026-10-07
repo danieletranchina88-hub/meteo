@@ -121,6 +121,13 @@ def load_threshold_climatology(month: str) -> dict | None:
     """Backward-compatible thresholds-only view of the QC-aware loader."""
     return threshold_climatology_status(month)[0]
 
+# The fallback and the independent locators keep the 100/45 km pair on
+# purpose: it is the ICON-2I refinement scale, finer than the engine's 150 km
+# synoptic prior, and it is what lets the kilometre-scale model sharpen the
+# geometry inside the corridor.  The climatological thresholds are calibrated
+# for this pair, and the engine's own evidence gate (score_lines) stays the
+# single verdict on whether a fallback line may publish -- scale and verdict
+# are deliberately separate duties.
 SYNOPTIC_SIGMA_KM = 100.0
 REFINE_SIGMA_KM = 45.0
 DERIVATIVE_SIGMA_KM = 15.0
@@ -1409,6 +1416,18 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                 ),
                 "thermalAdvection3h": _finite_median(
                     self._sample(kinematics["thermalAdvection3h"], coordinates)
+                ),
+                # The physically meaningful reading of advection is the
+                # cross-front differential: cold air being advected onto the
+                # cold side while warm air recedes is an advancing cold front.
+                # The on-line value above is near zero by construction (the
+                # near-geostrophic flow runs parallel to the isotherms), so
+                # the sign information lives between the two sides.
+                "coldSideAdvection3h": _finite_median(
+                    self._sample(kinematics["thermalAdvection3h"], cold)
+                ),
+                "warmSideAdvection3h": _finite_median(
+                    self._sample(kinematics["thermalAdvection3h"], warm)
                 ),
                 # Standard Hewson speed: negative cold, positive warm.
                 "ofaSpeedMps": _finite_median(ofa_speed),

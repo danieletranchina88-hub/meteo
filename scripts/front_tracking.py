@@ -50,6 +50,7 @@ DIAGNOSTIC_KEYS = (
     "vorticity1e5", "frontogenesis", "pressureTroughHpa",
     "pressureTroughFraction", "linePressureTendencyHpa3h",
     "coldPressureTendencyHpa3h", "warmPressureTendencyHpa3h",
+    "coldSideAdvection3h", "warmSideAdvection3h",
     "lowerLevelSupport", "deltaThetaW925", "omega700PaS",
     "deltaThetaW700", "upperValidFraction", "frontWidth700Km",
     "windShift700Ms", "upperWindValidFraction",
@@ -634,11 +635,16 @@ def classify_track(track: Track, window_hours: int, wind_sampler=None) -> dict:
     airmass_type = (
         _type_from_speed(airmass_motion) if np.isfinite(airmass_motion) else None
     )
+    # A wind family whose two signals point to opposite moving types is not a
+    # vote for "uncertain": it is a family that cannot read itself, and it
+    # abstains.  Forcing the global verdict to uncertain on that internal
+    # conflict threw away fronts whose geometry and phase agreed, whenever
+    # terrain or an incipient occlusion made OFA and air-mass flow diverge.
     wind_parts = [value for value in (ofa_type, airmass_type) if value]
     wind_moving = {value for value in wind_parts if value != "stationary"}
     wind_conflict = len(wind_moving) > 1
     if wind_conflict:
-        wind_type = "uncertain"
+        wind_type = None
     elif wind_moving:
         wind_type = next(iter(wind_moving))
     elif wind_parts:
@@ -646,10 +652,70 @@ def classify_track(track: Track, window_hours: int, wind_sampler=None) -> dict:
     else:
         wind_type = None
 
+    # The phase family pairs the theta-w tendency with the cross-front
+    # isallobaric differential (pressure falls ahead of an advancing cold
+    # front, rises behind it; the opposite ahead of a warm front).  The two
+    # are independent witnesses of the same displacement, so the family
+    # reports the tendency reading unless the baric signal contradicts it.
+    isallobaric_values = [
+        track.lines[h].get("coldPressureTendencyHpa3h", np.nan)
+        - track.lines[h].get("warmPressureTendencyHpa3h", np.nan)
+        for h in hours
+    ]
+    isallobaric_motion = _finite_median(isallobaric_values)
+    # Physical conversion: a front advancing at the Hewson threshold
+    # (5.4 km/h) across a 1-hPa trough prints a cold-warm differential of
+    # 2*D*v*3/100 = 0.32 hPa/3h over the 100-km sampling pair.  The same
+    # threshold is therefore 0.32 hPa/3h here, not a round 0.5, and the
+    # differential is divided by it to recover km/h.
+    ISALLOBARIC_REFERENCE_HPA3H = 0.32
+    isallobaric_type = (
+        _type_from_speed(isallobaric_motion / ISALLOBARIC_REFERENCE_HPA3H
+                         * COLD_WARM_THRESHOLD_KMH)
+        if np.isfinite(isallobaric_motion) else None
+    )
+    # Cross-front thermal advection: an advancing cold front is cooling both
+    # its flanks, hardest on the cold side, so the warm-minus-cold advection
+    # difference is positive; an advancing warm front warms both, hardest on
+    # the cold side, and the difference is negative (Petterssen's rule read
+    # across the line, not on it -- on the line the near-geostrophic flow is
+    # parallel to the isotherms and the advection vanishes).  It is the same
+    # family as the phase speed, so it arbitrates inside the family.
+    advection_differential = _finite_median([
+        track.lines[h].get("warmSideAdvection3h", np.nan)
+        - track.lines[h].get("coldSideAdvection3h", np.nan)
+        for h in hours
+    ])
+    # 0.8 K/3h is the advection a 1.5 K/100 km gradient feels under a 15 m/s
+    # cross-isotherm flow -- the scale of a genuine frontal circulation.
+    advection_type = (
+        _type_from_speed(advection_differential / 0.8
+                         * COLD_WARM_THRESHOLD_KMH)
+        if np.isfinite(advection_differential) else None
+    )
     phase_type = (
         _type_from_speed(tendency_motion)
         if np.isfinite(tendency_motion) else None
     )
+    # The phase family reads three witnesses of the same displacement:
+    # tendency speed, baric memory and advective flux.  A direct contradiction
+    # between two moving readings is the signature of a reshaping, not
+    # translating, boundary and the family abstains.  Otherwise the family
+    # follows its moving witness -- a lone reading is still a reading -- and
+    # falls back to stationary only when every present witness is stationary.
+    phase_witnesses = [
+        value for value in (phase_type, isallobaric_type, advection_type)
+        if value is not None
+    ]
+    phase_moving = {value for value in phase_witnesses if value != "stationary"}
+    if len(phase_moving) > 1:
+        phase_type = None
+    elif phase_moving:
+        phase_type = next(iter(phase_moving))
+    elif phase_witnesses:
+        phase_type = "stationary"
+    else:
+        phase_type = None
     family_votes = {
         "geometry": geo_type,
         "phase": phase_type,
@@ -689,14 +755,24 @@ def classify_track(track: Track, window_hours: int, wind_sampler=None) -> dict:
             front_type, certainty = "uncertain", 0.24
 
     # Penalise an unstable OFA sign over the track without allowing a weak
-    # single hour to flip the median classification.
+    # single hour to flip the median classification.  An hour where the two
+    # wind signals read opposite moving types is exactly the situation the
+    # family-level abstention above was built for: counting that same
+    # contradiction again here, hour by hour, would veto the very fronts the
+    # abstention was meant to save.
     hourly_motion_types = []
     for h in hours:
         ofa_value = track.lines[h].get("ofaSpeedMps", np.nan)
         air_value = track.lines[h].get("airmassMotionKmh", np.nan)
-        if np.isfinite(ofa_value):
+        if np.isfinite(ofa_value) and np.isfinite(air_value):
+            ofa_t = _type_from_speed(-float(ofa_value) * 3.6)
+            air_t = _type_from_speed(float(air_value))
+            if {ofa_t, air_t} == {"cold", "warm"}:
+                continue
+            hourly_motion_types.extend([ofa_t, air_t])
+        elif np.isfinite(ofa_value):
             hourly_motion_types.append(_type_from_speed(-float(ofa_value) * 3.6))
-        if np.isfinite(air_value):
+        elif np.isfinite(air_value):
             hourly_motion_types.append(_type_from_speed(float(air_value)))
     if hourly_motion_types and front_type != "uncertain":
         agreement = float(np.mean([
@@ -723,6 +799,11 @@ def classify_track(track: Track, window_hours: int, wind_sampler=None) -> dict:
         "ofaSpeedKmh": None if not np.isfinite(ofa_motion) else round(ofa_motion, 1),
         "tendencyMotionKmh": None if not np.isfinite(tendency_motion) else round(tendency_motion, 1),
         "airmassMotionKmh": None if not np.isfinite(airmass_motion) else round(airmass_motion, 1),
+        "isallobaricMotionKmh": (
+            None if not np.isfinite(isallobaric_motion)
+            else round(float(isallobaric_motion / 0.32
+                             * COLD_WARM_THRESHOLD_KMH), 1)
+        ),
         "motionVotes": family_votes,
         "windMotionConflict": bool(wind_conflict),
         "motionMadKmh": round(float(motion_mad), 1),
