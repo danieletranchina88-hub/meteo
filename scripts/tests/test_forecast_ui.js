@@ -177,10 +177,7 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
     map:{setLayoutProperty:(id,k,value)=>{visibilita[id]=value;},getLayer:()=>({})},
     showParticles:false,showVectors:true,showIsobars:true,showIsotherms:false,showIsohypses:false,
     showFronts:true,showFusion:false,showStations:false,showTerrain:false,showSatellite:false,show3D:false,showGraticule:false,
-    showLightning:true,showRadar:true,showLiveLightning:true,liveStrikes:[{},{}],cloudTimeSelected:123456,
-    showVolumeClouds:true};
-  let disattivazioniVolume=0;
-  ctx.NubiVolumetriche={attiva:()=>{},disattiva:()=>{disattivazioniVolume++;}};
+    showLightning:true,showRadar:true,showLiveLightning:true,liveStrikes:[{},{}],cloudTimeSelected:123456};
   for(const name of ['setPlaying','updateTerrain3D','updateSatelliteBase','updateSatelliteClouds','updateLightningLayer','updateSatelliteControlsVisibility','updateLayerUi','updateLegend','setDrawer','updateMapPresentation','updateIsobars','updateStationMarkers','renderWeather','requestVectorRender','updateTimeUi','updateBufferUi','scheduleFrameWarmup','stopStrikeAnimation'])ctx[name]=()=>{};
   // Entrando nella vista satellite il dominio percorribile deve allargarsi,
   // e va aggiornato QUANDO I FLAG SONO GIA' FERMI: showSatelliteClouds viene
@@ -240,11 +237,6 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
   assert.equal(visibilita['radar-layer'],'none','il livello radar resta visibile in previsione');
   assert.equal(ctx.showLiveLightning,false,'la diretta resta accesa in previsione');
   assert.equal(ctx.liveStrikes.length,0,'le scariche restano in memoria');
-  // Il ray marcher e' pesante: tornando alla previsione deve spegnersi
-  // come gli altri livelli osservati, non restare acceso su una vista che
-  // non lo mostra piu'.
-  assert.equal(ctx.showVolumeClouds,false,'le nubi in volume restano accese in previsione');
-  assert.equal(disattivazioniVolume,1,'NubiVolumetriche.disattiva non viene chiamata uscendo dal satellite');
   assert.equal(chiusure,1,'la connessione al flusso resta aperta senza nessuno che guardi');
  });
 

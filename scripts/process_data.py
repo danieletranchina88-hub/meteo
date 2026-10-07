@@ -19,11 +19,6 @@ from front_analysis_v12 import FrontalAnalysisV12
 # Add meteo_analysis imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from meteo_analysis.core.icon_fields import IconRunFields
-from meteo_analysis.clouds.environment import CloudEnvironmentWriter
-from meteo_analysis.clouds.environment import MAX_LEAD_HOURS as CLOUD_ENV_MAX_LEAD
-from meteo_analysis.clouds.icon_eu import COARSEN as ICON_EU_COARSEN
-from meteo_analysis.clouds.icon_eu import EU_DOMAIN as ICON_EU_DOMAIN
-from meteo_analysis.clouds.icon_eu import IconEuCloudProfile, IconEuCloudVolume
 from meteo_analysis.hazards.storms import (
     bowen_ratio,
     coarsen,
@@ -895,75 +890,6 @@ def build_storm_payload(
             "seaBreeze": breeze * 1.0e5 if breeze is not None else None,
         }
     return payload
-
-
-CLOUD_TEMP_DIR = "temp_cloud_fields"
-
-
-def prepare_icon_cloud_fields(run_dt, source_inventory=None):
-    """Campi ICON-2I per il motore d'inferenza delle nubi 3D.
-
-    Tenuti separati dalla diagnostica temporali: un file mancante o con meno
-    scadenze non restringe le ore degli altri prodotti. Tutti facoltativi;
-    senza, le nubi 3D restano possibili con l'ambiente minimo.
-    """
-    run_tag = run_dt.strftime("%Y%m%d%H")
-    common = f"ICON_2I_SURFACE_PRESSURE_LEVELS_{run_tag}"
-    run_base = f"{NWP_DIRECT_BASE}/{NWP_DIRECTORY_ID}/{run_tag}"
-    surface_file = f"{common}_surface-0.grib"
-    requests_to_make = {
-        # Il vento in alta troposfera orienta l'incudine e i cirri. MeteoHub
-        # pubblica 250 hPa (non 300).
-        "u250": f"{run_base}/U/{common}_isobaricInhPa-250.grib",
-        "v250": f"{run_base}/V/{common}_isobaricInhPa-250.grib",
-        # La temperatura a 250 hPa chiude il profilo della particella: fin dove
-        # sale la convezione (livello di equilibrio), cioe' lo spessore.
-        "t250": f"{run_base}/T/{common}_isobaricInhPa-250.grib",
-        # Il profilo di umidita': dove l'aria e' satura c'e' uno strato.
-        "rh850": f"{run_base}/RELHUM/{common}_isobaricInhPa-850.grib",
-        "rh500": f"{run_base}/RELHUM/{common}_isobaricInhPa-500.grib",
-        # La copertura del modello per piani (basso < 800 hPa, medio 800-400,
-        # alto > 400): quale piano porta la nube che il satellite vede.
-        "clcl": f"{run_base}/CLCL/{common}_isobaricLayer-800.grib",
-        "clcm": f"{run_base}/CLCM/{common}_isobaricLayer-400.grib",
-        "clch": f"{run_base}/CLCH/{common}_isobaricLayer-0.grib",
-        # Pioggia convettiva e di scala: distingue il cumulonembo dal
-        # nembostrato meglio di qualunque soglia sul satellite.
-        "rain_con": f"{run_base}/RAIN_CON/{surface_file}",
-        "rain_gsp": f"{run_base}/RAIN_GSP/{surface_file}",
-    }
-    if os.path.exists(CLOUD_TEMP_DIR):
-        shutil.rmtree(CLOUD_TEMP_DIR)
-    os.makedirs(CLOUD_TEMP_DIR)
-    paths = {}
-    print("2c. Scarico i campi ICON-2I delle nubi 3D (vento e T 250 hPa, UR, CLCL/M/H, piogge)…",
-          flush=True)
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = {
-            executor.submit(download_grib_file, url, os.path.join(CLOUD_TEMP_DIR, name + ".grib")):
-                (name, os.path.join(CLOUD_TEMP_DIR, name + ".grib"))
-            for name, url in requests_to_make.items()
-        }
-        for future in as_completed(futures):
-            name, destination = futures[future]
-            try:
-                future.result()
-            except Exception as error:
-                print(f"   {name} non disponibile: {error}", flush=True)
-                continue
-            paths[name] = destination
-            if source_inventory is not None:
-                record_source_asset(source_inventory, name=name, url=requests_to_make[name],
-                                    path=destination, role="cloud-inference", required=False)
-    if not paths:
-        return None
-    try:
-        return IconRunFields(paths)
-    except Exception as error:
-        print(f"   Campi nubi 3D non leggibili: {error}", flush=True)
-        return None
-
-
 def prepare_icon_hazard_fields(run_dt, source_inventory=None, raw_archive=None):
     """Download real convective and 700-hPa hazard fields for the ICON run.
 
@@ -1786,43 +1712,6 @@ def process_data():
     synoptic_errors = []
     meteogram_archive = None
     station_forecast_archive = None
-    # L'ambiente ICON-2I delle nubi 3D (base, gradiente, CAPE, orografia):
-    # una piastrella per ora, interpolata dal browser all'istante satellitare.
-    cloud_environment = None
-    # La struttura verticale delle nubi: copertura per livello di ICON-EU (DWD).
-    # Facoltativa: senza, il volume resta quello del solo ICON-2I.
-    icon_eu_clouds = None
-    try:
-        icon_eu_clouds = IconEuCloudProfile(
-            (ICON_EU_DOMAIN["south"], ICON_EU_DOMAIN["north"]),
-            (ICON_EU_DOMAIN["west"], ICON_EU_DOMAIN["east"]),
-            margin_deg=0.0, factor=ICON_EU_COARSEN)
-        letti = icon_eu_clouds.download(run_dt, range(0, CLOUD_ENV_MAX_LEAD + 1))
-        print(f"2d. ICON-EU (DWD): {letti} campi di copertura per livello"
-              f" dal run {icon_eu_clouds.run}", flush=True)
-        if not letti:
-            icon_eu_clouds = None
-    except Exception as icon_eu_error:
-        print(f"2d. ICON-EU non disponibile: {icon_eu_error}", flush=True)
-        icon_eu_clouds = None
-    # I livelli NATIVI di ICON-EU (una sessantina sotto i 15 km): copertura,
-    # acqua liquida e ghiaccio in g/m3, temperatura, corrente verticale e
-    # turbolenza, ricampionati ogni 250 m. Le prime 12 ore (quelle che la
-    # timeline del satellite usa prima del run successivo): con sei campi per
-    # voxel il sito deve restare sotto il limite di GitHub Pages (~1 GB).
-    icon_eu_volume = None
-    try:
-        icon_eu_volume = IconEuCloudVolume(
-            (ICON_EU_DOMAIN["south"], ICON_EU_DOMAIN["north"]),
-            (ICON_EU_DOMAIN["west"], ICON_EU_DOMAIN["east"]), factor=3)
-        ore_volume = icon_eu_volume.download(run_dt, range(0, 13))
-        print(f"2e. ICON-EU livelli nativi: {ore_volume} ore di volume dal run {icon_eu_volume.run}",
-              flush=True)
-        if not ore_volume:
-            icon_eu_volume = None
-    except Exception as icon_eu_error:
-        print(f"2e. ICON-EU livelli nativi non disponibili: {icon_eu_error}", flush=True)
-        icon_eu_volume = None
     icon_front_analyzer = prepare_icon_front_analyzer(
         run_dt, source_inventory=source_inventory, raw_archive=raw_archive
     )
@@ -1834,11 +1723,6 @@ def process_data():
     icon_hazard_fields = prepare_icon_hazard_fields(
         run_dt, source_inventory=source_inventory, raw_archive=raw_archive
     )
-    try:
-        icon_cloud_fields = prepare_icon_cloud_fields(run_dt, source_inventory=source_inventory)
-    except Exception as cloud_fields_error:
-        print(f"   Campi nubi 3D non disponibili: {cloud_fields_error}", flush=True)
-        icon_cloud_fields = None
     for idx, filename in enumerate(file_list):
         if run_source == "nwp-direct":
             # The opendata catalog does not have this run yet: fetch the same
@@ -2418,58 +2302,6 @@ def process_data():
                         flush=True,
                     )
 
-                # Nubi 3D: il modello non decide dove sono le nubi, ne
-                # descrive l'ambiente. Un errore qui non tocca la previsione.
-                if icon_hazard_fields is not None and cape_ml is not None:
-                    try:
-                        if cloud_environment is None:
-                            cloud_environment = CloudEnvironmentWriter(run_dt, lat, lon)
-                        def nube(name, fields=icon_cloud_fields, hour=step_hours):
-                            # Facoltativo: un campo che manca non toglie
-                            # l'ambiente di base alle nubi 3D.
-                            if fields is None:
-                                return None
-                            try:
-                                return fields.field(name, hour, lat, lon)
-                            except Exception:
-                                return None
-
-                        def tasso(name, hour=step_hours):
-                            # Le piogge sono cumulate dall'inizio del run:
-                            # l'intensita' e' la differenza con l'ora prima.
-                            ora = nube(name, hour=hour)
-                            prima = nube(name, hour=hour - 1) if hour > 0 else None
-                            if ora is None or prima is None:
-                                return None
-                            return np.maximum(ora - prima, 0.0)
-
-                        def rischio(name):
-                            return nube(name, fields=icon_hazard_fields)
-
-                        extras = {
-                            "cin": rischio("cin_ml"), "hzero": rischio("hzerocl"),
-                            "u500": rischio("u500"), "v500": rischio("v500"),
-                            "u700": rischio("u700"), "v700": rischio("v700"),
-                            "u10": u_val, "v10": v_val,
-                            "shear_u": rischio("wshear_u"), "shear_v": rischio("wshear_v"),
-                            "t700": rischio("t700"), "q700": rischio("q700"),
-                            "u250": nube("u250"), "v250": nube("v250"), "t250": nube("t250"),
-                            "rh850": nube("rh850"), "rh500": nube("rh500"),
-                            "clcl": nube("clcl"), "clcm": nube("clcm"), "clch": nube("clch"),
-                            "rain_con": tasso("rain_con"), "rain_gsp": tasso("rain_gsp"),
-                        }
-                        cloud_environment.add(
-                            step_hours,
-                            temp_c,
-                            icon_hazard_fields.field("td_2m", step_hours, lat, lon),
-                            cape_ml,
-                            t500_k=icon_hazard_fields.field("t500", step_hours, lat, lon),
-                            hsurf_m=icon_hazard_fields.field("hsurf", step_hours, lat, lon),
-                            extras=extras,
-                        )
-                    except Exception as cloud_env_error:
-                        print(f" cloudenv-{step_hours}h:{cloud_env_error}", end="", flush=True)
-
                 previous = bulletin_history.get(step_hours - 3, {})
                 bulletin_inputs = build_bulletin_inputs(
                     valid_time=iso_date,
@@ -2940,10 +2772,6 @@ def process_data():
         icon_front_analyzer.close()
     if icon_hazard_fields is not None:
         icon_hazard_fields.close()
-    if icon_cloud_fields is not None:
-        icon_cloud_fields.close()
-    if os.path.exists(CLOUD_TEMP_DIR):
-        shutil.rmtree(CLOUD_TEMP_DIR)
     if os.path.exists(FRONT_TEMP_DIR):
         shutil.rmtree(FRONT_TEMP_DIR)
     if os.path.exists(HAZARD_TEMP_DIR):
@@ -3067,31 +2895,6 @@ def process_data():
                 )
 
         write_observations(TEMP_DIR, observations)
-
-        # La copertura per livello di ICON-EU su tutta l'Europa del volume:
-        # una serie a parte (cloud_eu), stesso formato dell'ambiente.
-        if icon_eu_clouds is not None:
-            try:
-                indice_eu = icon_eu_clouds.write(os.path.join(TEMP_DIR, "cloud_eu"), run_dt)
-                print(f"   Nubi ICON-EU per livello: {len(indice_eu['hours'])} ore.", flush=True)
-            except Exception as icon_eu_error:
-                print(f"   Nubi ICON-EU non salvate: {icon_eu_error}", flush=True)
-        if icon_eu_volume is not None:
-            try:
-                indice_vol = icon_eu_volume.write(os.path.join(TEMP_DIR, "cloud_eu_vol"), run_dt)
-                print(f"   Volume nubi ICON-EU (livelli nativi): {len(indice_vol['hours'])} ore.", flush=True)
-            except Exception as icon_eu_error:
-                print(f"   Volume nubi ICON-EU non salvato: {icon_eu_error}", flush=True)
-
-        if cloud_environment is not None and cloud_environment.hours:
-            try:
-                cloud_environment.write(os.path.join(TEMP_DIR, "cloud_env"))
-                print(
-                    f"   Ambiente nubi 3D: {len(cloud_environment.hours)} ore.",
-                    flush=True,
-                )
-            except Exception as cloud_env_error:
-                print(f"   Ambiente nubi 3D non salvato: {cloud_env_error}", flush=True)
 
         # The manifest is written last so every published product can be
         # checksummed.  Raw GRIBs are described truthfully as non-retained;

@@ -83,9 +83,6 @@ function setWeatherView(view) {
     showRadar = false;
     if (map.getLayer('radar-layer')) map.setLayoutProperty('radar-layer','visibility','none');
     if (showLiveLightning) { showLiveLightning = false; blitzDisconnect(); stopStrikeAnimation(); liveStrikes = []; }
-    // Il ray marcher e' pesante: non ha senso lasciarlo acceso su una vista
-    // che non lo mostra piu'.
-    if (showVolumeClouds) { showVolumeClouds = false; NubiVolumetriche.disattiva(); }
     const saved = forecastRestore;
     if(saved) {
       activeLayer=saved.layer; showParticles=saved.particles; showVectors=saved.vectors;
