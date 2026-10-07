@@ -55,7 +55,7 @@ DIAGNOSTIC_KEYS = (
     "windShift700Ms", "upperWindValidFraction",
     "verticalCoherence700", "verticalCoherence3Level",
     "frontalTiltKm", "frontalTiltConsistency",
-    "terrainFraction", "candidateEvidence",
+    "terrainFraction", "frontogenesisFraction", "thermalWindAlignment", "candidateEvidence",
     "physicalCandidateEvidence", "preConsensusEvidence",
     "consensusEvidenceBonus",
     "consensusSupport", "methodAgreementCount", "methodAvailability",
@@ -1352,9 +1352,17 @@ def track_fronts(
         dominant_diagnosis = max(set(diagnoses), key=diagnoses.count)
         segment_types = segment_types_for_track(track, local_classifications)
         per_hour = hourly_quality(track, local_classifications, quality)
+        characters = {
+            h: track.lines[h].get("frontalCharacter", "undetermined")
+            for h in track.hours
+        }
+        named = [value for value in characters.values() if value not in (None, "undetermined")]
+        dominant_character = max(set(named), key=named.count) if named else "undetermined"
         results.append({
             "id": track.id,
             "hours": list(track.hours),
+            "frontalCharacter": dominant_character,
+            "characters": characters,
             "coreHours": core_hours,
             "recoveredHours": recovered_hours,
             "lifetimeH": span,

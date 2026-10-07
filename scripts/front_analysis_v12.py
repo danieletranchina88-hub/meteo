@@ -37,7 +37,7 @@ from front_analysis import SynopticFrontAnalyzer, _blend_lines, _line_length_km,
 # campo termico ma dalla cresta di un campo di evidenza fuso, a scala
 # sinottica dichiarata: e' un metodo diverso, non una taratura diversa, e
 # chi confronta run archiviati deve poterlo distinguere dalla stringa.
-FRONT_METHOD = "icon2i-ofa-evidence-ridge-v20-auditable"
+FRONT_METHOD = "icon2i-warm-edge-frontogenesis-v21"
 ANALYSIS_PRESSURE_PA = 85_000.0
 LOWER_PRESSURE_PA = 92_500.0
 UPPER_PRESSURE_PA = 70_000.0
@@ -888,6 +888,33 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             boundary_margin_km=BOUNDARY_MARGIN_KM,
         )
 
+
+    def _apply_physical_character(self, candidates, engine_fields, hour):
+        """Frontogenesis and thermal-wind gates, plus ana/kata character."""
+        import front_character as fch
+        evidence = (engine_fields or {}).get("evidence") or {}
+        if not evidence:
+            return candidates
+        u_upper = v_upper = None
+        if self.has_upper_wind:
+            try:
+                u_upper = self._field("u700", hour)
+                v_upper = self._field("v700", hour)
+            except Exception:
+                u_upper = v_upper = None
+        kept = []
+        for candidate in candidates:
+            fch.annotate_candidate(
+                candidate, evidence, self.longitudes, self.latitudes,
+                u_lower=evidence.get("uWind"),
+                v_lower=evidence.get("vWind"),
+                u_upper=u_upper, v_upper=v_upper,
+                omega=evidence.get("omega"),
+            )
+            if fch.passes_physical_gate(candidate):
+                kept.append(candidate)
+        return kept
+
     def _detect_hour(self, hour: int) -> list[dict]:
         thermodynamics = self._thermodynamics(hour)
         theta_w = thermodynamics["theta_w"]
@@ -972,6 +999,9 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             )
             engine_funnel["fallbackOffered"] = len(fallback)
             engine_funnel["fallbackAccepted"] = len(wet_candidates)
+        wet_candidates = self._apply_physical_character(
+            wet_candidates, engine_fields, hour
+        )
         # Independent directional ridge geometry.  It confirms position and
         # method agreement, but it is deliberately NOT an autonomous seed:
         # both Hewson and Laplacian geometry can follow opposite edges of the
@@ -2065,6 +2095,17 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         classification = classification or track
         properties = {
             "frontType": classification["frontType"],
+            "frontalCharacter": (
+                (track.get("characters") or {}).get(hour)
+                or track.get("frontalCharacter")
+                or "undetermined"
+            ),
+            "frontogenesisFraction": _json_number(
+                (track.get("diagnostics") or {}).get("frontogenesisFraction"), 2
+            ),
+            "thermalWindAlignment": _json_number(
+                (track.get("diagnostics") or {}).get("thermalWindAlignment"), 2
+            ),
             "confidence": round(float(track["qualityScore"]), 2),
             "qualityScore": round(float(track["qualityScore"]), 2),
             "uncertaintyIndex": round(float(track["uncertaintyIndex"]), 2),

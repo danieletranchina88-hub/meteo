@@ -399,6 +399,9 @@ def frontal_evidence(
         "hewsonEast": gm_e,
         "hewsonNorth": gm_n,
         "frontogenesis": frontogenesis,
+        "uWind": u_smooth,
+        "vWind": v_smooth,
+        "omega": ascent if omega is not None else None,
         "vorticity1e5": vorticity,
         "convergence1e5": convergence,
         "windShift": wind_shift,
@@ -1248,9 +1251,30 @@ def _build_candidate(
     line_abz = sample(abz_gradient)
     line_probability = sample(evidence["probability"])
     sinuosity, net_turn, closure, total_turn = _shape_metrics(line)
+    # The ridge of |grad theta_w| is the centre of the zone. The published
+    # line is the warm boundary, a fixed fraction of the analysis width
+    # toward the warm air. Normals are recomputed on the moved vertices.
+    width = float(reference.get("widthKm", 80.0))
+    offset = 0.35 * width
+    import front_character as fch
+    line = fch.place_on_warm_edge(
+        line, np.column_stack((east / magnitude, north / magnitude)), offset
+    )
+    east = sample(evidence["gradientEast"]) if False else fl._sample(
+        evidence["gradientEast"], line, longitudes, latitudes, dlon, dlat)
+    north = fl._sample(evidence["gradientNorth"], line, longitudes, latitudes, dlon, dlat)
+    magnitude = np.maximum(np.hypot(east, north), 1.0e-12)
+    hewson_e = fl._sample(evidence["hewsonEast"], line, longitudes, latitudes, dlon, dlat)
+    hewson_n = fl._sample(evidence["hewsonNorth"], line, longitudes, latitudes, dlon, dlat)
+    hewson_mag = np.maximum(np.hypot(hewson_e, hewson_n), 1.0e-12)
+    line_tfp = fl._sample(evidence["tfp"], line, longitudes, latitudes, dlon, dlat)
+    line_abz = fl._sample(abz_gradient, line, longitudes, latitudes, dlon, dlat)
+    line_probability = fl._sample(evidence["probability"], line, longitudes, latitudes, dlon, dlat)
 
     return {
         "coordinates": line,
+        "warmEdgeOffsetKm": round(offset, 1),
+        "positionSource": "warm-edge-of-baroclinic-zone",
         "warmNormal": np.column_stack((east / magnitude, north / magnitude)),
         "hewsonDir": np.column_stack((hewson_e / hewson_mag,
                                       hewson_n / hewson_mag)),
@@ -1430,10 +1454,19 @@ def detect_fronts(
                 funnel["droppedTooRough"] += 1
                 continue
 
-            candidates.append(_build_candidate(
+            built = _build_candidate(
                 line, evidence, abz_gradient, longitudes, latitudes, metrics,
                 min_probability=min_probability, source=LOCATOR_NAME,
-            ))
+            )
+            import front_character as fch
+            fch.annotate_candidate(
+                built, evidence, longitudes, latitudes,
+                u_lower=u_wind, v_lower=v_wind, omega=omega,
+            )
+            if not fch.passes_physical_gate(built):
+                funnel["droppedPhysicalGate"] = funnel.get("droppedPhysicalGate", 0) + 1
+                continue
+            candidates.append(built)
 
     candidates.sort(
         key=lambda item: (item["locatorConfidence"], item["lengthKm"]),
@@ -1518,10 +1551,19 @@ def score_lines(
                 continue
             if mean_turn_deg_per_km(piece) > float(max_turn_deg_per_20km):
                 continue
-            kept.append(_build_candidate(
+            built = _build_candidate(
                 piece, evidence, abz_gradient, longitudes, latitudes, metrics,
                 min_probability=min_probability, source=source,
-            ))
+            )
+            import front_character as fch
+            fch.annotate_candidate(
+                built, evidence, longitudes, latitudes,
+                u_lower=evidence.get("uWind"), v_lower=evidence.get("vWind"),
+                omega=evidence.get("omega"),
+            )
+            if not fch.passes_physical_gate(built):
+                continue
+            kept.append(built)
     kept.sort(key=lambda item: item["lengthKm"], reverse=True)
     return kept
 

@@ -4597,7 +4597,9 @@
           movement = (approaching ? "in avvicinamento" : "in allontanamento") +
             " (" + Math.abs(Math.round(motion)) + " km/h)";
         }
-        let text = typeName + " a " + Math.round(best.distance) + " km · " + movement;
+        const characterNames = { anafront: "anafronte", katafront: "katafronte" };
+        const character = characterNames[props.frontalCharacter] || "";
+        let text = typeName + (character ? " " + character : "") + " a " + Math.round(best.distance) + " km · " + movement;
         if (props.lifetimeH) text += " · vita " + props.lifetimeH + " h";
         const existence = Number(props.existenceConfidence);
         const typeConfidence = Number(props.typeConfidence);
