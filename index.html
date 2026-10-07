@@ -5569,13 +5569,8 @@
           map.setPaintProperty(
             "background",
             "background-color",
-            // Qui c'era ancora "onDark ? scuro : chiaro", ma onDark e' stato
-            // tolto quando il fondo e' diventato sempre la carta chiara: il
-            // resto della funzione usa gia' solo i valori chiari. Il ramo
-            // gira solo a mappa inclinata, quindi il ReferenceError e'
-            // rimasto nascosto finche' "Nubi in volume" non ha cominciato a
-            // inclinare la mappa -- e da li' bloccava la costruzione del
-            // volume prima ancora che partisse.
+            // Il fondo e' sempre la carta chiara: anche a mappa inclinata
+            // lo sfondo resta nel suo tono chiaro.
             synopticChart ? mapBackgroundColour() : "rgb(188,204,218)"
           );
         }
