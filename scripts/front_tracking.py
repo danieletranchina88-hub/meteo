@@ -594,7 +594,14 @@ def classify_track(track: Track, window_hours: int, wind_sampler=None) -> dict:
                 )
             )
     geo_motion = float(np.median(geo_speeds)) if geo_speeds else 0.0
-    geo_type = _type_from_speed(geo_motion)
+    geo_mad = _finite_median(np.abs(np.asarray(geo_speeds) - geo_motion), 0.0) if geo_speeds else 0.0
+    # A kilometre-scale line jitters by a few kilometres an hour. That jitter
+    # is not a front type: trust the geometric vote only when the median
+    # displacement exceeds both the cold/warm threshold and its own scatter.
+    if geo_speeds and (abs(geo_motion) < max(COLD_WARM_THRESHOLD_KMH, geo_mad)):
+        geo_type = "stationary" if abs(geo_motion) < COLD_WARM_THRESHOLD_KMH else "uncertain"
+    else:
+        geo_type = _type_from_speed(geo_motion)
     if motion_bearings:
         bearing_sine = float(np.mean(np.sin(motion_bearings)))
         bearing_cosine = float(np.mean(np.cos(motion_bearings)))

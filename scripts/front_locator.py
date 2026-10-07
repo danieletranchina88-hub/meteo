@@ -130,6 +130,91 @@ def smooth_km(field: np.ndarray, sigma_km: float, metrics: dict) -> np.ndarray:
 # --------------------------------------------------------------------------
 # Metric-aware differential operators (local flat-plane approximation)
 # --------------------------------------------------------------------------
+ANALYSIS_SPACING_KM = 80.0
+HIGH_RES_SPACING_KM = 25.0
+# Four analysis cells: the shortest baroclinic zone a 0.75-degree chart can
+# place without aliasing the thermal gradient into a false front.
+APPROX_HALFPOWER_KM = 4.0 * ANALYSIS_SPACING_KM
+HIGH_FREQUENCY_KEEP = 0.08
+
+
+def _median_spacing_km(metrics: dict) -> float:
+    dx = float(np.nanmedian(np.asarray(metrics["dx_km_col"], dtype=float)))
+    dy = float(metrics["dy_km"])
+    return float(math.hypot(dx, dy) / math.sqrt(2.0))
+
+
+def approximate_theta_w(
+    theta_w: np.ndarray,
+    longitudes: np.ndarray,
+    latitudes: np.ndarray,
+    metrics: dict | None = None,
+) -> tuple[np.ndarray, dict]:
+    """Approximate theta_w by the field a synoptic analysis would contain.
+
+    A kilometre-scale model writes ``theta_w_hi = theta_w_syn + epsilon``.
+    ``epsilon`` is convective, sea-breeze and orographic variance below the
+    scale at which a front is defined. The thermal front parameter is a
+    second derivative, so that variance becomes false fronts and pulls a
+    real front onto mesoscale wobbles.
+
+    The estimator is the L2 projection onto wavelengths longer than the
+    Nyquist scale of a 0.75-degree analysis (about 80 km). A Gaussian
+    low-pass has amplitude transfer
+
+        H(lambda) = exp(-2 * pi**2 * sigma**2 / lambda**2).
+
+    Setting H = 1/2 at ``lambda = 4 * 80 km`` gives
+
+        sigma = lambda * sqrt(ln 2 / (2 * pi**2)).
+
+    Before the low-pass, convective spikes are winsorised at 3.5 robust
+    standard deviations of the short-scale residual, so a 2 km core cannot
+    set the gradient. If the grid is already coarser than 25 km, or the 99th percentile of
+    the analysis-scale residual is below 0.35 K, the field is returned
+    unchanged: a second call is a no-op. The tail, not the variance, is
+    the gate, because a convective core is few points but a large curvature.
+    """
+    lon = np.asarray(longitudes, dtype=float)
+    lat = np.asarray(latitudes, dtype=float)
+    field = np.asarray(theta_w, dtype=float)
+    if metrics is None:
+        metrics = grid_metrics(lon, lat)
+    spacing = _median_spacing_km(metrics)
+    info = {
+        "approximated": False,
+        "spacingKm": round(spacing, 2),
+        "analysisSpacingKm": ANALYSIS_SPACING_KM,
+        "sigmaKm": 0.0,
+        "highFrequencyFraction": None,
+    }
+    if spacing >= HIGH_RES_SPACING_KM or field.shape[0] < 8 or field.shape[1] < 8:
+        return field, info
+    sigma = APPROX_HALFPOWER_KM * math.sqrt(math.log(2.0) / (2.0 * math.pi ** 2))
+    coarse = smooth_km(field, sigma, metrics)
+    residual = field - coarse
+    centre = np.nanmedian(residual)
+    mad = np.nanmedian(np.abs(residual - centre))
+    robust = 1.4826 * mad
+    if np.isfinite(robust) and robust > 0.0:
+        limit = 3.5 * robust
+        residual = np.clip(residual, -limit, limit)
+        guarded = coarse + residual
+    else:
+        guarded = field
+    approximated = smooth_km(guarded, sigma, metrics)
+    # Variance is the wrong gate: a thunderstorm core is a few grid points,
+    # so it barely moves the variance, but a second derivative turns it into
+    # a false front. The tail of the analysis-scale residual is the signal.
+    residual_tail = float(np.nanpercentile(np.abs(field - approximated), 99))
+    info["residualTailK"] = round(residual_tail, 2)
+    info["sigmaKm"] = round(sigma, 1)
+    if residual_tail < 0.35:
+        return field, info
+    info["approximated"] = True
+    return approximated, info
+
+
 def gradient(field: np.ndarray, metrics: dict) -> tuple[np.ndarray, np.ndarray]:
     """East (d/dx) and north (d/dy) derivatives, per km."""
     # Second-order one-sided differences at the domain edge follow the
@@ -384,6 +469,12 @@ def locate_fronts(
     metrics = grid_metrics(lon, lat)
     dlon, dlat = metrics["dlon"], metrics["dlat"]
 
+    # 0) on a kilometre-scale grid, replace theta_w by its synoptic
+    #    equivalent before any derivative. See approximate_theta_w.
+    theta_w, theta_w_approximation = approximate_theta_w(
+        theta_w, lon, lat, metrics
+    )
+
     # 1) physical smoothing BEFORE any derivative
     field = smooth_km(np.asarray(theta_w, dtype=float), synoptic_sigma_km, metrics)
 
@@ -563,6 +654,7 @@ def locate_fronts(
                 "effectiveTfpThreshold": effective_tfp,
                 "effectiveGradientThreshold": effective_gradient,
                 "locatorMethod": locator_method,
+                "thetaWApproximation": dict(theta_w_approximation),
             })
 
     candidates.sort(key=lambda c: c["lengthKm"], reverse=True)
@@ -576,5 +668,6 @@ def locate_fronts(
             "effective_tfp_threshold": effective_tfp,
             "effective_gradient_threshold": effective_gradient,
             "locator_method": locator_method,
+            "theta_w_approximation": theta_w_approximation,
         }
     return candidates

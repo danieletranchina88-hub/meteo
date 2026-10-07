@@ -19,11 +19,6 @@ from front_analysis_v12 import FrontalAnalysisV12
 # Add meteo_analysis imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from meteo_analysis.core.icon_fields import IconRunFields
-from meteo_analysis.clouds.environment import CloudEnvironmentWriter
-from meteo_analysis.clouds.environment import MAX_LEAD_HOURS as CLOUD_ENV_MAX_LEAD
-from meteo_analysis.clouds.icon_eu import COARSEN as ICON_EU_COARSEN
-from meteo_analysis.clouds.icon_eu import EU_DOMAIN as ICON_EU_DOMAIN
-from meteo_analysis.clouds.icon_eu import IconEuCloudProfile, IconEuCloudVolume
 from meteo_analysis.hazards.storms import (
     bowen_ratio,
     coarsen,
@@ -907,6 +902,8 @@ def prepare_icon_cloud_fields(run_dt, source_inventory=None):
     scadenze non restringe le ore degli altri prodotti. Tutti facoltativi;
     senza, le nubi 3D restano possibili con l'ambiente minimo.
     """
+    return None
+
     run_tag = run_dt.strftime("%Y%m%d%H")
     common = f"ICON_2I_SURFACE_PRESSURE_LEVELS_{run_tag}"
     run_base = f"{NWP_DIRECT_BASE}/{NWP_DIRECTORY_ID}/{run_tag}"
@@ -1786,43 +1783,17 @@ def process_data():
     synoptic_errors = []
     meteogram_archive = None
     station_forecast_archive = None
+    # Nubi 3D rimosse: nessuna piastrella di volume, nessun ambiente ICON-EU.
     # L'ambiente ICON-2I delle nubi 3D (base, gradiente, CAPE, orografia):
     # una piastrella per ora, interpolata dal browser all'istante satellitare.
     cloud_environment = None
     # La struttura verticale delle nubi: copertura per livello di ICON-EU (DWD).
     # Facoltativa: senza, il volume resta quello del solo ICON-2I.
     icon_eu_clouds = None
-    try:
-        icon_eu_clouds = IconEuCloudProfile(
-            (ICON_EU_DOMAIN["south"], ICON_EU_DOMAIN["north"]),
-            (ICON_EU_DOMAIN["west"], ICON_EU_DOMAIN["east"]),
-            margin_deg=0.0, factor=ICON_EU_COARSEN)
-        letti = icon_eu_clouds.download(run_dt, range(0, CLOUD_ENV_MAX_LEAD + 1))
-        print(f"2d. ICON-EU (DWD): {letti} campi di copertura per livello"
-              f" dal run {icon_eu_clouds.run}", flush=True)
-        if not letti:
-            icon_eu_clouds = None
-    except Exception as icon_eu_error:
-        print(f"2d. ICON-EU non disponibile: {icon_eu_error}", flush=True)
-        icon_eu_clouds = None
-    # I livelli NATIVI di ICON-EU (una sessantina sotto i 15 km): copertura,
-    # acqua liquida e ghiaccio in g/m3, temperatura, corrente verticale e
-    # turbolenza, ricampionati ogni 250 m. Le prime 12 ore (quelle che la
-    # timeline del satellite usa prima del run successivo): con sei campi per
-    # voxel il sito deve restare sotto il limite di GitHub Pages (~1 GB).
     icon_eu_volume = None
-    try:
-        icon_eu_volume = IconEuCloudVolume(
-            (ICON_EU_DOMAIN["south"], ICON_EU_DOMAIN["north"]),
-            (ICON_EU_DOMAIN["west"], ICON_EU_DOMAIN["east"]), factor=3)
-        ore_volume = icon_eu_volume.download(run_dt, range(0, 13))
-        print(f"2e. ICON-EU livelli nativi: {ore_volume} ore di volume dal run {icon_eu_volume.run}",
-              flush=True)
-        if not ore_volume:
-            icon_eu_volume = None
-    except Exception as icon_eu_error:
-        print(f"2e. ICON-EU livelli nativi non disponibili: {icon_eu_error}", flush=True)
-        icon_eu_volume = None
+    icon_cloud_fields = None
+    print("2d. Nubi 3D non generate: il sito pubblica solo copertura e satellite 2D.", flush=True)
+
     icon_front_analyzer = prepare_icon_front_analyzer(
         run_dt, source_inventory=source_inventory, raw_archive=raw_archive
     )
@@ -2422,8 +2393,8 @@ def process_data():
                 # descrive l'ambiente. Un errore qui non tocca la previsione.
                 if icon_hazard_fields is not None and cape_ml is not None:
                     try:
-                        if cloud_environment is None:
-                            cloud_environment = CloudEnvironmentWriter(run_dt, lat, lon)
+                        if False and cloud_environment is None:
+                            cloud_environment = None
                         def nube(name, fields=icon_cloud_fields, hour=step_hours):
                             # Facoltativo: un campo che manca non toglie
                             # l'ambiente di base alle nubi 3D.

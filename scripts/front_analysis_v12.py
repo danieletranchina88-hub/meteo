@@ -771,6 +771,14 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             name: np.where(invalid, np.nan, np.asarray(fields[name], dtype=float))
             for name in ("theta_w", "theta", "theta_e")
         }
+        # Geometry and classification both read this field. On ICON-2I the
+        # native theta_w still contains convective variance; the locator
+        # would turn it into false fronts. Approximate it once, here.
+        approximated, info = fl.approximate_theta_w(
+            result["theta_w"], self.longitudes, self.latitudes
+        )
+        result["theta_w"] = approximated
+        result["theta_w_approximation"] = info
         self._thermodynamic_cache[key] = result
         return result
 

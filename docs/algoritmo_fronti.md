@@ -1113,3 +1113,15 @@ forma analitica del ponte browniano.
   [Advances in Statistical Climatology, Meteorology and Oceanography](https://doi.org/10.5194/ascmo-5-147-2019)
 - Dagon et al., 2022, fronti ML e associazione con precipitazioni estreme:
   [JGR Atmospheres](https://doi.org/10.1029/2022JD037038)
+
+## Approssimazione di theta_w ad alta risoluzione
+
+ICON-2I risolve varianza convettiva e orografica che una carta sinottica a 0,75 gradi non contiene. Il parametro frontale termico è una derivata seconda: quella varianza diventa un falso fronte, oppure sposta un fronte vero sulla cresta mesoscala dentro il corridoio.
+
+Se il passo di griglia è sotto i 25 km, `approximate_theta_w` sostituisce theta_w con la sua proiezione L2 sulla scala di analisi. Il filtro è gaussiano, con trasferimento di ampiezza un mezzo a 320 km (quattro celle da 80 km):
+
+sigma = lambda * sqrt(ln 2 / (2 * pi^2)), lambda = 320 km.
+
+Prima del filtro i picchi convettivi sono winsorizzati a 3,5 deviazioni robuste del residuo. Se il 99° percentile del residuo è già sotto 0,35 K, il campo non viene toccato: una seconda chiamata non liscia di nuovo. La coda, non la varianza, è il criterio, perché un nucleo convettivo pesa poco ma curva molto.
+
+La geometria pubblicata, quando sta nel corridoio sinottico, viene poi agganciata all'asse di quella theta_w approssimata (`snap_to_synoptic_axis`), non alla cresta del campo a 2 km. La classificazione ignora uno spostamento geometrico inferiore sia alla soglia freddo/caldo sia alla dispersione oraria della traiettoria: il jitter di una linea ad alta risoluzione non è un tipo di fronte.

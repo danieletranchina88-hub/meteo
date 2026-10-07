@@ -23,6 +23,7 @@ is a scale prior, not independent evidence and not a comparison with ECMWF.
 
 from __future__ import annotations
 
+import math
 import numpy as np
 
 import front_locator as fl
@@ -109,6 +110,41 @@ def _overlap_fraction(first: np.ndarray, second: np.ndarray, radius_km: float) -
     return min(a, b)
 
 
+
+def snap_to_synoptic_axis(
+    coordinates: np.ndarray,
+    synoptic_lines: list,
+    corridor_km: float,
+) -> tuple[np.ndarray, float]:
+    """Place a refined line on the analysis-scale warm edge.
+
+    A high-resolution locator can keep a real front but draw it along the
+    mesoscale ridge inside the synoptic corridor. Each vertex inside the
+    corridor is moved to the nearest synoptic vertex; vertices outside are
+    left alone so a genuine branch is not invented. The returned fraction
+    is the share of the line that was repositioned.
+    """
+    line = np.asarray(coordinates, dtype=float)
+    if len(line) < 2 or not synoptic_lines:
+        return line, 0.0
+    bank = np.vstack([np.asarray(item, dtype=float) for item in synoptic_lines if len(item) >= 2])
+    if len(bank) < 2:
+        return line, 0.0
+    snapped = line.copy()
+    moved = 0
+    mean_lat = np.deg2rad(float(np.nanmean(line[:, 1])))
+    lon_scale = 111.32 * max(math.cos(mean_lat), 0.25)
+    for index, point in enumerate(line):
+        east = (bank[:, 0] - point[0]) * lon_scale
+        north = (bank[:, 1] - point[1]) * 111.32
+        distance = np.hypot(east, north)
+        nearest = int(np.nanargmin(distance))
+        if float(distance[nearest]) <= corridor_km:
+            snapped[index] = bank[nearest]
+            moved += 1
+    return snapped, moved / len(line)
+
+
 def detect_fronts_two_scale(
     theta_w: np.ndarray,
     longitudes: np.ndarray,
@@ -188,6 +224,19 @@ def detect_fronts_two_scale(
         candidate["synopticSupport"] = round(support, 2)
         if support >= min_synoptic_support:
             candidate["corroborated"] = True
+            snapped, placed = snap_to_synoptic_axis(
+                candidate["coordinates"], synoptic_lines, corridor_km
+            )
+            # Only adopt the analysis-scale axis when most of the line sits
+            # in the synoptic corridor. A partial overlap keeps its own
+            # geometry so a real branch is not dragged onto another front.
+            if placed >= 0.70:
+                candidate["coordinates"] = snapped
+                candidate["positionSource"] = "synoptic-theta-w-axis"
+                candidate["synopticPlacement"] = round(placed, 2)
+            else:
+                candidate["positionSource"] = "refined-corridor"
+                candidate["synopticPlacement"] = round(placed, 2)
             final.append(candidate)
         # Nessuna eccezione basata sulla sola intensita': un confine locale
         # puo' essere piu' netto di un fronte sinottico autentico.
