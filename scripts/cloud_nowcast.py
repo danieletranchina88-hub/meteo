@@ -160,6 +160,35 @@ def km_per_pixel(width: int) -> float:
     return (EAST - WEST) * 111.32 * math.cos(mean_lat) / width
 
 
+
+def blend_motion(satellite_u, satellite_v, model_u, model_v, confidence):
+    """Dove il satellite ha un picco chiaro comanda lui, altrove il vento del modello.
+
+    ``confidence`` è 0..1, alta solo sui vettori accettati. Il modello riempie
+    il cielo sereno e le finestre ambigue, che sono quelle che nell'avvezione
+    pura producevano i riccioli.
+    """
+    weight = np.clip(np.asarray(confidence, dtype=np.float32), 0.0, 1.0)
+    u = weight * satellite_u + (1.0 - weight) * model_u
+    v = weight * satellite_v + (1.0 - weight) * model_v
+    return u.astype(np.float32), v.astype(np.float32)
+
+
+def blend_clouds(advected_satellite, model_cloud, minutes: float):
+    """La nube osservata resta, la nube prevista dal modello entra col tempo.
+
+    A +0 minuti il peso del modello è zero. A +60 è un terzo: abbastanza per
+    far comparire uno sviluppo che il satellite non può inventare, non abbastanza
+    per cancellare una nube che il modello non ha.
+    """
+    model_weight = 0.35 * min(max(minutes, 0.0) / 60.0, 1.0)
+    observed = np.asarray(advected_satellite, dtype=np.float32)
+    forecast = np.asarray(model_cloud, dtype=np.float32)
+    if forecast.shape != observed.shape:
+        raise ValueError("modello e satellite devono stare sulla stessa griglia")
+    return (1.0 - model_weight) * observed + model_weight * forecast
+
+
 def save_frame(field: np.ndarray, path: str) -> None:
     image = Image.fromarray(np.clip(field, 0, 255).astype(np.uint8), mode="L")
     image = image.filter(ImageFilter.SMOOTH)
