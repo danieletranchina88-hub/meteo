@@ -6199,10 +6199,10 @@
         // Sicilia guadagnava 1.5x e restava fuori soglia. A 1.35 il guadagno
         // c'e' davvero, e la panoramica dentro il riquadro gia' scaricato
         // continua a non chiedere nulla.
-        // Lo zoom ricarica solo se il pixel in vista è il doppio di quello
-        // già scaricato. Prima 1,35 faceva ripartire la richiesta anche
-        // durante un gesto che MapLibre chiude con un piccolo cambio di scala.
-        return cloudLoadedMetres > size.metres * 2.0;
+        // Soglia di zoom, non di panoramica. 1,35 è il minimo che fa
+        // raggiungere il pixel nativo avvicinandosi; la panoramica non
+        // ricarica finché la vista resta nel riquadro già scaricato.
+        return cloudLoadedMetres > size.metres * 1.35;
       }
 
       function markCloudFreshness(slot) {
