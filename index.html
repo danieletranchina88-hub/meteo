@@ -2323,11 +2323,11 @@
           <button class="sat-layer" type="button" data-toggle="radar" aria-pressed="false">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20a8 8 0 0 1 0-16 M12 16.5a4.5 4.5 0 0 1 0-9 M12 13a1 1 0 0 1 0 2 M16 6l4-2 M17 12h4 M16 18l4 2"></path></svg>
             <span><b>Radar precipitazioni</b><small id="radar-note">RainViewer HD · osservato</small></span>
-          </button>
+           onclick="if(window.scientificLegend) window.scientificLegend.show('radar')"</button>
           <button class="sat-layer" type="button" data-toggle="livelightning" aria-pressed="false">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"></path></svg>
             <span><b>Scariche a terra · Live</b><small id="livelightning-note">Blitzortung · punti e tempi rilevati · traccia 150 s</small></span>
-          </button>
+           onclick="if(window.scientificLegend) window.scientificLegend.show('lightning')"</button>
           <button class="sat-layer" type="button" data-toggle="lightning" aria-pressed="false">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5a10 10 0 0 1 10 10 M4 9a5.5 5.5 0 0 1 5.5 5.5 M14.5 4 11 9.5h2.8L12 14l4.5-6h-2.9L14.5 4Z M4.5 19.5h.01"></path></svg>
             <span><b>Attività ottica · MTG LI</b><small id="lightning-note">AFA osservata · accumulo 5 minuti · storico</small></span>
@@ -6376,7 +6376,28 @@
           window.satelliteManager = new SatelliteManager(map);
         }
         
-        // Controlla se abbiamo già questa immagine in cache
+        // Controlla se abbia
+        // === WORLD CACHE PER DEZOOM FLUIDO ===
+        // Controlla se abbiamo un'immagine cached per questo zoom/area
+        if (window.worldCache) {
+          const cachedImage = window.worldCache.findBestImage(map.getZoom(), box);
+          if (cachedImage && !force) {
+            console.log("[Satellite] Using world cache (quality: " + cachedImage.quality.toFixed(2) + ")");
+            try {
+              publishSatelliteClouds(cachedImage.image, cachedImage.box, cachedImage.size, product, slot);
+              // Continua in background per aggiornare con immagine fresca
+              if (cachedImage.quality < 0.95) {
+                setTimeout(() => loadSatelliteClouds(true), 1000);
+              }
+              return;
+            } catch (e) {
+              console.warn("[Satellite] World cache hit but publish failed, fetching new");
+            }
+          }
+        }
+        // === FINE WORLD CACHE ===
+        
+mo già questa immagine in cache
         const center = map.getCenter();
         const zoom = Math.round(map.getZoom());
         const tile = window.satelliteManager.cache.get(zoom, 0, 0, product.layer, slot.value);
@@ -6420,6 +6441,27 @@
           if (token !== cloudToken || !showSatelliteClouds) return;
           try {
             publishSatelliteClouds(image, box, size, product, slot);
+          
+          // === SALVA NEL WORLD CACHE ===
+          if (window.worldCache) {
+            window.worldCache.cacheImage(map.getZoom(), image, box, size, Date.now());
+            
+            // Precarica zoom levels adiacenti
+            window.worldCache.prefetchZoomLevels(
+              map.getZoom(),
+              box,
+              (targetZoom, targetBox) => {
+                // Triggera caricamento asincrono per altri zoom levels
+                setTimeout(() => {
+                  if (showSatelliteClouds) {
+                    loadSatelliteClouds(false);
+                  }
+                }, 2000); // Ritardo per non sovraccaricare
+              }
+            );
+          }
+          // === FINE SALVATAGGIO CACHE ===
+
           } catch (error) {
             console.error("Nubi satellitari non elaborate", error);
             toast("Immagine satellitare non elaborabile");
@@ -16479,5 +16521,33 @@
       }
 
     </script>
+    <!-- World cache per satellite e legende scientifiche -->
+    <script src="scripts/satellite_world_cache.js">
+      // === GESTIONE LEGENDA SCIENTIFICA ===
+      function updateScientificLegend() {
+        if (!window.scientificLegend) return;
+        
+        // Mostra legenda se radar o fulmini sono attivi
+        if (showRadar || showLiveLightning) {
+          if (showRadar) {
+            window.scientificLegend.show('radar');
+          } else if (showLiveLightning) {
+            window.scientificLegend.show('lightning');
+          }
+        } else {
+          window.scientificLegend.hide();
+        }
+      }
+      
+      // Chiama updateScientificLegend quando cambia lo stato dei layer
+      const originalUpdateRadarLayer = window.updateRadarLayer;
+      window.updateRadarLayer = function() {
+        if (originalUpdateRadarLayer) originalUpdateRadarLayer();
+        updateScientificLegend();
+      };
+      // === FINE GESTIONE LEGENDA ===
+
+    </script>
+
 </body>
 </html>
