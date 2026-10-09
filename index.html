@@ -2316,6 +2316,10 @@
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17a5 5 0 0 1 0-10 6 6 0 0 1 11-1 5.5 5.5 0 0 1 0 11Z"></path></svg>
             <span><b>Immagine satellite</b><small>canale scelto qui sotto</small></span>
           </button>
+          <button class="sat-layer" type="button" data-toggle="cloudnow" aria-pressed="false">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16h14a3.5 3.5 0 0 0 .4-7 5 5 0 0 0-9.6-1.2A3.5 3.5 0 0 0 4 16Z M8 19h8 M12 16v3"></path></svg>
+            <span><b>Nubi tra un'ora</b><small id="cloudnow-note">spostamento dell'osservato · non è il modello</small></span>
+          </button>
           <button class="sat-layer" type="button" data-toggle="radar" aria-pressed="false">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20a8 8 0 0 1 0-16 M12 16.5a4.5 4.5 0 0 1 0-9 M12 13a1 1 0 0 1 0 2 M16 6l4-2 M17 12h4 M16 18l4 2"></path></svg>
             <span><b>Radar precipitazioni</b><small id="radar-note">RainViewer HD · osservato</small></span>
@@ -3891,6 +3895,9 @@
       // serve guardare la fotografia, non a ogni visita.
       let showSatellite = false;
       let showSatelliteClouds = false;
+      let showCloudNowcast = false;
+      let cloudObserved = null;
+      let cloudNowcastToken = 0;
       let showLightning = false;
       let showGraticule = false;
       // Carta cartografica: non un livello in piu', un modo di presentare la
@@ -6192,7 +6199,10 @@
         // Sicilia guadagnava 1.5x e restava fuori soglia. A 1.35 il guadagno
         // c'e' davvero, e la panoramica dentro il riquadro gia' scaricato
         // continua a non chiedere nulla.
-        return cloudLoadedMetres > size.metres * 1.35;
+        // Lo zoom ricarica solo se il pixel in vista è il doppio di quello
+        // già scaricato. Prima 1,35 faceva ripartire la richiesta anche
+        // durante un gesto che MapLibre chiude con un piccolo cambio di scala.
+        return cloudLoadedMetres > size.metres * 2.0;
       }
 
       function markCloudFreshness(slot) {
@@ -6274,6 +6284,8 @@
           canvas.width = image.naturalWidth || size.width;
           canvas.height = image.naturalHeight || size.height;
           canvas.getContext("2d").drawImage(image, 0, 0);
+          cloudObserved = { canvas: canvas, box: box, slot: slot };
+          if (showCloudNowcast) scheduleCloudNowcast();
           // L'immagine e' gia' qui, su una canvas nostra: costa pochissimo
           // ricavarne anche la sagoma delle nubi, che serve al campo di
           // attivita' per accendersi dove la nube c'e' davvero invece che
@@ -6372,7 +6384,7 @@
         // pannello non parta comunque con una stima.
         aggiornaIstantiDisponibili(false);
         let slot = cloudSlot(product);
-        const box = cloudRequestBox(0.22);
+        const box = cloudRequestBox(1.15);
         const size = cloudRequestSize(box, product);
         if (!force && !cloudNeedsReload(cloudRequestBox(0), size, slot)) return;
 
@@ -8164,7 +8176,7 @@
       function pubblicaLightningInCache(slotRichiesto, boxRichiesto, sizeRichiesta) {
         if (!showLightning) return false;
         const slot = slotRichiesto || cloudSlot(LIGHTNING_PRODUCT);
-        const box = boxRichiesto || cloudRequestBox(0.22);
+        const box = boxRichiesto || cloudRequestBox(1.15);
         const size = sizeRichiesta || cloudRequestSize(box, LIGHTNING_PRODUCT);
         const frameKey = cloudFrameKey(LIGHTNING_PRODUCT, slot, box, size);
         const frame = cloudFrames.get(frameKey);
@@ -8177,7 +8189,7 @@
         if (typeof document.hidden === "boolean" && document.hidden) return;
 
         let slot = cloudSlot(LIGHTNING_PRODUCT);
-        const box = cloudRequestBox(0.22);
+        const box = cloudRequestBox(1.15);
         const size = cloudRequestSize(box, LIGHTNING_PRODUCT);
         const framePronto = pubblicaLightningInCache(slot, box, size);
         if (framePronto) {
@@ -8303,13 +8315,225 @@
       // Dopo un gesto la vista e' cambiata: forse serve un'immagine piu'
       // stretta e piu' fitta. Aspetto che il gesto sia finito davvero, poi
       // lascio decidere a cloudNeedsReload.
+
+      function updateCloudNowcastLayer() {
+        if (!mapLoaded || !map.getLayer("cloud-nowcast-layer")) return;
+        map.setLayoutProperty(
+          "cloud-nowcast-layer", "visibility",
+          showCloudNowcast ? "visible" : "none"
+        );
+        if (showCloudNowcast) {
+          map.setLayoutProperty("satellite-clouds-layer", "visibility", "none");
+        } else if (showSatelliteClouds) {
+          map.setLayoutProperty("satellite-clouds-layer", "visibility", "visible");
+        }
+      }
+
+      function scheduleCloudNowcast() {
+        const token = ++cloudNowcastToken;
+        const note = document.getElementById("cloudnow-note");
+        if (note) note.textContent = "calcolo del moto dalle ultime due immagini…";
+        const observed = cloudObserved;
+        if (!observed) {
+          if (note) note.textContent = "in attesa dell'immagine satellite";
+          return;
+        }
+        const product = CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour;
+        const earlierSlot = slotArretrato(product, observed.slot, 3);
+        const image = new Image();
+        image.crossOrigin = "anonymous";
+        image.onload = function () {
+          if (token !== cloudNowcastToken) return;
+          try {
+            publishCloudNowcast(observed, image, earlierSlot);
+          } catch (error) {
+            console.error("Nowcast nubi non calcolato", error);
+            if (note) note.textContent = "moto non calcolabile su questo fotogramma";
+          }
+        };
+        image.onerror = function () {
+          if (note) note.textContent = "fotogramma di mezz'ora fa non disponibile";
+        };
+        image.src = cloudUrl(observed.box, {
+          width: observed.canvas.width, height: observed.canvas.height, metres: 1000
+        }, product, earlierSlot);
+      }
+
+      function publishCloudNowcast(observed, earlierImage, earlierSlot) {
+        const width = 180;
+        const height = Math.max(40, Math.round(observed.canvas.height * width / observed.canvas.width));
+        const laterSmall = document.createElement("canvas");
+        laterSmall.width = width;
+        laterSmall.height = height;
+        laterSmall.getContext("2d").drawImage(observed.canvas, 0, 0, width, height);
+        const earlierSmall = document.createElement("canvas");
+        earlierSmall.width = width;
+        earlierSmall.height = height;
+        earlierSmall.getContext("2d").drawImage(earlierImage, 0, 0, width, height);
+        const later = laterSmall.getContext("2d").getImageData(0, 0, width, height).data;
+        const earlier = earlierSmall.getContext("2d").getImageData(0, 0, width, height).data;
+        const flow = cloudMotionField(earlier, later, width, height, observed.box);
+        const hours = 1;
+        const out = document.createElement("canvas");
+        out.width = Math.min(observed.canvas.width, 720);
+        out.height = Math.round(observed.canvas.height * out.width / observed.canvas.width);
+        const ctx = out.getContext("2d");
+        ctx.drawImage(observed.canvas, 0, 0, out.width, out.height);
+        const frame = ctx.getImageData(0, 0, out.width, out.height);
+        const src = new Uint8ClampedArray(frame.data);
+        const sx = out.width / width;
+        const sy = out.height / height;
+        for (let y = 0; y < out.height; y += 1) {
+          const gy = Math.min(height - 1, Math.floor(y / sy));
+          for (let x = 0; x < out.width; x += 1) {
+            const gx = Math.min(width - 1, Math.floor(x / sx));
+            const k = (gy * width + gx) * 2;
+            const fromX = Math.max(0, Math.min(out.width - 1, Math.round(x - flow[k] * sx * hours)));
+            const fromY = Math.max(0, Math.min(out.height - 1, Math.round(y - flow[k + 1] * sy * hours)));
+            const di = (y * out.width + x) * 4;
+            const si = (fromY * out.width + fromX) * 4;
+            frame.data[di] = src[si];
+            frame.data[di + 1] = src[si + 1];
+            frame.data[di + 2] = src[si + 2];
+            frame.data[di + 3] = src[si + 3];
+          }
+        }
+        paintModelGrowth(frame, observed.box, out.width, out.height);
+        ctx.putImageData(frame, 0, 0);
+        const box = observed.box;
+        map.getSource("cloud-nowcast").updateImage({
+          url: out.toDataURL("image/jpeg", 0.82),
+          coordinates: [
+            [box.west, box.north], [box.east, box.north],
+            [box.east, box.south], [box.west, box.south]
+          ]
+        });
+        updateCloudNowcastLayer();
+        const note = document.getElementById("cloudnow-note");
+        if (note) {
+          note.textContent = "tra un'ora · moto satellite"
+            + (flow.modelUsed ? " e vento del modello" : "")
+            + " · " + formatClockTime(earlierSlot.date) + "→" + formatClockTime(observed.slot.date);
+        }
+      }
+
+      function cloudMotionField(earlier, later, width, height, box) {
+        const window = 12;
+        const stride = 14;
+        const maxShift = 6;
+        const u = new Float32Array(width * height);
+        const v = new Float32Array(width * height);
+        const weight = new Float32Array(width * height);
+        let modelUsed = false;
+        const model = modelWindPxPerHour(box, width, height);
+        function grey(data, x, y) {
+          const i = (y * width + x) * 4;
+          return data[i] * 0.3 + data[i + 1] * 0.59 + data[i + 2] * 0.11;
+        }
+        for (let y = window + maxShift; y < height - window - maxShift; y += stride) {
+          for (let x = window + maxShift; x < width - window - maxShift; x += stride) {
+            let best = 0, second = 0, bdx = 0, bdy = 0;
+            const meanT = grey(later, x, y);
+            for (let dy = -maxShift; dy <= maxShift; dy += 2) {
+              for (let dx = -maxShift; dx <= maxShift; dx += 2) {
+                let acc = 0, nt = 0, ne = 0;
+                for (let j = -window; j <= window; j += 3) {
+                  for (let i = -window; i <= window; i += 3) {
+                    const a = grey(later, x + i, y + j) - meanT;
+                    const b = grey(earlier, x + i - dx, y + j - dy) - meanT;
+                    acc += a * b; nt += a * a; ne += b * b;
+                  }
+                }
+                const score = acc / Math.sqrt(Math.max(nt * ne, 1));
+                if (score > best) { second = best; best = score; bdx = dx; bdy = dy; }
+                else if (score > second) second = score;
+              }
+            }
+            const trusted = best > 0.45 && best - second > 0.05;
+            let vx = trusted ? bdx * 2 : 0;
+            let vy = trusted ? bdy * 2 : 0;
+            if (!trusted && model) {
+              vx = model.u; vy = model.v; modelUsed = true;
+            }
+            const radius = 16;
+            for (let j = -radius; j <= radius; j += 1) {
+              for (let i = -radius; i <= radius; i += 1) {
+                const xx = x + i, yy = y + j;
+                if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
+                const fade = Math.exp(-(i * i + j * j) / (2 * 8 * 8));
+                const p = yy * width + xx;
+                u[p] += fade * vx; v[p] += fade * vy; weight[p] += fade;
+              }
+            }
+          }
+        }
+        const flow = new Float32Array(width * height * 2);
+        flow.modelUsed = modelUsed;
+        for (let i = 0; i < u.length; i += 1) {
+          const w = weight[i] || 1;
+          flow[i * 2] = u[i] / w;
+          flow[i * 2 + 1] = v[i] / w;
+        }
+        return flow;
+      }
+
+      function modelWindPxPerHour(box, width, height) {
+        if (!currentData || !currentData.wind_u || !currentData.meta) return null;
+        const grid = getGrid(currentData.wind_u);
+        const gridV = getGrid(currentData.wind_v);
+        if (!grid || !gridV) return null;
+        const meta = currentData.meta;
+        const lon = (box.west + box.east) / 2;
+        const lat = (box.south + box.north) / 2;
+        const gx = (lon - meta.lo1) / meta.dx;
+        const gy = (meta.la1 - lat) / meta.dy;
+        const u = fieldSample(grid, gx, gy);
+        const v = fieldSample(gridV, gx, gy);
+        if (!Number.isFinite(u) || !Number.isFinite(v)) return null;
+        const kmX = (box.east - box.west) * 111.32 * Math.cos(lat * Math.PI / 180) / width;
+        const kmY = (box.north - box.south) * 111.32 / height;
+        // Il vento a 10 m è più lento del flusso che trasporta la nube.
+        // 1,5 è il fattore di sterzo usato quando manca il vento in quota.
+        return { u: u * 1.5 * 3.6 / kmX, v: -v * 1.5 * 3.6 / kmY };
+      }
+
+      function fieldSample(grid, gx, gy) {
+        if (!grid || !currentData || !currentData.meta) return NaN;
+        const meta = currentData.meta;
+        const x = Math.max(0, Math.min(meta.nx - 1, Math.round(gx)));
+        const y = Math.max(0, Math.min(meta.ny - 1, Math.round(gy)));
+        const value = grid[y * meta.nx + x];
+        return Number.isFinite(value) ? value : NaN;
+      }
+
+      function paintModelGrowth(frame, box, width, height) {
+        if (!currentData || !getGrid(currentData.cloud) || !currentData.meta) return;
+        const cloud = getGrid(currentData.cloud);
+        const meta = currentData.meta;
+        for (let y = 0; y < height; y += 2) {
+          const lat = box.north - (y / height) * (box.north - box.south);
+          const gy = (meta.la1 - lat) / meta.dy;
+          for (let x = 0; x < width; x += 2) {
+            const lon = box.west + (x / width) * (box.east - box.west);
+            const gx = (lon - meta.lo1) / meta.dx;
+            const cover = fieldSample(cloud, gx, gy);
+            const i = (y * width + x) * 4;
+            const clear = frame.data[i] < 40 && frame.data[i + 3] < 80;
+            if (!clear || !(cover > 45)) continue;
+            const alpha = Math.round(Math.min(120, (cover - 45) * 1.4));
+            frame.data[i] = 210; frame.data[i + 1] = 214; frame.data[i + 2] = 216;
+            frame.data[i + 3] = alpha;
+          }
+        }
+      }
+
       function scheduleCloudReload() {
         if (!showSatelliteClouds) return;
         if (cloudReloadTimer) clearTimeout(cloudReloadTimer);
         cloudReloadTimer = setTimeout(function () {
           cloudReloadTimer = 0;
           loadSatelliteClouds(false);
-        }, 600);
+        }, 1100);
       }
 
       // ---- BARRA DEL TEMPO DELL'OSSERVATO ------------------------------
@@ -8396,7 +8620,7 @@
           CLOUD_HISTORY_HOURS * 3600 * 1000 / slotMs
         );
         const corrente = cloudSlot(product);
-        const box = cloudRequestBox(0.22);
+        const box = cloudRequestBox(1.15);
         const size = cloudRequestSize(box, product);
         for (let distanza = 1; distanza <= passi; distanza += 1) {
           for (const verso of [-1, 1]) {
@@ -8574,7 +8798,7 @@
         if (!source) return false;
         const product = CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour;
         const slot = cloudSlot(product);
-        const box = cloudRequestBox(0.22);
+        const box = cloudRequestBox(1.15);
         const size = cloudRequestSize(box, product);
         const frameKey = cloudFrameKey(product, slot, box, size);
         const frame = cloudFrames.get(frameKey);
@@ -9156,6 +9380,7 @@
           radar: showRadar,
           satclouds: showSatelliteClouds,
           satimage: showSatelliteClouds,
+          cloudnow: showCloudNowcast,
           lightning: showLightning,
           livelightning: showLiveLightning,
           volume: showVolumeClouds,
@@ -9470,7 +9695,7 @@
       // nuovo farebbe uscire dalla vista al primo clic.
       const SATELLITE_TOGGLES = new Set([
         "satclouds", "satimage", "radar", "lightning", "livelightning",
-        "strikesound", "strikehaptic", "volume"
+        "strikesound", "strikehaptic", "volume", "cloudnow"
       ]);
 
       function setToggle(name) {
@@ -9522,6 +9747,17 @@
           updateSatelliteClouds();
           aggiornaDominioNavigabile();
           updateSatelliteControlsVisibility();
+        } else if (name === "cloudnow") {
+          showCloudNowcast = !showCloudNowcast;
+          if (showCloudNowcast && !showSatelliteClouds) {
+            showSatelliteClouds = true;
+            updateSatelliteClouds();
+          }
+          updateCloudNowcastLayer();
+          if (showCloudNowcast) scheduleCloudNowcast();
+          toast(showCloudNowcast
+            ? "Nubi tra un'ora: l'osservato spostato col suo moto"
+            : "Nowcast nubi spento");
         } else if (name === "strikesound") {
           setStrikeSound(!strikeSoundOn);
         } else if (name === "strikehaptic") {
@@ -15422,6 +15658,28 @@
           // Zoom e panoramica cambiano il riquadro da chiedere: avvicinandosi
           // si guadagna dettaglio fino al pixel nativo dello strumento.
           map.on("moveend", scheduleCloudReload);
+
+          map.addSource("cloud-nowcast", {
+            type: "image",
+            url: "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+            coordinates: [
+              [CLOUD_DOMAIN.west, CLOUD_DOMAIN.north],
+              [CLOUD_DOMAIN.east, CLOUD_DOMAIN.north],
+              [CLOUD_DOMAIN.east, CLOUD_DOMAIN.south],
+              [CLOUD_DOMAIN.west, CLOUD_DOMAIN.south]
+            ]
+          });
+          map.addLayer({
+            id: "cloud-nowcast-layer",
+            type: "raster",
+            source: "cloud-nowcast",
+            layout: { visibility: "none" },
+            paint: {
+              "raster-opacity": 0.92,
+              "raster-resampling": "linear",
+              "raster-fade-duration": 0
+            }
+          });
 
           map.addLayer({
             id: "satellite-clouds-layer",
