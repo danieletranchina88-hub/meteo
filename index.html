@@ -6371,47 +6371,7 @@
       }
 
       function loadSatelliteClouds(force) {
-        // === SISTEMA DI CACHING SATELLITE ===
-        if (!window.satelliteManager) {
-          window.satelliteManager = new SatelliteManager(map);
-        }
         
-        // Controlla se abbia
-        // === WORLD CACHE PER DEZOOM FLUIDO ===
-        // Controlla se abbiamo un'immagine cached per questo zoom/area
-        if (window.worldCache) {
-          const cachedImage = window.worldCache.findBestImage(map.getZoom(), box);
-          if (cachedImage && !force) {
-            console.log("[Satellite] Using world cache (quality: " + cachedImage.quality.toFixed(2) + ")");
-            try {
-              publishSatelliteClouds(cachedImage.image, cachedImage.box, cachedImage.size, product, slot);
-              // Continua in background per aggiornare con immagine fresca
-              if (cachedImage.quality < 0.95) {
-                setTimeout(() => loadSatelliteClouds(true), 1000);
-              }
-              return;
-            } catch (e) {
-              console.warn("[Satellite] World cache hit but publish failed, fetching new");
-            }
-          }
-        }
-        // === FINE WORLD CACHE ===
-        
-mo già questa immagine in cache
-        const center = map.getCenter();
-        const zoom = Math.round(map.getZoom());
-        const tile = window.satelliteManager.cache.get(zoom, 0, 0, product.layer, slot.value);
-        
-        if (tile && !force) {
-          console.log("[Satellite] Using cached image");
-          try {
-            publishSatelliteClouds(tile, box, size, product, slot);
-            return;
-          } catch (e) {
-            console.warn("[Satellite] Cache hit but publish failed, fetching new");
-          }
-        }
-        // === FINE SISTEMA DI CACHING ===
         
 
         if (!mapLoaded || !showSatelliteClouds) return;
@@ -6441,26 +6401,32 @@ mo già questa immagine in cache
           if (token !== cloudToken || !showSatelliteClouds) return;
           try {
             publishSatelliteClouds(image, box, size, product, slot);
-          
-          // === SALVA NEL WORLD CACHE ===
-          if (window.worldCache) {
-            window.worldCache.cacheImage(map.getZoom(), image, box, size, Date.now());
-            
-            // Precarica zoom levels adiacenti
-            window.worldCache.prefetchZoomLevels(
-              map.getZoom(),
-              box,
-              (targetZoom, targetBox) => {
-                // Triggera caricamento asincrono per altri zoom levels
-                setTimeout(() => {
-                  if (showSatelliteClouds) {
-                    loadSatelliteClouds(false);
-                  }
-                }, 2000); // Ritardo per non sovraccaricare
-              }
-            );
+          } catch (error) {
+            console.error("Nubi satellitari non elaborabili", error);
+            toast("Immagine satellitare non elaborabile");
           }
-          // === FINE SALVATAGGIO CACHE ===
+        
+        // === SALVA NEL WORLD CACHE (dopo successo) ===
+        if (window.worldCache) {
+          window.worldCache.cacheImage(map.getZoom(), image, box, size, Date.now());
+          
+          // Precarica zoom levels adiacenti in background
+          window.worldCache.prefetchZoomLevels(
+            map.getZoom(),
+            box,
+            (targetZoom, targetBox) => {
+              setTimeout(() => {
+                if (showSatelliteClouds) {
+                  loadSatelliteClouds(false);
+                }
+              }, 2000);
+            }
+          );
+        }
+        // === FINE SALVATAGGIO CACHE ===
+
+          
+          
 
           } catch (error) {
             console.error("Nubi satellitari non elaborate", error);
