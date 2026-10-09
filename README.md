@@ -51,6 +51,24 @@ Le palette colori sono state progettate seguendo standard meteorologici internaz
 - Bianco (stabile) → Giallo → Arancione → Rosso (molto instabile)
 - Soglie: <1000 debole, 1000-2500 moderato, >2500 forte
 
+### Classificazione e Tracking dei Fronti (Nuovo in v2.1.0)
+
+Il sistema ora include classificazione completa e tracking temporale dei fronti:
+
+#### Classificazione Tipo Fronte
+- **Freddo**: Avvezione termica ≤ -1.5 K/(3h), trough di pressione
+- **Caldo**: Avvezione termica ≥ 1.0 K/(3h)
+- **Occluso**: Struttura verticale complessa (cold-type o warm-type)
+- **Stazionario**: Velocità < 5 km/h o avvezione debole
+
+#### Tracking Temporale
+- Identificazione dello stesso fronte attraverso time steps consecutivi
+- Calcolo velocità di propagazione (km/h)
+- Rilevamento automatico di frontogenesi e frontolisi
+- Nowcasting della posizione futura (6h ahead)
+
+Vedi `scripts/example_usage.py` per esempi completi.
+
 ### Strumenti Scientifici
 
 #### Meteogrammi Avanzati
