@@ -553,3 +553,611 @@ body.clean-mode #place-search, body.clean-mode #quick-layers, body.clean-mode #v
 /* Tutta l'intestazione e' il bersaglio del tocco, non la sola freccia. */
 #satellite-status { cursor: pointer; }
 #satellite-controls { cursor: default; }
+
+
+/* ============================================ */
+/* ============================================
+   SICILIA METEO - ENHANCED DESIGN SYSTEM
+   Professional scientific interface inspired by Windy/Ventusky
+   ============================================ */
+
+/* Enhanced color palette with scientific accuracy */
+:root {
+  /* Base surfaces - darker for professional look */
+  --surface: rgba(12, 22, 35, 0.94);
+  --surface-strong: #0c1623;
+  --surface-soft: rgba(15, 28, 45, 0.88);
+  
+  /* Borders and strokes */
+  --stroke: rgba(200, 220, 240, 0.14);
+  --stroke-strong: rgba(160, 190, 220, 0.32);
+  --stroke-subtle: rgba(180, 200, 220, 0.08);
+  
+  /* Text hierarchy */
+  --text: #f4f7fc;
+  --text-2: #e0e8f0;
+  --muted: #9fb3c8;
+  --deep-muted: #6b7f95;
+  
+  /* Scientific accent colors - desaturated to not distract from data */
+  --accent: #4a8fa8;
+  --accent-hover: #5a9fb8;
+  --accent-active: #3a7f98;
+  
+  /* Status colors */
+  --success: #5a9a7a;
+  --warning: #c89a5a;
+  --danger: #b86a6a;
+  --info: #5a8ab8;
+  
+  /* Shadows and depth */
+  --shadow: 0 8px 32px rgba(0, 12, 24, 0.42);
+  --shadow-strong: 0 16px 48px rgba(0, 8, 16, 0.56);
+  --shadow-subtle: 0 4px 16px rgba(0, 16, 32, 0.28);
+  
+  /* Spacing and sizing */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --ui-gap: 20px;
+  --sidebar-width: 64px;
+  --sidebar-expanded: 280px;
+  
+  /* Transitions */
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================
+   WINDY-STYLE LEFT SIDEBAR
+   ============================================ */
+.scientific-sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--sidebar-width);
+  background: var(--surface-strong);
+  border-right: 1px solid var(--stroke);
+  box-shadow: var(--shadow);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+  transition: width var(--transition-base);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.scientific-sidebar.expanded {
+  width: var(--sidebar-expanded);
+}
+
+.sidebar-section {
+  width: 100%;
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.sidebar-section:last-child {
+  border-bottom: none;
+}
+
+.sidebar-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 8px 8px;
+  display: none;
+}
+
+.scientific-sidebar.expanded .sidebar-label {
+  display: block;
+}
+
+.sidebar-icon-button {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 4px auto;
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  position: relative;
+}
+
+.sidebar-icon-button:hover {
+  background: rgba(74, 143, 168, 0.12);
+  border-color: var(--stroke-strong);
+  color: var(--text);
+}
+
+.sidebar-icon-button.active {
+  background: rgba(74, 143, 168, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sidebar-icon-button svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.8;
+}
+
+/* Tooltip for sidebar icons */
+.sidebar-icon-button::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--surface-strong);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--stroke);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast);
+  z-index: 1001;
+}
+
+.sidebar-icon-button:hover::after {
+  opacity: 1;
+}
+
+.scientific-sidebar.expanded .sidebar-icon-button::after {
+  display: none;
+}
+
+/* Expanded sidebar content */
+.sidebar-expanded-content {
+  display: none;
+  width: 100%;
+  padding: 8px;
+}
+
+.scientific-sidebar.expanded .sidebar-expanded-content {
+  display: block;
+}
+
+.sidebar-item {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin: 2px 0;
+}
+
+.sidebar-item:hover {
+  background: rgba(74, 143, 168, 0.12);
+  color: var(--text);
+}
+
+.sidebar-item.active {
+  background: rgba(74, 143, 168, 0.18);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ============================================
+   ENHANCED TIMELINE
+   ============================================ */
+.scientific-timeline {
+  position: fixed;
+  bottom: 0;
+  left: var(--sidebar-width);
+  right: 0;
+  height: 72px;
+  background: var(--surface-strong);
+  border-top: 1px solid var(--stroke);
+  box-shadow: 0 -4px 24px rgba(0, 12, 24, 0.36);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-right: 24px;
+}
+
+.timeline-button {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--stroke);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.timeline-button:hover {
+  background: rgba(74, 143, 168, 0.12);
+  border-color: var(--accent);
+}
+
+.timeline-button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.timeline-scrubber {
+  flex: 1;
+  height: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+
+.timeline-track {
+  width: 100%;
+  height: 6px;
+  background: var(--stroke);
+  border-radius: 3px;
+  position: relative;
+  cursor: pointer;
+}
+
+.timeline-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width var(--transition-fast);
+}
+
+.timeline-thumb {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  border: 2px solid var(--text);
+  border-radius: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: transform var(--transition-fast);
+}
+
+.timeline-thumb:hover {
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+.timeline-thumb:active {
+  cursor: grabbing;
+}
+
+.timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-current {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* ============================================
+   SCIENTIFIC COLOR PALETTES
+   ============================================ */
+
+/* Temperature: Blue (-30°C) → Green (0°C) → Red (+40°C) */
+.palette-temperature {
+  --color-0: #1a3a7a;
+  --color-1: #2a5a9a;
+  --color-2: #3a7ab8;
+  --color-3: #5a9ad0;
+  --color-4: #7ab8e0;
+  --color-5: #9ad0e8;
+  --color-6: #bae0e8;
+  --color-7: #dae8c0;
+  --color-8: #c0d890;
+  --color-9: #a0c860;
+  --color-10: #80b830;
+  --color-11: #60a800;
+  --color-12: #80c800;
+  --color-13: #a0e800;
+  --color-14: #c0ff30;
+  --color-15: #e0ff60;
+  --color-16: #ffff80;
+  --color-17: #ffe040;
+  --color-18: #ffc020;
+  --color-19: #ffa000;
+  --color-20: #ff8000;
+  --color-21: #ff6000;
+  --color-22: #ff4000;
+  --color-23: #ff2000;
+  --color-24: #e00000;
+}
+
+/* Wind: White (0 kt) → Yellow (20 kt) → Red (50 kt) → Purple (100 kt) */
+.palette-wind {
+  --color-0: #f0f0f0;
+  --color-1: #e0e8f0;
+  --color-2: #d0e0e8;
+  --color-3: #c0d8e0;
+  --color-4: #b0d0d8;
+  --color-5: #a0c8d0;
+  --color-6: #90c0c8;
+  --color-7: #80b8c0;
+  --color-8: #70b0b8;
+  --color-9: #60a8b0;
+  --color-10: #50a0a8;
+  --color-11: #4098a0;
+  --color-12: #309098;
+  --color-13: #208890;
+  --color-14: #108088;
+  --color-15: #007880;
+  --color-16: #007078;
+  --color-17: #006870;
+  --color-18: #006068;
+  --color-19: #005860;
+  --color-20: #005058;
+  --color-21: #004850;
+  --color-22: #004048;
+  --color-23: #003840;
+  --color-24: #003038;
+}
+
+/* Precipitation: Light green (0.1mm) → Dark green (5mm) → Red (20mm) → Purple (50mm) */
+.palette-precipitation {
+  --color-0: #e0f0e8;
+  --color-1: #c0e0d0;
+  --color-2: #a0d0b8;
+  --color-3: #80c0a0;
+  --color-4: #60b088;
+  --color-5: #40a070;
+  --color-6: #209058;
+  --color-7: #008040;
+  --color-8: #007030;
+  --color-9: #006020;
+  --color-10: #005010;
+  --color-11: #204000;
+  --color-12: #403000;
+  --color-13: #602000;
+  --color-14: #801000;
+  --color-15: #a00000;
+  --color-16: #c00000;
+  --color-17: #e00000;
+  --color-18: #ff0000;
+  --color-19: #ff2020;
+  --color-20: #ff4040;
+  --color-21: #ff6060;
+  --color-22: #ff8080;
+  --color-23: #ffa0a0;
+  --color-24: #ffc0c0;
+}
+
+/* Pressure: Blue (980 hPa) → Green (1013 hPa) → Red (1040 hPa) */
+.palette-pressure {
+  --color-0: #1a2a5a;
+  --color-1: #2a3a6a;
+  --color-2: #3a4a7a;
+  --color-3: #4a5a8a;
+  --color-4: #5a6a9a;
+  --color-5: #6a7aaa;
+  --color-6: #7a8aba;
+  --color-7: #8a9aca;
+  --color-8: #9aaada;
+  --color-9: #aabaea;
+  --color-10: #bacaef;
+  --color-11: #cadaef;
+  --color-12: #dacaef;
+  --color-13: #eadaef;
+  --color-14: #f0e0f0;
+  --color-15: #f0d8e8;
+  --color-16: #f0d0e0;
+  --color-17: #f0c8d8;
+  --color-18: #f0c0d0;
+  --color-19: #f0b8c8;
+  --color-20: #f0b0c0;
+  --color-21: #f0a8b8;
+  --color-22: #f0a0b0;
+  --color-23: #f098a8;
+  --color-24: #f090a0;
+}
+
+/* CAPE: White (0 J/kg) → Yellow (1000) → Orange (2500) → Red (4000+) */
+.palette-cape {
+  --color-0: #f8f8f8;
+  --color-1: #f0f0e8;
+  --color-2: #e8e8d8;
+  --color-3: #e0e0c8;
+  --color-4: #d8d8b8;
+  --color-5: #d0d0a8;
+  --color-6: #c8c898;
+  --color-7: #c0c088;
+  --color-8: #b8b878;
+  --color-9: #b0b068;
+  --color-10: #a8a858;
+  --color-11: #a0a048;
+  --color-12: #989838;
+  --color-13: #909028;
+  --color-14: #888818;
+  --color-15: #808008;
+  --color-16: #908000;
+  --color-17: #a08000;
+  --color-18: #b08000;
+  --color-19: #c08000;
+  --color-20: #d08000;
+  --color-21: #e08000;
+  --color-22: #f08000;
+  --color-23: #ff8000;
+  --color-24: #ff9000;
+}
+
+/* ============================================
+   ENHANCED LEGENDS
+   ============================================ */
+.scientific-legend {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+  z-index: 998;
+  min-width: 200px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.legend-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+  letter-spacing: 0.02em;
+}
+
+.legend-gradient {
+  height: 12px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  background: linear-gradient(to right, 
+    var(--color-0), var(--color-3), var(--color-6), 
+    var(--color-9), var(--color-12), var(--color-15), 
+    var(--color-18), var(--color-21), var(--color-24));
+}
+
+.legend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-unit {
+  text-align: center;
+  font-size: 10px;
+  color: var(--deep-muted);
+  margin-top: 8px;
+  font-weight: 500;
+}
+
+/* ============================================
+   ENHANCED TOOLTIPS
+   ============================================ */
+.scientific-tooltip {
+  position: fixed;
+  background: var(--surface-strong);
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  box-shadow: var(--shadow-strong);
+  z-index: 2000;
+  pointer-events: none;
+  min-width: 240px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.tooltip-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--stroke);
+}
+
+.tooltip-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  font-size: 12px;
+}
+
+.tooltip-label {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.tooltip-value {
+  color: var(--text);
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltip-coords {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--stroke);
+  font-size: 10px;
+  color: var(--deep-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================ */
+@media (max-width: 768px) {
+  .scientific-sidebar {
+    width: 56px;
+  }
+  
+  .scientific-timeline {
+    left: 56px;
+    height: 64px;
+    padding: 0 16px;
+  }
+  
+  .scientific-legend {
+    right: 16px;
+    bottom: 88px;
+  }
+}
+
+@media (max-width: 480px) {
+  .scientific-sidebar {
+    width: 48px;
+  }
+  
+  .scientific-timeline {
+    left: 48px;
+    padding: 0 12px;
+  }
+  
+  .timeline-labels {
+    font-size: 10px;
+  }
+}
