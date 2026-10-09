@@ -1161,3 +1161,310 @@ body.clean-mode #place-search, body.clean-mode #quick-layers, body.clean-mode #v
     font-size: 10px;
   }
 }
+
+
+/* ============================================
+   SICILIA METEO - SCIENTIFIC ENHANCEMENTS
+   Professional improvements inspired by Windy/Ventusky
+   ============================================ */
+
+/* Enhanced sidebar for parameter selection */
+.scientific-sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 64px;
+  background: rgba(12, 22, 35, 0.94);
+  border-right: 1px solid rgba(200, 220, 240, 0.14);
+  box-shadow: 0 8px 32px rgba(0, 12, 24, 0.42);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.sidebar-icon-button {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #9fb3c8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 4px auto;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  position: relative;
+}
+
+.sidebar-icon-button:hover {
+  background: rgba(74, 143, 168, 0.12);
+  border-color: rgba(160, 190, 220, 0.32);
+  color: #f4f7fc;
+}
+
+.sidebar-icon-button.active {
+  background: rgba(74, 143, 168, 0.18);
+  border-color: #4a8fa8;
+  color: #4a8fa8;
+}
+
+.sidebar-icon-button svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.8;
+}
+
+.sidebar-icon-button::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(12, 22, 35, 0.94);
+  color: #f4f7fc;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 8px 32px rgba(0, 12, 24, 0.42);
+  border: 1px solid rgba(160, 190, 220, 0.32);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1001;
+}
+
+.sidebar-icon-button:hover::after {
+  opacity: 1;
+}
+
+/* Enhanced timeline */
+.scientific-timeline {
+  position: fixed;
+  bottom: 0;
+  left: 64px;
+  right: 0;
+  height: 72px;
+  background: rgba(12, 22, 35, 0.94);
+  border-top: 1px solid rgba(200, 220, 240, 0.14);
+  box-shadow: 0 -4px 24px rgba(0, 12, 24, 0.36);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.timeline-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-right: 24px;
+}
+
+.timeline-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid rgba(200, 220, 240, 0.14);
+  color: #f4f7fc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.timeline-button:hover {
+  background: rgba(74, 143, 168, 0.12);
+  border-color: #4a8fa8;
+}
+
+.timeline-button.active {
+  background: #4a8fa8;
+  border-color: #4a8fa8;
+  color: white;
+}
+
+.timeline-scrubber {
+  flex: 1;
+  height: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+}
+
+.timeline-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(200, 220, 240, 0.14);
+  border-radius: 3px;
+  position: relative;
+  cursor: pointer;
+}
+
+.timeline-progress {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: #4a8fa8;
+  border-radius: 3px;
+  transition: width 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #9fb3c8;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-current {
+  color: #4a8fa8;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* Scientific legends */
+.scientific-legend {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  background: rgba(12, 22, 35, 0.94);
+  border: 1px solid rgba(200, 220, 240, 0.14);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 8px 32px rgba(0, 12, 24, 0.42);
+  z-index: 998;
+  min-width: 200px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.legend-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f4f7fc;
+  margin-bottom: 12px;
+  letter-spacing: 0.02em;
+}
+
+.legend-gradient {
+  height: 12px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.legend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #9fb3c8;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-unit {
+  text-align: center;
+  font-size: 10px;
+  color: #6b7f95;
+  margin-top: 8px;
+  font-weight: 500;
+}
+
+/* Enhanced tooltips */
+.scientific-tooltip {
+  position: fixed;
+  background: rgba(12, 22, 35, 0.94);
+  border: 1px solid rgba(160, 190, 220, 0.32);
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 0 16px 48px rgba(0, 8, 16, 0.56);
+  z-index: 2000;
+  pointer-events: none;
+  min-width: 240px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.tooltip-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f4f7fc;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(200, 220, 240, 0.14);
+}
+
+.tooltip-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  font-size: 12px;
+}
+
+.tooltip-label {
+  color: #9fb3c8;
+  font-weight: 500;
+}
+
+.tooltip-value {
+  color: #f4f7fc;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltip-coords {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(200, 220, 240, 0.14);
+  font-size: 10px;
+  color: #6b7f95;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .scientific-sidebar {
+    width: 56px;
+  }
+  
+  .scientific-timeline {
+    left: 56px;
+    height: 64px;
+    padding: 0 16px;
+  }
+  
+  .scientific-legend {
+    right: 16px;
+    bottom: 88px;
+  }
+}
+
+@media (max-width: 480px) {
+  .scientific-sidebar {
+    width: 48px;
+  }
+  
+  .scientific-timeline {
+    left: 48px;
+    padding: 0 12px;
+  }
+  
+  .timeline-labels {
+    font-size: 10px;
+  }
+}
