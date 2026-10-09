@@ -1,5 +1,77 @@
 # Changelog - Migliorie Scientifiche ICON-2I
 
+## Versione 2.1.0 - 2026-10-09
+
+### 🎯 Classificazione Completa dei Fronti (Priorità Alta - Completato)
+
+#### Nuove Funzionalità
+- **Classificazione tipo fronte**: Freddo, Caldo, Occluso, Stazionario
+- **Tracking temporale**: Identificazione dello stesso fronte attraverso time steps consecutivi
+- **Calcolo velocità**: Stima della velocità di propagazione dei fronti (km/h)
+- **Frontogenesi/Frontolisi**: Rilevamento automatico di rafforzamento/indebolimento
+- **Nowcasting**: Previsione della posizione futura dei fronti (6h ahead)
+
+#### Implementazione Tecnica
+- **`front_type_classification.py`** (nuovo modulo, ~300 righe)
+  - Calcolo avvezione termica: `-V · ∇(θ_w)` in K/(3h)
+  - Stima velocità fronte: Componente normale del vento (regola K3 di Hewson)
+  - Analisi struttura verticale: Rilevamento occlusioni (cold-type vs warm-type)
+  - Pattern di pressione: Identificazione trough/ridge
+  - Decision tree basato su soglie calibrate per Mediterraneo
+
+- **`front_tracking.py`** (nuovo modulo, ~400 righe)
+  - Matching geometrico bidirezionale tra time steps
+  - Calcolo vettore spostamento (mean displacement + std)
+  - Assegnazione track ID univoci
+  - Rilevamento eventi frontogenesi/frontolisi
+  - Nowcasting con estrapolazione lineare
+
+- **Integrazione `front_engine.py`**
+  - `detect_fronts_with_classification()`: Entry point principale
+  - `track_fronts_across_time()`: Tracking multi-time-step
+  - `nowcast_fronts()`: Generazione previsioni posizione
+
+#### Parametri di Classificazione
+| Parametro | Valore | Significato |
+|-----------|--------|-------------|
+| `COLD_ADVECTION_THRESHOLD` | -1.5 K/(3h) | Avvezione fredda forte |
+| `WARM_ADVECTION_THRESHOLD` | 1.0 K/(3h) | Avvezione calda moderata |
+| `STATIONARY_SPEED_THRESHOLD` | 5.0 km/h | Fronte stazionario |
+| `OCCLUSION_VERTICAL_RATIO` | 0.3 | Soglia per occlusioni |
+| `MAX_FRONT_SPEED_KMH` | 80.0 km/h | Velocità massima fisicamente plausibile |
+| `MIN_OVERLAP_FOR_MATCH` | 0.40 | Overlap minimo per matching |
+
+#### Colori per Visualizzazione
+| Tipo Fronte | Colore | Simbolo | Line Width |
+|-------------|--------|---------|------------|
+| **Freddo** | `#1e88e5` (blu) | Triangoli | 3.0 |
+| **Caldo** | `#e53935` (rosso) | Semicerchi | 3.0 |
+| **Occluso** | `#8e24aa` (viola) | Alternato | 3.0 |
+| **Stazionario** | `#43a047` (verde) | Alternato entrambi lati | 2.0, dash [8,4] |
+| **Non classificato** | `#757575` (grigio) | Linea semplice | 2.0 |
+
+#### Validazione Scientifica
+- Basato su definizioni della scuola norvegese (Petterssen 1956)
+- Adattato per regione mediterranea
+- Soglie calibrate su dati ICON-2I reali
+- Compatibile con metodologia Hewson (1998) e Sansom & Catto (2024)
+
+#### File Creati/Modificati
+- ✅ `scripts/front_type_classification.py` (nuovo, 300+ righe)
+- ✅ `scripts/front_tracking.py` (nuovo, 400+ righe)
+- ✅ `scripts/front_engine.py` (aggiornato, +6.4KB)
+- ✅ `scripts/example_usage.py` (nuovo, esempi completi)
+- ✅ `CHANGELOG.md` (aggiornato)
+
+#### Prossimi Passi (Sprint 3-4)
+- [ ] Soglie adattive stagionali/regionali
+- [ ] Ottimizzazioni GPU (CuPy)
+- [ ] Database climatologico fronti noti
+- [ ] Integrazione con ML per classificazione avanzata
+- [ ] API pubblica per accesso programmatico
+
+---
+
 ## Versione 2.0.0 - 2026-10-09
 
 ### 🎨 Miglioramenti UI/UX (Implementati)
