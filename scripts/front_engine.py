@@ -1576,3 +1576,196 @@ def last_funnel(candidates: list[dict], fallback: dict | None = None) -> dict:
         if "engineFunnel" in candidate:
             return candidate["engineFunnel"]
     return fallback or {}
+
+
+# ============================================================================
+# INTEGRATION: Front Type Classification
+# ============================================================================
+# Import the new classification and tracking modules
+import front_type_classification as ftc
+import front_tracking as ft
+
+
+def detect_fronts_with_classification(
+    theta_w: np.ndarray,
+    u_wind: np.ndarray,
+    v_wind: np.ndarray,
+    longitudes: np.ndarray,
+    latitudes: np.ndarray,
+    *,
+    metrics: dict | None = None,
+    sigma_km: float = SYNOPTIC_SIGMA_KM,
+    theta_w_lower: np.ndarray | None = None,
+    theta_w_upper: np.ndarray | None = None,
+    pressure: np.ndarray | None = None,
+    omega: np.ndarray | None = None,
+    terrain: np.ndarray | None = None,
+    min_length_km: float = MIN_LENGTH_KM,
+    vertex_spacing_km: float = VERTEX_SPACING_KM,
+    min_probability: float = 0.5,
+    max_turn_deg_per_20km: float = MAX_PUBLISHED_TURN_DEG_PER_20KM,
+    max_sinuosity: float = 2.35,
+    min_closure_ratio: float = 0.42,
+    max_net_turn_deg: float = 165.0,
+    return_fields: bool = False,
+) -> list[dict]:
+    """Detect fronts and classify their type.
+
+    This is the enhanced entry point that combines detection, classification,
+    and tracking capabilities.
+
+    Returns a list of candidate dicts, each containing:
+    - Base detection fields (coordinates, length, confidence, etc.)
+    - frontType: "cold", "warm", "occluded", "stationary", "unclassified"
+    - frontTypeConfidence: classification confidence [0, 1]
+    - frontTypeDiagnostics: supporting evidence for the classification
+    """
+    # Get the base detection results
+    result = detect_fronts(
+        theta_w, u_wind, v_wind, longitudes, latitudes,
+        metrics=metrics, sigma_km=sigma_km,
+        theta_w_lower=theta_w_lower, theta_w_upper=theta_w_upper,
+        pressure=pressure, omega=omega, terrain=terrain,
+        min_length_km=min_length_km, vertex_spacing_km=vertex_spacing_km,
+        min_probability=min_probability,
+        max_turn_deg_per_20km=max_turn_deg_per_20km,
+        max_sinuosity=max_sinuosity,
+        min_closure_ratio=min_closure_ratio,
+        max_net_turn_deg=max_net_turn_deg,
+        return_fields=return_fields,
+    )
+
+    # Handle the case where return_fields is True
+    if return_fields:
+        candidates, fields = result
+    else:
+        candidates = result
+        fields = None
+
+    # Add type classification to each candidate
+    for candidate in candidates:
+        ftc.annotate_with_type(
+            candidate,
+            theta_w, u_wind, v_wind,
+            longitudes, latitudes, metrics,
+            theta_w_lower, theta_w_upper, pressure,
+        )
+
+    if return_fields:
+        return candidates, fields
+    return candidates
+
+
+def track_fronts_across_time(
+    fronts_by_time: list[list[dict]],
+    longitudes: np.ndarray,
+    latitudes: np.ndarray,
+    dt_hours: float = 3.0,
+    metrics: dict | None = None,
+) -> dict:
+    """Track fronts across multiple time steps and detect frontogenesis/frontolysis.
+
+    Args:
+        fronts_by_time: List of front lists, one per time step
+        longitudes, latitudes: Grid coordinates
+        dt_hours: Time between steps in hours
+        metrics: Grid metrics dict
+
+    Returns:
+        dict with:
+        - tracked_fronts: fronts with trackId and trackStep assigned
+        - frontogenesis_events: list of strengthening/weakening events
+        - statistics: tracking statistics
+    """
+    if not fronts_by_time:
+        return {
+            "tracked_fronts": [],
+            "frontogenesis_events": [],
+            "statistics": {"total_tracks": 0, "mean_track_length": 0},
+        }
+
+    # Assign track IDs
+    tracked = ft.assign_track_ids(
+        fronts_by_time, longitudes, latitudes,
+        dt_hours=dt_hours, metrics=metrics
+    )
+
+    # Detect frontogenesis/frontolysis events
+    events = ft.detect_frontogenesis_frontolysis(tracked, dt_hours=dt_hours)
+
+    # Compute statistics
+    all_track_ids = set()
+    for time_fronts in tracked:
+        for front in time_fronts:
+            if "trackId" in front:
+                all_track_ids.add(front["trackId"])
+
+    track_lengths = {}
+    for time_fronts in tracked:
+        for front in time_fronts:
+            track_id = front.get("trackId")
+            if track_id is not None:
+                if track_id not in track_lengths:
+                    track_lengths[track_id] = 0
+                track_lengths[track_id] += 1
+
+    mean_length = np.mean(list(track_lengths.values())) if track_lengths else 0
+
+    return {
+        "tracked_fronts": tracked,
+        "frontogenesis_events": events,
+        "statistics": {
+            "total_tracks": len(all_track_ids),
+            "mean_track_length": round(mean_length, 1),
+            "frontogenesis_count": sum(1 for e in events if e["event"] == "frontogenesis"),
+            "frontolysis_count": sum(1 for e in events if e["event"] == "frontolysis"),
+        },
+    }
+
+
+def nowcast_fronts(
+    current_fronts: list[dict],
+    forecast_hours: float = 6.0,
+) -> list[dict]:
+    """Generate nowcast of front positions for visualization.
+
+    Uses the tracked speed and direction to extrapolate future positions.
+
+    Args:
+        current_fronts: List of current front candidates with tracking info
+        forecast_hours: Hours ahead to forecast
+
+    Returns:
+        List of dicts with current and forecast positions
+    """
+    nowcast = []
+
+    for front in current_fronts:
+        diagnostics = front.get("frontTypeDiagnostics", {})
+        speed_kmh = diagnostics.get("frontSpeedKmh")
+        displacement = diagnostics.get("displacement")
+
+        if speed_kmh is None or not np.isfinite(speed_kmh):
+            continue
+
+        direction_deg = None
+        if displacement and "meanDirectionDeg" in displacement:
+            direction_deg = displacement["meanDirectionDeg"]
+
+        if direction_deg is None or not np.isfinite(direction_deg):
+            continue
+
+        forecast_coords = ft.nowcast_front_position(
+            front, speed_kmh, direction_deg, forecast_hours
+        )
+
+        nowcast.append({
+            "current": front["coordinates"],
+            "forecast": forecast_coords,
+            "frontType": front.get("frontType"),
+            "speedKmh": speed_kmh,
+            "directionDeg": direction_deg,
+            "trackId": front.get("trackId"),
+        })
+
+    return nowcast
