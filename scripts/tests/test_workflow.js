@@ -324,6 +324,26 @@ prova('un ramo senza dati non viene pubblicato', async () => {
     'non spiega perche\' si e\' fermato');
 });
 
+
+// A scheduled run started before a fix can publish its older checkout later.
+// The completion hook must publish latest main using the same non-forcing
+// publisher already exercised above, and only after a successful trusted run.
+prova('un aggiornamento dati precedente non lascia in linea la vecchia interfaccia', () => {
+  const sync = fs.readFileSync(path.join(root,
+    '.github/workflows/preserve_frontend.yml'), 'utf8');
+  assert.match(sync, /workflow_run:\s*\n\s*workflows: \['Update Meteo Data'\]/);
+  assert.match(sync, /types: \[completed\]/);
+  assert.match(sync, /workflow_run\.conclusion == 'success'/);
+  assert.match(sync, /workflow_run\.head_repository\.full_name == github\.repository/);
+  assert.match(sync, /workflow_run\.head_branch == 'main'/);
+  assert.match(sync, /ref: main/, 'il checkout riusa il commit vecchio del run');
+  assert.match(sync, /for prova in scripts\/tests\/test_\*\.js/);
+  const start = sync.indexOf('      - name: Pubblica i file statici su gh-pages');
+  assert.equal(sync.slice(start).trim(), rapida.trim(),
+    'il riallineamento deve usare la stessa pubblicazione verificata, senza toccare i dati');
+  assert.doesNotMatch(sync, /force:\s*true|git push --force/);
+});
+
 Promise.all(inCorso).then(() => {
   console.log(ok ? 'ESITO: SUPERATO' : 'ESITO: DA RIVEDERE');
   process.exitCode = ok ? 0 : 1;
