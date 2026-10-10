@@ -220,5 +220,139 @@ prova('a scala europea non si scarica piu\' di quanto lo schermo possa mostrare'
     'zoomando su una cella si chiedono ' + cella.width + ' pixel per un centinaio di campioni');
 });
 
+
+// Execute the real loader: source-only assertions cannot catch a ReferenceError
+// before the first request (the regression introduced by the second cache).
+function ambienteSatellite() {
+  const vm = require('node:vm');
+  const richieste = [], pubblicazioni = [], aggiornamenti = [];
+  const product = { layer: 'mtg-geocolour' };
+  const slot = { value: 123000, date: new Date(123000), latest: false };
+  const box = { west: 10, east: 20, south: 35, north: 45 };
+  const size = { width: 800, height: 600, metres: 2000 };
+  const source = { updateImage: frame => aggiornamenti.push(frame) };
+  const ctx = {
+    console, window: {}, mapLoaded: true, showSatelliteClouds: true,
+    document: { hidden: false }, cloudProduct: 'geocolour',
+    CLOUD_PRODUCTS: { geocolour: product }, cloudToken: 0,
+    CLOUD_MAX_PASSI_INDIETRO: 2, cloudFrames: new Map(),
+    showRadar: false, cloudPublishedKey: '',
+    map: { getSource: () => source, setPaintProperty: () => {} },
+    aggiornaIstantiDisponibili: () => Promise.resolve(),
+    cloudSlot: () => slot, cloudRequestBox: () => box,
+    cloudRequestSize: () => size, cloudNeedsReload: () => true,
+    cloudFrameKey: (p, t, b, z) => [p.layer, t.value, b.west, z.width].join('|'),
+    cloudUrl: (b, z, p, t) => 'https://sat.example/' + p.layer + '/' + t.value,
+    ultimoIstanteDichiarato: () => 0,
+    slotArretrato: (p, t) => ({ ...t, value: t.value - 1000 }),
+    publishSatelliteClouds: (...args) => pubblicazioni.push(args),
+    markCloudFreshness: () => {}, syncRadarToSatellite: () => {},
+    syncTimelineToSatellite: () => {}, toast: () => {},
+    Image: class {
+      constructor() { richieste.push(this); }
+      set src(url) { this.url = url; }
+      get src() { return this.url; }
+    }
+  };
+  vm.createContext(ctx);
+  vm.runInContext(implementazione('pubblicaFotogrammaInCache'), ctx);
+  vm.runInContext(implementazione('loadSatelliteClouds'), ctx);
+  return { ctx, richieste, pubblicazioni, aggiornamenti, product, slot, box, size };
+}
+
+prova('il loader parte senza moduli aggiuntivi e pubblica il satellite richiesto', () => {
+  const a = ambienteSatellite();
+  a.ctx.loadSatelliteClouds(false);
+  assert.equal(a.richieste.length, 1);
+  assert.equal(a.richieste[0].crossOrigin, 'anonymous');
+  assert.match(a.richieste[0].src, /mtg-geocolour\/123000$/);
+  a.richieste[0].onload();
+  assert.equal(a.pubblicazioni.length, 1);
+  assert.equal(a.pubblicazioni[0][3], a.product);
+  assert.equal(a.pubblicazioni[0][4], a.slot);
+});
+
+prova('satellite spento, mappa non pronta o scheda nascosta non chiedono immagini', () => {
+  for (const caso of ['spento', 'mappa', 'nascosto', 'sorgente']) {
+    const a = ambienteSatellite();
+    if (caso === 'spento') a.ctx.showSatelliteClouds = false;
+    if (caso === 'mappa') a.ctx.mapLoaded = false;
+    if (caso === 'nascosto') a.ctx.document.hidden = true;
+    if (caso === 'sorgente') a.ctx.map.getSource = () => null;
+    a.ctx.loadSatelliteClouds(true);
+    assert.equal(a.richieste.length, 0, caso);
+    assert.equal(a.ctx.cloudToken, 0, caso);
+  }
+});
+
+prova('il ricarico forzato sostituisce la richiesta in volo anche con cache piena', () => {
+  const a = ambienteSatellite();
+  a.ctx.loadSatelliteClouds(false);
+  const vecchia = a.richieste[0];
+  const key = a.ctx.cloudFrameKey(a.product, a.slot, a.box, a.size);
+  a.ctx.cloudFrames.set(key, { url: 'blob:cached', box: a.box, size: a.size });
+  a.ctx.cloudNeedsReload = () => false;
+  a.ctx.loadSatelliteClouds(true);
+  assert.equal(a.richieste.length, 2);
+  assert.equal(a.ctx.cloudToken, 2);
+  vecchia.onload();
+  assert.equal(a.pubblicazioni.length, 0, 'la vecchia richiesta viene ripubblicata');
+  a.richieste[1].onload();
+  assert.equal(a.pubblicazioni.length, 1);
+});
+
+prova('la cache riusa solo lo stesso prodotto, istante, riquadro e risoluzione', () => {
+  const a = ambienteSatellite();
+  a.ctx.loadSatelliteClouds(false);
+  const vecchia = a.richieste[0];
+  const key = a.ctx.cloudFrameKey(a.product, a.slot, a.box, a.size);
+  a.ctx.cloudFrames.set(key, { url: 'blob:cached', box: a.box, size: a.size });
+  a.ctx.loadSatelliteClouds(false);
+  assert.equal(a.richieste.length, 1, 'la cache richiede di nuovo la stessa immagine');
+  assert.equal(a.aggiornamenti[0].url, 'blob:cached');
+  vecchia.onload();
+  assert.equal(a.pubblicazioni.length, 0, 'la risposta vecchia sovrascrive la cache');
+  a.slot.value += 1000;
+  a.ctx.loadSatelliteClouds(false);
+  assert.equal(a.richieste.length, 2, 'un nuovo istante riusa il vecchio fotogramma');
+  a.product.layer = 'mtg-ir';
+  a.ctx.loadSatelliteClouds(false);
+  assert.equal(a.richieste.length, 3, 'un altro canale riusa il vecchio fotogramma');
+  a.box.west -= 1;
+  a.ctx.loadSatelliteClouds(false);
+  assert.equal(a.richieste.length, 4, 'un altro riquadro riusa il vecchio fotogramma');
+  a.size.width *= 2;
+  a.ctx.loadSatelliteClouds(false);
+  assert.equal(a.richieste.length, 5, 'un altro zoom riusa la vecchia risoluzione');
+});
+
+prova('le etichette satellite riportano l\'istante del fotogramma pubblicato', () => {
+  const vm = require('node:vm');
+  const label = { textContent: '' };
+  const ctx = {
+    document: { getElementById: () => label },
+    formatDateTime: date => date.toISOString()
+  };
+  vm.createContext(ctx);
+  vm.runInContext(implementazione('syncTimelineToSatellite'), ctx);
+  const date = new Date('2026-10-10T06:10:00Z');
+  ctx.syncTimelineToSatellite({ latest: false, date });
+  assert.equal(label.textContent, date.toISOString());
+});
+
+prova('la pagina usa solo script pubblicati e non carica comandi con dati fittizi', () => {
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/update_meteo.yml'), 'utf8');
+  for (const script of scripts) {
+    const src = script[1].match(/\bsrc="([^"]+)"/);
+    if (!src) continue;
+    assert.equal(script[2].trim(), '', 'codice ignorato dentro uno script con src');
+    if (/^https?:\/\//.test(src[1])) continue;
+    assert.ok(workflow.includes(src[1]), src[1] + ' assente dalla pubblicazione');
+  }
+  assert.doesNotMatch(html, /src="scientific-ui\.js"/,
+    'la pagina carica una seconda timeline scollegata e tooltip casuali');
+});
+
 console.log(ok ? 'ESITO: SUPERATO' : 'ESITO: DA RIVEDERE');
 process.exit(ok ? 0 : 1);

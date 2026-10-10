@@ -6371,28 +6371,6 @@
       }
 
       function loadSatelliteClouds(force) {
-        // === SISTEMA DI CACHING SATELLITE ===
-        if (!window.satelliteManager) {
-          window.satelliteManager = new SatelliteManager(map);
-        }
-        
-        // Controlla se abbiamo già questa immagine in cache
-        const center = map.getCenter();
-        const zoom = Math.round(map.getZoom());
-        const tile = window.satelliteManager.cache.get(zoom, 0, 0, product.layer, slot.value);
-        
-        if (tile && !force) {
-          console.log("[Satellite] Using cached image");
-          try {
-            publishSatelliteClouds(tile, box, size, product, slot);
-            return;
-          } catch (e) {
-            console.warn("[Satellite] Cache hit but publish failed, fetching new");
-          }
-        }
-        // === FINE SISTEMA DI CACHING ===
-        
-
         if (!mapLoaded || !showSatelliteClouds) return;
         if (!map.getSource("satellite-clouds")) return;
         // In una scheda in secondo piano nessuno sta guardando: inutile
@@ -6411,6 +6389,11 @@
         if (!force && !cloudNeedsReload(cloudRequestBox(0), size, slot)) return;
 
         const token = ++cloudToken;
+        // Riusa la cache dei fotogrammi WMS gia' presente, che distingue
+        // prodotto, istante, riquadro e risoluzione. Anche una pubblicazione
+        // dalla cache invalida le richieste precedenti ancora in volo.
+        // force=true deve invece chiedere un'immagine nuova.
+        if (!force && pubblicaFotogrammaInCache()) return;
         const image = new Image();
         // La canvas va riletta pixel per pixel: senza CORS il browser la
         // marcherebbe come "sporca" e getImageData fallirebbe. EUMETView
@@ -16451,33 +16434,5 @@
     <script src="modern-ui.js"></script>
     <!-- Atmosfera viva rimossa insieme alle nubi 3D. -->
   
-    <script src="scientific-ui.js"></script>
-  
-    <!-- Ottimizzazioni satellite/radar/fulmini -->
-    <script src="scripts/satellite_optimizations.js">
-      // === INIZIALIZZAZIONE OTTIMIZZAZIONI ===
-      function initSatelliteOptimizations() {
-        if (!window.satelliteManager && map) {
-          window.satelliteManager = new SatelliteManager(map);
-          console.log("[Satellite] Sistema di caching inizializzato");
-          
-          // Precarica tile per la vista corrente
-          window.satelliteManager.prefetchCurrentView();
-        }
-        
-        if (!window.lightningDisplay) {
-          window.lightningDisplay = new LightningDisplay();
-          console.log("[Lightning] Display scientifico inizializzato");
-        }
-      }
-      
-      // Chiama inizializzazione quando la mappa è pronta
-      if (mapLoaded) {
-        initSatelliteOptimizations();
-      } else {
-        map.on('load', initSatelliteOptimizations);
-      }
-
-    </script>
 </body>
 </html>
