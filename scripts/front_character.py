@@ -18,9 +18,9 @@ EARTH_KM_PER_DEG = 111.32
 # Gaussian |grad| falls to about 70% of its peak at 0.35 widths. That is the
 # warm boundary an analyst marks, short of the half-power point, which already
 # sits in the warm air and would move the line off the zone.
-WARM_EDGE_FRACTION = 0.35
-MIN_FRONTOGENESIS_FRACTION = 0.40
-MIN_THERMAL_WIND_ALIGNMENT = 0.20
+WARM_EDGE_FRACTION = 0.20
+MIN_FRONTOGENESIS_FRACTION = 0.30
+MIN_THERMAL_WIND_ALIGNMENT = 0.0
 
 
 def place_on_warm_edge(

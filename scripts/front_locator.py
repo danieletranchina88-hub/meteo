@@ -134,7 +134,7 @@ ANALYSIS_SPACING_KM = 80.0
 HIGH_RES_SPACING_KM = 25.0
 # Four analysis cells: the shortest baroclinic zone a 0.75-degree chart can
 # place without aliasing the thermal gradient into a false front.
-APPROX_HALFPOWER_KM = 4.0 * ANALYSIS_SPACING_KM
+APPROX_HALFPOWER_KM = 2.0 * ANALYSIS_SPACING_KM
 HIGH_FREQUENCY_KEEP = 0.08
 
 
@@ -164,7 +164,7 @@ def approximate_theta_w(
 
         H(lambda) = exp(-2 * pi**2 * sigma**2 / lambda**2).
 
-    Setting H = 1/2 at ``lambda = 4 * 80 km`` gives
+    Setting H = 1/2 at ``lambda = 2 * 80 km`` gives
 
         sigma = lambda * sqrt(ln 2 / (2 * pi**2)).
 

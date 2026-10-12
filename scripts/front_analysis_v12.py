@@ -903,6 +903,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             except Exception:
                 u_upper = v_upper = None
         kept = []
+        dropped = 0
         for candidate in candidates:
             fch.annotate_candidate(
                 candidate, evidence, self.longitudes, self.latitudes,
@@ -913,6 +914,11 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             )
             if fch.passes_physical_gate(candidate):
                 kept.append(candidate)
+            else:
+                dropped += 1
+        if engine_fields is not None:
+            funnel = engine_fields.setdefault("funnel", {})
+            funnel["droppedPhysicalGate"] = dropped
         return kept
 
     def _detect_hour(self, hour: int) -> list[dict]:
