@@ -1481,10 +1481,18 @@ assert.ok(!/strokeText/.test(paperIsobar[0]),
 // Le tre temperature al suolo sono una scelta grafica consolidata e devono
 // restare sulla stessa scala. La temperatura in libera atmosfera usa invece
 // una rampa dedicata, cosi' una futura revisione non le accorpa per errore.
-["temp", "feels", "wetbulb"].forEach((key) => {
-  assert.match(html, new RegExp(key + ":\\s*\\{[\\s\\S]{0,180}?stops:\\s*TEMP_BANDS,"),
-    "il layer " + key + " non usa piu' la palette termica protetta");
+// Temperatura e percepita sono SFUMATE sugli stessi ancoraggi (a fasce
+// ogni cella che scavalca un bordo cambiava colore di colpo, e sul mare la
+// carta si riempiva di gradini squadrati); il bulbo umido resta a fasce,
+// perche' li' la fascia 0/+1 e' un indizio di fase.
+["temp", "feels"].forEach((key) => {
+  assert.match(html, new RegExp(key + ":\\s*\\{[\\s\\S]{0,180}?stops:\\s*TEMP_SCALE,\\s*discrete: false,"),
+    "il layer " + key + " non usa piu' la palette termica protetta, sfumata");
 });
+assert.match(html, /wetbulb:\s*\{[\s\S]{0,180}?stops:\s*TEMP_BANDS,/,
+  "il bulbo umido non usa piu' le fasce termiche");
+assert.match(html, /const TEMP_SCALE = TEMP_ANCHORS\.map\(/,
+  "la temperatura sfumata non usa piu' gli ancoraggi della scala fornita");
 assert.match(html, /const T850_STOPS = buildDiscreteBands\(T850_ANCHORS, -30, 35, 1, 1\);/,
   "manca la scala dedicata della temperatura a 850 hPa");
 assert.match(html, /t850:\s*\{[\s\S]{0,180}?stops:\s*T850_STOPS,/,

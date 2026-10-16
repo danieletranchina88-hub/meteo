@@ -2888,6 +2888,17 @@
         { v: 46.85, c: [71, 14, 0] }
       ];
       const TEMP_BANDS = buildDiscreteBands(TEMP_ANCHORS, -76, 46, 2, 1, true);
+      // La stessa scala, ma SFUMATA: e' quella delle carte che si leggono a
+      // colpo d'occhio. A fasce di 2 gradi ogni cella del modello che scavalca
+      // un bordo cambia colore di colpo, e sul mare -- dove ICON-2I eredita
+      // la temperatura dell'acqua da una griglia piu' grossa -- la carta si
+      // riempiva di gradini squadrati per salti di pochi decimi. Sfumati,
+      // quei decimi spariscono e restano le differenze vere. Il salto del
+      // gelo fra 0 e 0,85 gradi resta nella scala, quindi la linea dello
+      // zero si vede ancora netta.
+      const TEMP_SCALE = TEMP_ANCHORS.map(function (stop) {
+        return { v: stop.v, c: stop.c.slice(), a: 1 };
+      });
 
       // Una sola scala per il vento medio e per le raffiche. Erano due, e lo
       // stesso valore usciva di due colori diversi a seconda del livello
@@ -3268,19 +3279,19 @@
         temp: {
           label: "Temperatura a 2 m",
           unit: "°C",
-          stops: TEMP_BANDS,
-          discrete: true,
+          stops: TEMP_SCALE,
+          discrete: false,
           decimals: 1,
           ticks: [-40, -20, -10, 0, 10, 20, 30, 40, 46],
-          note: "Fasce cromatiche ogni 2 °C con contorni netti ad alta definizione.",
+          note: "Sfumatura continua sulla scala termica; le isoterme danno i contorni netti.",
           opacity: 0.95,
           terrainOpacity: 0.3
         },
         feels: {
           label: "Temperatura percepita",
           unit: "°C",
-          stops: TEMP_BANDS,
-          discrete: true,
+          stops: TEMP_SCALE,
+          discrete: false,
           decimals: 1,
           ticks: [-40, -20, -10, 0, 10, 20, 30, 40, 46],
           note: "Heat Index con caldo · Wind Chill con freddo · temperatura dell'aria nella fascia intermedia. Valori all'ombra.",
@@ -3873,7 +3884,14 @@
       let isPlaying = false;
       let playbackDelay = 1200;
       let useNearestCell = false;
-      let showParticles = false;
+      // Il flusso animato e' acceso da subito sul PC: e' la lettura del vento
+      // che si coglie a colpo d'occhio sopra qualunque campo. Sul telefono
+      // resta da chiedere (una tela intera ridisegnata a ogni fotogramma), e
+      // resta spento per chi ha chiesto al sistema meno animazioni.
+      // (960 e' MOBILE_BREAKPOINT, dichiarato piu' sotto: qui non si puo'
+      // ancora leggere.)
+      let showParticles = window.innerWidth >= 960 && !(window.matchMedia
+        && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
       let showVectors = false;
       let showIsobars = false;
       let showIsotherms = false;
@@ -5515,7 +5533,7 @@
         ui.timeLabel.textContent = formatDateTime(date);
         ui.leadLabel.textContent = lead === null ? "--" : "+" + lead + " h";
         // La stessa cosa, in una riga sola, per l'intestazione del telefono.
-        ui.brandMeta.textContent = "Run " + formatRun(item);
+        ui.brandMeta.textContent = formatRun(item);
         ui.brandMeta.classList.toggle(
           "stale", ui.runValue.classList.contains("stale")
         );
