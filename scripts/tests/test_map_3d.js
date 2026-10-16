@@ -2073,3 +2073,24 @@ assert.doesNotMatch(html, /ATMOSFERA VIVA \(beta\)/, "la pioggia delle nubi 3D e
 assert.match(html, /function attivaNubiVolumetriche\(\) \{\}/,
   "manca lo stub che impedisce al cambio vista di chiamare il volume");
 console.log("volumetric clouds removed: OK");
+
+// ASPETTO "MAPPA PRIMA": stili e comandi in due blocchi staccabili. Il resto
+// della pagina non deve dipenderne, salvo la posizione dei valori della
+// legenda (--pos), che senza il blocco resta un attributo inerte.
+{
+  const stili = html.match(/<style id="aspetto-mappa">[\s\S]*?<\/style>/);
+  const comandi = html.match(/<script id="aspetto-mappa-comandi">[\s\S]*?<\/script>/);
+  assert.ok(stili && comandi, "mancano i blocchi dell'aspetto mappa prima");
+  new Function(comandi[0].replace(/^<script[^>]*>|<\/script>$/g, ""));
+  const resto = html.replace(stili[0], "").replace(comandi[0], "");
+  assert.ok(!/am-cerca|am-menu|am-riquadri|am-cerca-aperta/.test(resto),
+    "il resto della pagina dipende dall'aspetto mappa prima");
+  assert.match(stili[0], /body \.brand-panel \{ display: none !important; \}/,
+    "il marchio deve restare nascosto");
+  assert.match(html, /<title>Meteo · Mappa e previsioni<\/title>/);
+  // I campi principali si spostano, non si copiano: un solo bottone per campo.
+  ["wind", "temp", "rain", "cloud", "press", "rh"].forEach((k) => {
+    assert.equal(html.split('data-layer="' + k + '"').length - 1, 1, "il campo " + k + " e' duplicato");
+  });
+  console.log("Aspetto mappa prima: blocchi staccabili, marchio tolto, campi spostati non copiati");
+}
