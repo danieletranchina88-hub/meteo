@@ -223,56 +223,141 @@ prova('a scala europea non si scarica piu\' di quanto lo schermo possa mostrare'
 
 // Execute the real loader: source-only assertions cannot catch a ReferenceError
 // before the first request (the regression introduced by the second cache).
+// Il caricatore scarica con scaricaImmagineSatellite (fetch del file, URL
+// locale alla mappa): qui la si sostituisce con promesse che la prova
+// risolve a mano, una per richiesta. I tasselli nitidi si registrano soltanto.
 function ambienteSatellite() {
   const vm = require('node:vm');
-  const richieste = [], pubblicazioni = [], aggiornamenti = [];
+  const richieste = [], pubblicazioni = [], aggiornamenti = [], revocati = [], tasselli = [];
   const product = { layer: 'mtg-geocolour' };
   const slot = { value: 123000, date: new Date(123000), latest: false };
   const box = { west: 10, east: 20, south: 35, north: 45 };
-  const size = { width: 800, height: 600, metres: 2000 };
+  const size = { width: 1800, height: 1200, metres: 2000 };
   const source = { updateImage: frame => aggiornamenti.push(frame) };
+  let n = 0;
   const ctx = {
     console, window: {}, mapLoaded: true, showSatelliteClouds: true,
     document: { hidden: false }, cloudProduct: 'geocolour',
     CLOUD_PRODUCTS: { geocolour: product }, cloudToken: 0,
     CLOUD_MAX_PASSI_INDIETRO: 2, cloudFrames: new Map(),
     showRadar: false, cloudPublishedKey: '',
+    URL: { revokeObjectURL: u => revocati.push(u) },
+    setTimeout: fn => fn(),
     map: { getSource: () => source, setPaintProperty: () => {} },
     aggiornaIstantiDisponibili: () => Promise.resolve(),
     cloudSlot: () => slot, cloudRequestBox: () => box,
-    cloudRequestSize: () => size, cloudNeedsReload: () => true,
+    misuraSatellite: () => size, cloudNeedsReload: () => true,
+    aggiornaTasselli: (p, t) => tasselli.push([p.layer, t.value]),
     cloudFrameKey: (p, t, b, z) => [p.layer, t.value, b.west, z.width].join('|'),
-    cloudUrl: (b, z, p, t) => 'https://sat.example/' + p.layer + '/' + t.value,
+    cloudUrl: (b, z, p, t) => 'https://sat.example/' + p.layer + '/' + t.value + '?w=' + z.width,
     ultimoIstanteDichiarato: () => 0,
     slotArretrato: (p, t) => ({ ...t, value: t.value - 1000 }),
     publishSatelliteClouds: (...args) => pubblicazioni.push(args),
     markCloudFreshness: () => {}, syncRadarToSatellite: () => {},
     syncTimelineToSatellite: () => {}, toast: () => {},
-    Image: class {
-      constructor() { richieste.push(this); }
-      set src(url) { this.url = url; }
-      get src() { return this.url; }
-    }
+    scaricaImmagineSatellite: url => new Promise((risolvi, rifiuta) => {
+      const r = { url, locale: 'blob:' + (++n) };
+      r.arriva = () => { risolvi({ image: { url }, url: r.locale }); return attendi(); };
+      r.fallisce = () => { rifiuta(new Error('502')); return attendi(); };
+      richieste.push(r);
+    })
   };
   vm.createContext(ctx);
   vm.runInContext(implementazione('pubblicaFotogrammaInCache'), ctx);
   vm.runInContext(implementazione('loadSatelliteClouds'), ctx);
-  return { ctx, richieste, pubblicazioni, aggiornamenti, product, slot, box, size };
+  return { ctx, richieste, pubblicazioni, aggiornamenti, revocati, tasselli, product, slot, box, size };
+}
+const attendi = () => new Promise(r => setImmediate(r));
+const nitide = a => a.richieste.filter(r => /w=1800$/.test(r.url));
+const asincrone = [];
+function provaAsync(nome, fn) {
+  asincrone.push(fn().then(() => console.log('PASS ' + nome),
+    error => { ok = false; console.log('FALLITO ' + nome + ': ' + error.message); }));
 }
 
-prova('il loader parte senza moduli aggiuntivi e pubblica il satellite richiesto', () => {
+provaAsync('il loader parte senza moduli aggiuntivi e pubblica il satellite richiesto', async () => {
   const a = ambienteSatellite();
   a.ctx.loadSatelliteClouds(false);
-  assert.equal(a.richieste.length, 1);
-  assert.equal(a.richieste[0].crossOrigin, 'anonymous');
-  assert.match(a.richieste[0].src, /mtg-geocolour\/123000$/);
-  a.richieste[0].onload();
+  assert.equal(nitide(a).length, 1);
+  assert.match(nitide(a)[0].url, /mtg-geocolour\/123000\?w=1800$/);
+  await nitide(a)[0].arriva();
   assert.equal(a.pubblicazioni.length, 1);
   assert.equal(a.pubblicazioni[0][3], a.product);
   assert.equal(a.pubblicazioni[0][4], a.slot);
+  // L'URL locale del file va alla mappa cosi' com'e': niente ricodifica.
+  assert.equal(a.pubblicazioni[0][5], nitide(a)[0].locale);
 });
 
-prova('satellite spento, mappa non pronta o scheda nascosta non chiedono immagini', () => {
+provaAsync('i tasselli nitidi partono con l\'immagine di base, sullo stesso istante', async () => {
+  const a = ambienteSatellite();
+  a.ctx.loadSatelliteClouds(false);
+  assert.deepEqual(a.tasselli, [['mtg-geocolour', 123000]],
+    'i tasselli non partono insieme all\'immagine di base');
+  assert.equal(a.richieste.length, 1, 'oltre ai tasselli parte una sola immagine');
+});
+
+provaAsync('i tasselli: istante nell\'URL, vecchi nascosti subito, nuovi solo a cursore fermo', async () => {
+  const vm = require('node:vm');
+  const wms = html.match(/const CLOUD_WMS = "[^"]+";/)[0];
+  const costanti = html.match(/const SAT_TASSELLI = [\s\S]*?let tasselliTimer = 0;/)[0];
+  const timers = [];
+  const visibilita = [], setTiles = [];
+  let sorgente = null;
+  const ctx = {
+    window: { devicePixelRatio: 1 },
+    CLOUD_DOMAIN: { west: -40, south: 26, east: 42, north: 68 },
+    setTimeout: fn => { timers.push(fn); return timers.length; },
+    clearTimeout: () => {},
+    map: {
+      getLayer: id => id === 'satellite-clouds-layer' || (id === 'satellite-tasselli-layer' && !!sorgente),
+      getSource: id => (id === 'satellite-tasselli' ? sorgente : null),
+      addSource: (id, def) => { sorgente = { def, setTiles: t => setTiles.push(t[0]) }; },
+      addLayer: () => {},
+      getStyle: () => ({ layers: [{ id: 'satellite-clouds-layer' }, { id: 'satellite-lightning-layer' }] }),
+      getLayoutProperty: () => 'visible',
+      setLayoutProperty: (id, k, v) => visibilita.push(v)
+    }
+  };
+  vm.createContext(ctx);
+  vm.runInContext([wms, costanti, implementazione('urlTasselli'), implementazione('preparaTasselli'),
+    implementazione('visibilitaTasselli'), implementazione('aggiornaTasselli')].join('\n'), ctx);
+  const prodotto = { layer: 'mtg_fd:rgb_geocolour', mode: 'scene' };
+  const t1 = { value: 1, iso: '2026-10-16T18:30:00.000Z' };
+  const t2 = { value: 2, iso: '2026-10-16T18:40:00.000Z' };
+  ctx.aggiornaTasselli(prodotto, t1);
+  const url1 = sorgente.def.tiles[0];
+  assert.match(url1, /&bbox=\{bbox-epsg-3857\}&width=512&height=512&time=2026-10-16T18:30:00\.000Z$/);
+  assert.match(url1, /format=image\/jpeg/);
+  timers.shift()();
+  assert.equal(visibilita[visibilita.length - 1], 'visible');
+  ctx.aggiornaTasselli(prodotto, t2);
+  assert.equal(visibilita[visibilita.length - 1], 'none',
+    'cambiando istante i tasselli vecchi restano sopra l\'immagine nuova');
+  assert.equal(setTiles.length, 0, 'i tasselli nuovi partono prima che il cursore si fermi');
+  timers.shift()();
+  assert.match(setTiles[0], /time=2026-10-16T18:40:00\.000Z$/);
+  assert.equal(visibilita[visibilita.length - 1], 'visible');
+  ctx.window.devicePixelRatio = 2;
+  assert.match(ctx.urlTasselli(prodotto, t2), /width=768&height=768/,
+    'sugli schermi ad alta densita\' il tassello va chiesto a 768 px');
+});
+
+prova('sotto i tasselli l\'immagine di base e\' a un terzo della risoluzione', () => {
+  const vm = require('node:vm');
+  const ctx = { showCloudNowcast: false, LIGHTNING_PRODUCT: { layer: 'li' },
+    cloudRequestSize: () => ({ width: 2160, height: 1428, metres: 2000 }) };
+  vm.createContext(ctx);
+  vm.runInContext(implementazione('misuraSatellite'), ctx);
+  const base = ctx.misuraSatellite({}, { layer: 'x' });
+  assert.equal(base.width, 720);
+  assert.equal(base.height, 476);
+  assert.equal(base.metres, 6000);
+  assert.equal(ctx.misuraSatellite({}, ctx.LIGHTNING_PRODUCT).width, 2160, 'i fulmini non hanno tasselli');
+  ctx.showCloudNowcast = true;
+  assert.equal(ctx.misuraSatellite({}, { layer: 'x' }).width, 2160, 'il nowcast lavora sui pixel pieni');
+});
+
+provaAsync('satellite spento, mappa non pronta o scheda nascosta non chiedono immagini', async () => {
   for (const caso of ['spento', 'mappa', 'nascosto', 'sorgente']) {
     const a = ambienteSatellite();
     if (caso === 'spento') a.ctx.showSatelliteClouds = false;
@@ -285,45 +370,57 @@ prova('satellite spento, mappa non pronta o scheda nascosta non chiedono immagin
   }
 });
 
-prova('il ricarico forzato sostituisce la richiesta in volo anche con cache piena', () => {
+provaAsync('il ricarico forzato sostituisce la richiesta in volo anche con cache piena', async () => {
   const a = ambienteSatellite();
   a.ctx.loadSatelliteClouds(false);
-  const vecchia = a.richieste[0];
+  const vecchia = nitide(a)[0];
   const key = a.ctx.cloudFrameKey(a.product, a.slot, a.box, a.size);
   a.ctx.cloudFrames.set(key, { url: 'blob:cached', box: a.box, size: a.size });
   a.ctx.cloudNeedsReload = () => false;
   a.ctx.loadSatelliteClouds(true);
-  assert.equal(a.richieste.length, 2);
+  assert.equal(nitide(a).length, 2);
   assert.equal(a.ctx.cloudToken, 2);
-  vecchia.onload();
+  await vecchia.arriva();
   assert.equal(a.pubblicazioni.length, 0, 'la vecchia richiesta viene ripubblicata');
-  a.richieste[1].onload();
+  assert.ok(a.revocati.includes(vecchia.locale), 'il file della richiesta superata non viene liberato');
+  await nitide(a)[1].arriva();
   assert.equal(a.pubblicazioni.length, 1);
 });
 
-prova('la cache riusa solo lo stesso prodotto, istante, riquadro e risoluzione', () => {
+provaAsync('un istante che il servizio non ha fa arretrare di un passo, sempre con l\'istante', async () => {
   const a = ambienteSatellite();
   a.ctx.loadSatelliteClouds(false);
-  const vecchia = a.richieste[0];
+  await nitide(a)[0].fallisce();
+  assert.equal(nitide(a).length, 2);
+  assert.match(nitide(a)[1].url, /\/122000\?/);
+  await nitide(a)[1].arriva();
+  assert.equal(a.pubblicazioni.length, 1);
+});
+
+provaAsync('la cache riusa solo lo stesso prodotto, istante, riquadro e risoluzione', async () => {
+  const a = ambienteSatellite();
+  a.ctx.loadSatelliteClouds(false);
+  const vecchia = nitide(a)[0];
   const key = a.ctx.cloudFrameKey(a.product, a.slot, a.box, a.size);
   a.ctx.cloudFrames.set(key, { url: 'blob:cached', box: a.box, size: a.size });
   a.ctx.loadSatelliteClouds(false);
-  assert.equal(a.richieste.length, 1, 'la cache richiede di nuovo la stessa immagine');
+  assert.equal(nitide(a).length, 1, 'la cache richiede di nuovo la stessa immagine');
   assert.equal(a.aggiornamenti[0].url, 'blob:cached');
-  vecchia.onload();
+  await vecchia.arriva();
   assert.equal(a.pubblicazioni.length, 0, 'la risposta vecchia sovrascrive la cache');
+  a.ctx.cloudPublishedKey = key;
   a.slot.value += 1000;
   a.ctx.loadSatelliteClouds(false);
-  assert.equal(a.richieste.length, 2, 'un nuovo istante riusa il vecchio fotogramma');
+  assert.equal(nitide(a).length, 2, 'un nuovo istante riusa il vecchio fotogramma');
   a.product.layer = 'mtg-ir';
   a.ctx.loadSatelliteClouds(false);
-  assert.equal(a.richieste.length, 3, 'un altro canale riusa il vecchio fotogramma');
+  assert.equal(nitide(a).length, 3, 'un altro canale riusa il vecchio fotogramma');
   a.box.west -= 1;
   a.ctx.loadSatelliteClouds(false);
-  assert.equal(a.richieste.length, 4, 'un altro riquadro riusa il vecchio fotogramma');
+  assert.equal(nitide(a).length, 4, 'un altro riquadro riusa il vecchio fotogramma');
   a.size.width *= 2;
   a.ctx.loadSatelliteClouds(false);
-  assert.equal(a.richieste.length, 5, 'un altro zoom riusa la vecchia risoluzione');
+  assert.equal(a.richieste.filter(r => /w=3600$/.test(r.url)).length, 1, 'un altro zoom riusa la vecchia risoluzione');
 });
 
 prova('le etichette satellite riportano l\'istante del fotogramma pubblicato', () => {
@@ -354,5 +451,7 @@ prova('la pagina usa solo script pubblicati e non carica comandi con dati fittiz
     'la pagina carica una seconda timeline scollegata e tooltip casuali');
 });
 
-console.log(ok ? 'ESITO: SUPERATO' : 'ESITO: DA RIVEDERE');
-process.exit(ok ? 0 : 1);
+Promise.all(asincrone).then(() => {
+  console.log(ok ? 'ESITO: SUPERATO' : 'ESITO: DA RIVEDERE');
+  process.exit(ok ? 0 : 1);
+});

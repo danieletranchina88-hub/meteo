@@ -6,6 +6,9 @@
     <meta name="theme-color" content="#0a1b2a" />
     <meta name="color-scheme" content="light" />
     <title>Sicilia Meteo · Mappa e previsioni</title>
+    <!-- Il satellite parte da EUMETView: la connessione (DNS + TLS) si apre
+         subito, invece che al primo clic su "Satellite". -->
+    <link rel="preconnect" href="https://view.eumetsat.int" crossorigin />
     <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
     <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
     <style>
@@ -5888,6 +5891,22 @@
       let cloudCapsAt = 0;
       let cloudCapsPending = null;
       const cloudCapsEnd = new Map();
+      // L'ultima dichiarazione letta resta nel browser: alla visita dopo si
+      // chiede subito un istante che ESISTE (magari di qualche minuto fa)
+      // invece di aspettare il GetCapabilities, che a volte impiega secondi.
+      // Un istante dichiarato non smette di esistere, quindi non si rischia
+      // il mosaico; la dichiarazione fresca arriva comunque e lo aggiorna.
+      const CLOUD_CAPS_KEY = "satellite-istanti-v1";
+      const CLOUD_CAPS_MEMORIA_MS = 45 * 60 * 1000;
+      try {
+        const salvata = JSON.parse(localStorage.getItem(CLOUD_CAPS_KEY) || "null");
+        if (salvata && Date.now() - salvata.at < CLOUD_CAPS_MEMORIA_MS && salvata.fine) {
+          Object.keys(salvata.fine).forEach(function (nome) {
+            const fine = Number(salvata.fine[nome]);
+            if (Number.isFinite(fine)) cloudCapsEnd.set(nome, fine);
+          });
+        }
+      } catch (errore) { /* memoria facoltativa */ }
 
       function nomeSemplice(layer) {
         const nome = String(layer || "");
@@ -5905,6 +5924,17 @@
       // La richiesta porta un numero che cambia: senza, la risposta resterebbe
       // in cache e l'ultimo istante non avanzerebbe mai -- lo stesso tranello
       // per cui in diretta si vedeva un'immagine vecchia.
+      // Il documento di UN prodotto (/mtg_fd/<strato>/ows): 6 kB e circa 2 s,
+      // contro i 35 kB e i 7-12 s di quello completo nelle ore di carico
+      // (misurato sul servizio vero). Si chiedono tutti e due: il primo che
+      // arriva sblocca il satellite, il completo aggiorna gli altri prodotti.
+      function urlIstantiDelProdotto(product) {
+        const pezzi = String(product.layer || "").split(":");
+        if (pezzi.length !== 2) return "";
+        return "https://view.eumetsat.int/geoserver/" + pezzi[0] + "/" + pezzi[1]
+          + "/ows?service=WMS&version=1.3.0&request=GetCapabilities";
+      }
+
       function aggiornaIstantiDisponibili(forza) {
         const adesso = Date.now();
         if (!forza && adesso - cloudCapsAt < CLOUD_CAPS_TTL_MS) {
@@ -5912,40 +5942,60 @@
         }
         if (cloudCapsPending) return cloudCapsPending;
         cloudCapsAt = adesso;
-        cloudCapsPending = fetch(CLOUD_CAPS_URL + "&_=" + adesso)
-          .then(function (risposta) {
+        const leggi = function (testo) {
+          const xml = new DOMParser().parseFromString(testo, "text/xml");
+          let cambiato = false;
+          const strati = xml.getElementsByTagName("Layer");
+          for (let i = 0; i < strati.length; i++) {
+            const nodoNome = strati[i].getElementsByTagName("Name")[0];
+            if (!nodoNome) continue;
+            const nome = nomeSemplice(nodoNome.textContent.trim());
+            const dimensioni = strati[i].getElementsByTagName("Dimension");
+            for (let d = 0; d < dimensioni.length; d++) {
+              if (dimensioni[d].getAttribute("name") !== "time") continue;
+              // "inizio/fine/passo": la fine e' l'ultimo istante servito.
+              const pezzi = String(dimensioni[d].textContent || "")
+                .trim().split(",").pop().split("/");
+              const fine = Date.parse(pezzi.length > 1 ? pezzi[1] : pezzi[0]);
+              if (!Number.isFinite(fine)) continue;
+              if (cloudCapsEnd.get(nome) !== fine) cambiato = true;
+              cloudCapsEnd.set(nome, fine);
+            }
+          }
+          try {
+            const fine = {};
+            cloudCapsEnd.forEach(function (valore, nome) { fine[nome] = valore; });
+            localStorage.setItem(CLOUD_CAPS_KEY, JSON.stringify({ at: Date.now(), fine: fine }));
+          } catch (errore) { /* memoria facoltativa */ }
+          return cambiato;
+        };
+        const scarica = function (url) {
+          return fetch(url).then(function (risposta) {
             if (!risposta.ok) throw new Error("capabilities " + risposta.status);
             return risposta.text();
-          })
-          .then(function (testo) {
-            const xml = new DOMParser().parseFromString(testo, "text/xml");
-            let cambiato = false;
-            const strati = xml.getElementsByTagName("Layer");
-            for (let i = 0; i < strati.length; i++) {
-              const nodoNome = strati[i].getElementsByTagName("Name")[0];
-              if (!nodoNome) continue;
-              const nome = nomeSemplice(nodoNome.textContent.trim());
-              const dimensioni = strati[i].getElementsByTagName("Dimension");
-              for (let d = 0; d < dimensioni.length; d++) {
-                if (dimensioni[d].getAttribute("name") !== "time") continue;
-                // "inizio/fine/passo": la fine e' l'ultimo istante servito.
-                const pezzi = String(dimensioni[d].textContent || "")
-                  .trim().split(",").pop().split("/");
-                const fine = Date.parse(pezzi.length > 1 ? pezzi[1] : pezzi[0]);
-                if (!Number.isFinite(fine)) continue;
-                if (cloudCapsEnd.get(nome) !== fine) cambiato = true;
-                cloudCapsEnd.set(nome, fine);
-              }
-            }
-            return cambiato;
-          })
-          .catch(function () { return false; })
-          .then(function (cambiato) {
+          }).then(leggi);
+        };
+        const prodotti = [CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour];
+        if (showLightning) prodotti.push(LIGHTNING_PRODUCT);
+        const veloci = prodotti.map(urlIstantiDelProdotto).filter(Boolean)
+          .map(function (url) { return scarica(url + "&_=" + adesso); });
+        const completa = scarica(CLOUD_CAPS_URL + "&_=" + adesso);
+        cloudCapsPending = new Promise(function (risolvi) {
+          // Il satellite riparte appena c'e' l'istante del prodotto in uso.
+          Promise.all(veloci).then(function (esiti) {
+            risolvi(esiti.some(Boolean));
+          }, function () { /* resta il completo */ });
+          Promise.allSettled(veloci.concat([completa])).then(function (esiti) {
             cloudCapsPending = null;
-            return cambiato;
+            risolvi(esiti.some(function (e) { return e.status === "fulfilled" && e.value; }));
           });
+        });
         return cloudCapsPending;
       }
+      // La dichiarazione si legge gia' all'apertura, non al primo clic su
+      // "Satellite": pesa 35 kB e cosi' il primo fotogramma parte senza
+      // attese.
+      setTimeout(function () { aggiornaIstantiDisponibili(false); }, 1500);
 
       // Di quanti passi si puo' tornare indietro quando l'istante chiesto
       // non c'e': un'ora scarsa di tentativi, poi si dichiara il guasto
@@ -6179,6 +6229,156 @@
           + "&time=" + slot.iso;
       }
 
+      // ---- SATELLITE A TASSELLI ---------------------------------------
+      //
+      // Un'immagine unica per tutto il riquadro e' lenta e sfocata insieme.
+      // Lenta perche' il servizio compone un fotogramma da 2160 px in circa
+      // 6 s, contro meno di un secondo per un tassello da 256 (misurato).
+      // Sfocata perche' a scala italiana il riquadro chiesto e' l'Europa
+      // intera, e quei 2160 px si stendono sul doppio dei pixel dello schermo.
+      //
+      // Si fa come le mappe vere: tasselli della sola vista, chiesti in
+      // parallelo, alla risoluzione di ogni zoom, e tenuti dal browser (il
+      // servizio li dichiara validi una settimana: l'istante e' nell'URL,
+      // quindi non invecchiano). Trenta tasselli in parallelo passano tutti
+      // senza rifiuti (provato sul servizio vero).
+      //
+      // Sotto resta l'immagine unica, ma a un terzo della risoluzione: arriva
+      // in un secondo e mezzo, copre il margine intorno alla vista mentre i
+      // tasselli arrivano, e serve alla sagoma delle nubi (fulmini) e al
+      // nowcast, che lavorano sui pixel. I tasselli mostrano sempre lo stesso
+      // prodotto e lo stesso istante dell'immagine sotto, e la stessa
+      // visibilita': si accendono e si spengono con lei.
+      const SAT_TASSELLI = "satellite-tasselli";
+      const SAT_TASSELLI_LAYER = "satellite-tasselli-layer";
+      const SAT_TASSELLI_ATTESA_MS = 350;
+      let tasselliUrl = "";
+      let tasselliTimer = 0;
+
+      function urlTasselli(product, slot) {
+        // Tasselli GRANDI (512 px logici), non i soliti 256: il servizio parla
+        // solo HTTP/1.1, quindi il browser gli apre sei connessioni alla
+        // volta. Uno schermo da PC vuole 35 tasselli da 256 -- sei giri da
+        // 0,7 s -- oppure una dozzina da 512 -- due giri da 1,1 s (misurato).
+        // Sugli schermi ad alta densita' il tassello e' da 768 px sullo
+        // stesso riquadro, non 1024: il servizio compone un 1024 in tempi
+        // che vanno da 0,8 a 7,7 s secondo il carico, un 768 resta intorno
+        // al secondo (misurato), e a 1,5x l'occhio non vede la differenza.
+        const lato = (window.devicePixelRatio || 1) >= 1.5 ? 768 : 512;
+        return CLOUD_WMS
+          + "?service=WMS&version=1.1.1&request=GetMap&styles="
+          + "&layers=" + encodeURIComponent(product.layer)
+          + "&srs=EPSG:3857"
+          + (product.mode === "scene"
+              ? "&format=image/jpeg"
+              : "&format=image/png&transparent=true")
+          + "&bbox={bbox-epsg-3857}&width=" + lato + "&height=" + lato
+          + "&time=" + (slot.iso || new Date(slot.value).toISOString()
+            .replace(/\.\d{3}Z$/, ".000Z"));
+      }
+
+      // Lo strato si crea al primo uso, subito sopra l'immagine di base.
+      function preparaTasselli(url) {
+        if (!map || !map.getLayer || !map.getLayer("satellite-clouds-layer")) return false;
+        if (map.getSource(SAT_TASSELLI)) return true;
+        map.addSource(SAT_TASSELLI, {
+          type: "raster", tiles: [url], tileSize: 512,
+          // Oltre lo zoom 7 un tassello da 512 e' gia' piu' fine del pixel
+          // dello strumento (500 m - 1 km): si ingrandisce quello.
+          minzoom: 0, maxzoom: 7,
+          bounds: [CLOUD_DOMAIN.west, CLOUD_DOMAIN.south, CLOUD_DOMAIN.east, CLOUD_DOMAIN.north]
+        });
+        const strati = map.getStyle().layers || [];
+        const qui = strati.findIndex(function (l) { return l.id === "satellite-clouds-layer"; });
+        const dopo = qui >= 0 && strati[qui + 1] ? strati[qui + 1].id : undefined;
+        map.addLayer({
+          id: SAT_TASSELLI_LAYER, type: "raster", source: SAT_TASSELLI,
+          layout: { visibility: "none" },
+          paint: { "raster-opacity": 0.94, "raster-resampling": "linear", "raster-fade-duration": 180 }
+        }, dopo);
+        tasselliUrl = url;
+        return true;
+      }
+
+      // Stessa visibilita' dell'immagine di base (che ha tre interruttori:
+      // satellite, nowcast, nubi 3D).
+      function visibilitaTasselli() {
+        if (!map || !map.getLayer || !map.getLayer(SAT_TASSELLI_LAYER)) return;
+        const base = map.getLayoutProperty("satellite-clouds-layer", "visibility");
+        const pronti = !tasselliTimer;
+        map.setLayoutProperty(SAT_TASSELLI_LAYER, "visibility",
+          base === "visible" && pronti ? "visible" : "none");
+      }
+
+      // Cambiando istante i tasselli vecchi si nascondono SUBITO -- mostrare
+      // l'ora prima sopra l'immagine dell'ora dopo sarebbe una lettura falsa
+      // -- e i nuovi si chiedono solo quando il cursore si ferma: un
+      // trascinamento attraversa decine di istanti, e chiedere i tasselli di
+      // ognuno vorrebbe dire migliaia di richieste. Intanto si vede
+      // l'immagine di base dell'istante giusto, dalla cache.
+      function aggiornaTasselli(product, slot) {
+        if (!product || !slot || !Number.isFinite(slot.value)) return;
+        const url = urlTasselli(product, slot);
+        if (url === tasselliUrl && map.getSource(SAT_TASSELLI)) { visibilitaTasselli(); return; }
+        if (!preparaTasselli(url)) return;
+        if (tasselliTimer) clearTimeout(tasselliTimer);
+        tasselliTimer = 1;
+        visibilitaTasselli();
+        tasselliTimer = setTimeout(function () {
+          tasselliTimer = 0;
+          const sorgente = map.getSource(SAT_TASSELLI);
+          if (!sorgente) return;
+          if (url !== tasselliUrl) {
+            tasselliUrl = url;
+            sorgente.setTiles([url]);
+          }
+          visibilitaTasselli();
+        }, SAT_TASSELLI_ATTESA_MS);
+      }
+
+      // La misura dell'immagine di base. Con i tasselli sopra basta un terzo
+      // della risoluzione; il nowcast invece lavora sui suoi pixel e li vuole
+      // tutti. Il Lightning Imager non passa di qui: non ha tasselli.
+      function misuraSatellite(box, product) {
+        const piena = cloudRequestSize(box, product);
+        if (showCloudNowcast || product === LIGHTNING_PRODUCT) return piena;
+        const width = Math.max(384, Math.round(piena.width / 3));
+        const height = Math.max(256, Math.round(width * piena.height / piena.width));
+        return { width: width, height: height, metres: piena.metres * piena.width / width };
+      }
+
+      // Scarica un fotogramma come FILE e lo decodifica da li'. L'URL locale
+      // (blob:) va direttamente alla mappa: niente seconda richiesta al
+      // servizio e niente ricodifica. Prima l'immagine si ridisegnava su una
+      // canvas e si ricodificava in PNG solo per avere quell'URL locale: su
+      // un fotogramma da 2160 px erano centinaia di millisecondi (secondi su
+      // un telefono) prima di vedere qualcosa, e un PNG cinque volte piu'
+      // pesante del JPEG da tenere in memoria per ogni istante in cache.
+      // Una risposta che non e' un'immagine (l'errore XML del servizio per un
+      // istante che non ha) conta come errore, come prima con Image.
+      function scaricaImmagineSatellite(url) {
+        return fetch(url, { mode: "cors", credentials: "omit" })
+          .then(function (risposta) {
+            const tipo = risposta.headers.get("content-type") || "";
+            if (!risposta.ok || tipo.indexOf("image/") !== 0) {
+              throw new Error("satellite " + risposta.status + " " + tipo);
+            }
+            return risposta.blob();
+          })
+          .then(function (blob) {
+            return new Promise(function (risolvi, rifiuta) {
+              const locale = URL.createObjectURL(blob);
+              const immagine = new Image();
+              immagine.onload = function () { risolvi({ image: immagine, url: locale }); };
+              immagine.onerror = function () {
+                URL.revokeObjectURL(locale);
+                rifiuta(new Error("satellite non decodificato"));
+              };
+              immagine.src = locale;
+            });
+          });
+      }
+
       // Vale la pena rifare la richiesta? Solo se il riquadro esce da quello
       // gia' pubblicato, se avvicinandosi si guadagna davvero dettaglio, o se
       // e' arrivata un'immagine nuova dal satellite.
@@ -6216,7 +6416,7 @@
 
       // Da immagine opaca a sovrapposizione: il calcolo dell'alfa dipende dal
       // tipo di prodotto (vedi il commento su CLOUD_PRODUCTS).
-      function publishSatelliteClouds(image, box, size, product, slot) {
+      function publishSatelliteClouds(image, box, size, product, slot, urlLocale) {
         const source = map.getSource("satellite-clouds");
         if (!source) return;
         // Fra il momento in cui QUESTA immagine finisce di caricare e il
@@ -6253,6 +6453,7 @@
             cloudLoadedBox = box;
             cloudLoadedMetres = size.metres;
             cloudLoadedSlot = slot.value;
+            aggiornaTasselli(product, slot);
             markCloudFreshness(slot);
             if (showRadar) syncRadarToSatellite(slot);
             syncTimelineToSatellite(slot);
@@ -6279,6 +6480,40 @@
         // dell'ora si aggiornava (la pubblicazione era "riuscita") ma il
         // livello restava vuoto, cioe' satellite invisibile senza un errore
         // che lo dicesse. Stesso rimedio gia' applicato ai fulmini.
+        // Il file scaricato e' gia' locale: si pubblica SUBITO, e la canvas
+        // per la sagoma e il nowcast si prepara al fotogramma dopo, fuori
+        // dal percorso che separa il clic dalle nubi sullo schermo.
+        if (urlLocale) {
+          // Lo stesso fotogramma era gia' in cache (ricarica forzata): si
+          // tiene quello, e il doppione si libera subito.
+          if (cloudFrames.has(frameKey)) {
+            URL.revokeObjectURL(urlLocale);
+            urlLocale = cloudFrames.get(frameKey).url;
+          } else {
+            rememberCloudFrame(frameKey, urlLocale, box, size, null);
+          }
+          update(urlLocale, false);
+          const preparaSagoma = function () {
+            if (publicationToken !== cloudToken) return;
+            try {
+              const canvas = document.createElement("canvas");
+              canvas.width = image.naturalWidth || size.width;
+              canvas.height = image.naturalHeight || size.height;
+              canvas.getContext("2d").drawImage(image, 0, 0);
+              cloudObserved = { canvas: canvas, box: box, slot: slot };
+              if (showCloudNowcast) scheduleCloudNowcast();
+              const sagoma = costruisciMascheraNube(canvas, box, product);
+              const voce = cloudFrames.get(frameKey);
+              if (voce) voce.maschera = sagoma;
+              if (cloudPublishedKey === frameKey) mascheraNube = sagoma;
+            } catch (error) {
+              console.warn("Sagoma delle nubi non calcolata", error);
+            }
+            scheduleCloudPrefetch();
+          };
+          setTimeout(preparaSagoma, 30);
+          return;
+        }
         try {
           const canvas = document.createElement("canvas");
           canvas.width = image.naturalWidth || size.width;
@@ -6385,7 +6620,7 @@
         aggiornaIstantiDisponibili(false);
         let slot = cloudSlot(product);
         const box = cloudRequestBox(1.15);
-        const size = cloudRequestSize(box, product);
+        const size = misuraSatellite(box, product);
         if (!force && !cloudNeedsReload(cloudRequestBox(0), size, slot)) return;
 
         const token = ++cloudToken;
@@ -6394,47 +6629,52 @@
         // dalla cache invalida le richieste precedenti ancora in volo.
         // force=true deve invece chiedere un'immagine nuova.
         if (!force && pubblicaFotogrammaInCache()) return;
-        const image = new Image();
-        // La canvas va riletta pixel per pixel: senza CORS il browser la
-        // marcherebbe come "sporca" e getImageData fallirebbe. EUMETView
-        // risponde con Access-Control-Allow-Origin: *.
-        image.crossOrigin = "anonymous";
-        image.onload = function () {
-          if (token !== cloudToken || !showSatelliteClouds) return;
-          try {
-            publishSatelliteClouds(image, box, size, product, slot);
-          } catch (error) {
-            console.error("Nubi satellitari non elaborate", error);
-            toast("Immagine satellitare non elaborabile");
-          }
-        };
+        // EUMETView risponde con Access-Control-Allow-Origin: *, quindi il
+        // file si puo' leggere e la canvas della sagoma non resta "sporca".
+        // I tasselli nitidi partono subito, in parallelo all'immagine di base.
+        aggiornaTasselli(product, slot);
+
         // Alcune RGB arrivano un ciclo dopo il canale IR, e la
         // dichiarazione del servizio puo' essere di qualche minuto avanti.
         // Si torna indietro di un passo per volta, restando sempre su un
         // istante PRECISO: il ripiego di prima -- chiedere senza istante --
         // faceva comporre al servizio un mosaico di granuli di ore diverse.
         let passiIndietro = 0;
-        image.onerror = function () {
-          if (token !== cloudToken || !showSatelliteClouds) return;
-          passiIndietro += 1;
-          if (passiIndietro <= CLOUD_MAX_PASSI_INDIETRO) {
-            // Se nel frattempo e' arrivata la dichiarazione e indica un
-            // istante piu' indietro di quello che stiamo tentando, si salta
-            // direttamente li' invece di scendere passo per passo. Senza
-            // questo, chi parte con la stima -- che puo' essere avanti di
-            // un'ora e mezza -- consuma tutti i tentativi prima di arrivarci,
-            // e il satellite non compare affatto: misurato, cinque 502 di
-            // fila e schermo vuoto.
-            const dichiarato = ultimoIstanteDichiarato(product);
-            slot = (dichiarato && dichiarato < slot.value)
-              ? cloudSlot(product)
-              : slotArretrato(product, slot, 1);
-            image.src = cloudUrl(box, size, product, slot);
-            return;
-          }
-          toast("Satellite EUMETSAT non raggiungibile");
+        const tenta = function () {
+          scaricaImmagineSatellite(cloudUrl(box, size, product, slot))
+            .then(function (esito) {
+              if (token !== cloudToken || !showSatelliteClouds) {
+                URL.revokeObjectURL(esito.url);
+                return;
+              }
+              try {
+                publishSatelliteClouds(esito.image, box, size, product, slot, esito.url);
+              } catch (error) {
+                console.error("Nubi satellitari non elaborate", error);
+                toast("Immagine satellitare non elaborabile");
+              }
+            })
+            .catch(function () {
+              if (token !== cloudToken || !showSatelliteClouds) return;
+              passiIndietro += 1;
+              if (passiIndietro <= CLOUD_MAX_PASSI_INDIETRO) {
+                // Se nel frattempo e' arrivata la dichiarazione e indica un
+                // istante piu' indietro di quello che stiamo tentando, si
+                // salta direttamente li' invece di scendere passo per passo.
+                // Senza questo, chi parte con la stima -- che puo' essere
+                // avanti di un'ora e mezza -- consuma tutti i tentativi prima
+                // di arrivarci, e il satellite non compare affatto.
+                const dichiarato = ultimoIstanteDichiarato(product);
+                slot = (dichiarato && dichiarato < slot.value)
+                  ? cloudSlot(product)
+                  : slotArretrato(product, slot, 1);
+                tenta();
+                return;
+              }
+              toast("Satellite EUMETSAT non raggiungibile");
+            });
         };
-        image.src = cloudUrl(box, size, product, slot);
+        tenta();
       }
 
       // ---- FULMINI IN DIRETTA (Blitzortung) ----------------------------
@@ -8332,6 +8572,7 @@
         } else if (showSatelliteClouds) {
           map.setLayoutProperty("satellite-clouds-layer", "visibility", "visible");
         }
+        visibilitaTasselli();
       }
 
       function scheduleCloudNowcast() {
@@ -8626,7 +8867,7 @@
         );
         const corrente = cloudSlot(product);
         const box = cloudRequestBox(1.15);
-        const size = cloudRequestSize(box, product);
+        const size = misuraSatellite(box, product);
         for (let distanza = 1; distanza <= passi; distanza += 1) {
           for (const verso of [-1, 1]) {
             const valore = corrente.value + verso * distanza * slotMs;
@@ -8686,44 +8927,36 @@
         }, CLOUD_PREFETCH_GAP_MS);
       }
 
-      // Scarica un fotogramma e lo mette in cache, senza pubblicarlo.
+      // Scarica un fotogramma e lo mette in cache, senza pubblicarlo. Il file
+      // va in cache cosi' com'e' (vedi scaricaImmagineSatellite): niente
+      // ricodifica in PNG, e un JPEG pesa in memoria un quinto.
       function scaricaFotogramma(product, slot, box, size, fatto) {
         const key = cloudFrameKey(product, slot, box, size);
         if (cloudFrames.has(key)) { if (fatto) fatto(cloudFrames.get(key)); return; }
-        const image = new Image();
-        image.crossOrigin = "anonymous";
-        image.onload = function () {
-          try {
-            const canvas = document.createElement("canvas");
-            canvas.width = image.naturalWidth || size.width;
-            canvas.height = image.naturalHeight || size.height;
-            canvas.getContext("2d").drawImage(image, 0, 0);
-            // Anche nel precarico: scorrendo fino a un istante gia' scaricato
-            // il campo di attivita' sa gia' come illuminarlo, invece di
-            // ripiegare sul disco tondo finche' non arriva una richiesta dal
-            // vivo.
-            const maschera = costruisciMascheraNube(canvas, box, product);
-            if (typeof canvas.toBlob === "function"
-                && typeof URL.createObjectURL === "function") {
-              canvas.toBlob(function (blob) {
-                if (!blob) { if (fatto) fatto(null); return; }
-                const url = URL.createObjectURL(blob);
-                rememberCloudFrame(key, url, box, size, maschera);
-                if (fatto) fatto(cloudFrames.get(key));
-              }, "image/png");
+        scaricaImmagineSatellite(cloudUrl(box, size, product, slot))
+          .then(function (esito) {
+            if (cloudFrames.has(key)) {
+              URL.revokeObjectURL(esito.url);
+              if (fatto) fatto(cloudFrames.get(key));
               return;
             }
-            rememberCloudFrame(
-              key, canvas.toDataURL("image/png"), box, size, maschera
-            );
-          } catch (error) {
-            if (fatto) fatto(null);
-            return;
-          }
-          if (fatto) fatto(cloudFrames.get(key));
-        };
-        image.onerror = function () { if (fatto) fatto(null); };
-        image.src = cloudUrl(box, size, product, slot);
+            let maschera = null;
+            try {
+              const canvas = document.createElement("canvas");
+              canvas.width = esito.image.naturalWidth || size.width;
+              canvas.height = esito.image.naturalHeight || size.height;
+              canvas.getContext("2d").drawImage(esito.image, 0, 0);
+              // Anche nel precarico: scorrendo fino a un istante gia'
+              // scaricato il campo di attivita' sa gia' come illuminarlo,
+              // invece di ripiegare sul disco tondo.
+              maschera = costruisciMascheraNube(canvas, box, product);
+            } catch (error) {
+              maschera = null;
+            }
+            rememberCloudFrame(key, esito.url, box, size, maschera);
+            if (fatto) fatto(cloudFrames.get(key));
+          })
+          .catch(function () { if (fatto) fatto(null); });
       }
 
       function cloudHistorySlots() {
@@ -8804,7 +9037,7 @@
         const product = CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour;
         const slot = cloudSlot(product);
         const box = cloudRequestBox(1.15);
-        const size = cloudRequestSize(box, product);
+        const size = misuraSatellite(box, product);
         const frameKey = cloudFrameKey(product, slot, box, size);
         const frame = cloudFrames.get(frameKey);
         if (!frame) return false;
@@ -8825,6 +9058,7 @@
         cloudLoadedBox = frame.box;
         cloudLoadedMetres = frame.size.metres;
         cloudLoadedSlot = slot.value;
+        aggiornaTasselli(product, slot);
         markCloudFreshness(slot);
         if (showRadar) syncRadarToSatellite(slot);
         syncTimelineToSatellite(slot);
@@ -8931,6 +9165,7 @@
           "satellite-clouds-layer", "visibility",
           showSatelliteClouds && !showVolumeClouds ? "visible" : "none"
         );
+        visibilitaTasselli();
         const picker = document.getElementById("satclouds-picker");
         if (picker) picker.style.display = showSatelliteClouds ? "" : "none";
         // Spegnendo il livello la timeline torna libera subito, senza
