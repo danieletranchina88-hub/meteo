@@ -15,6 +15,7 @@ on:
       - 'scripts/verify_archive.py'
       - 'scripts/front_analysis.py'
       - 'scripts/front_analysis_v12.py'
+      - 'scripts/front_character.py'
       - 'scripts/front_consensus.py'
       - 'scripts/front_impact_validation.py'
       - 'scripts/front_detection.py'
@@ -59,6 +60,7 @@ on:
       - 'scripts/verify_archive.py'
       - 'scripts/front_analysis.py'
       - 'scripts/front_analysis_v12.py'
+      - 'scripts/front_character.py'
       - 'scripts/front_consensus.py'
       - 'scripts/front_impact_validation.py'
       - 'scripts/front_detection.py'
@@ -325,6 +327,7 @@ jobs:
       - name: Verifica nucleo scientifico dei fronti
         run: |
           python scripts/tests/test_front_engine.py
+          python scripts/tests/test_front_character.py
           python scripts/tests/test_front_engine_graft.py
           python scripts/tests/test_front_continuity.py
           python scripts/tests/test_front_locator.py
@@ -414,6 +417,7 @@ jobs:
       - name: Verifica nucleo scientifico dei fronti
         run: |
           python scripts/tests/test_front_engine.py
+          python scripts/tests/test_front_character.py
           python scripts/tests/test_front_engine_graft.py
           python scripts/tests/test_front_continuity.py
           python scripts/tests/test_front_locator.py

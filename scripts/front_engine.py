@@ -401,7 +401,11 @@ def frontal_evidence(
         "frontogenesis": frontogenesis,
         "uWind": u_smooth,
         "vWind": v_smooth,
-        "omega": ascent if omega is not None else None,
+        # Pa/s with the model's sign (negative is ascent), as
+        # front_character.frontal_character expects; passing ``ascent`` here
+        # inverted the ana/kata vote for every fallback and v12 candidate.
+        "omega": -ascent if omega is not None else None,
+        "ascent": ascent if omega is not None else None,
         "vorticity1e5": vorticity,
         "convergence1e5": convergence,
         "windShift": wind_shift,
@@ -1254,13 +1258,21 @@ def _build_candidate(
     # The ridge of |grad theta_w| is the centre of the zone. The published
     # line is the warm boundary, a fixed fraction of the analysis width
     # toward the warm air. Normals are recomputed on the moved vertices.
-    width = float(reference.get("widthKm", 80.0))
-    offset = 0.35 * width
+    #
+    # Only the engine's own ridge is a zone axis.  An external line (the
+    # two-scale fallback) is a TFL zero contour masked to TFP < 0, i.e. it
+    # already sits on the warm flank; moving it again put it 60 km further
+    # into the warm air mass, where no cross-front contrast is left to find.
+    # Probability-based scores describe the zone, so they are read on the
+    # axis before the move.
     import front_character as fch
+    width = float(reference.get("widthKm", 80.0))
+    offset = fch.WARM_EDGE_FRACTION * width if source == LOCATOR_NAME else 0.0
+    line_gradient = sample(evidence["gradientMagnitude"])
     line = fch.place_on_warm_edge(
         line, np.column_stack((east / magnitude, north / magnitude)), offset
     )
-    east = sample(evidence["gradientEast"]) if False else fl._sample(
+    east = fl._sample(
         evidence["gradientEast"], line, longitudes, latitudes, dlon, dlat)
     north = fl._sample(evidence["gradientNorth"], line, longitudes, latitudes, dlon, dlat)
     magnitude = np.maximum(np.hypot(east, north), 1.0e-12)
@@ -1269,20 +1281,22 @@ def _build_candidate(
     hewson_mag = np.maximum(np.hypot(hewson_e, hewson_n), 1.0e-12)
     line_tfp = fl._sample(evidence["tfp"], line, longitudes, latitudes, dlon, dlat)
     line_abz = fl._sample(abz_gradient, line, longitudes, latitudes, dlon, dlat)
-    line_probability = fl._sample(evidence["probability"], line, longitudes, latitudes, dlon, dlat)
 
     return {
         "coordinates": line,
+        # Physical diagnostics are measured on the zone axis, which is
+        # ``coordinates`` moved back by this offset against ``warmNormal``.
         "warmEdgeOffsetKm": round(offset, 1),
-        "positionSource": "warm-edge-of-baroclinic-zone",
+        "positionSource": (
+            "warm-edge-of-baroclinic-zone" if offset > 0.0
+            else "thermal-front-locator"
+        ),
         "warmNormal": np.column_stack((east / magnitude, north / magnitude)),
         "hewsonDir": np.column_stack((hewson_e / hewson_mag,
                                       hewson_n / hewson_mag)),
         "medianTfp": float(np.nanmedian(line_tfp)),
         "medianTfpStrength": float(np.nanmedian(-line_tfp * 10_000.0)),
-        "medianThetaWGradient": float(
-            np.nanmedian(sample(evidence["gradientMagnitude"])) * 100.0
-        ),
+        "medianThetaWGradient": float(np.nanmedian(line_gradient) * 100.0),
         "medianAbzGradient": float(np.nanmedian(line_abz)),
         "peakAbzGradient": float(np.nanmax(line_abz)),
         "lengthKm": line_length_km(line),

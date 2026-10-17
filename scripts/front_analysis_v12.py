@@ -18,6 +18,7 @@ import os
 
 import numpy as np
 
+import front_character as fch
 import front_consensus as fcon
 import front_detection as fd
 import front_engine as fe
@@ -37,7 +38,10 @@ from front_analysis import SynopticFrontAnalyzer, _blend_lines, _line_length_km,
 # campo termico ma dalla cresta di un campo di evidenza fuso, a scala
 # sinottica dichiarata: e' un metodo diverso, non una taratura diversa, e
 # chi confronta run archiviati deve poterlo distinguere dalla stringa.
-FRONT_METHOD = "icon2i-warm-edge-frontogenesis-v21"
+# v22: l'asse della zona si rilegge su theta_w a 45 km, le misure fisiche si
+# fanno sull'asse e la linea si pubblica 34 km verso l'aria calda; corretto il
+# segno del vento termico, che dalla v21 scartava ogni fronte reale.
+FRONT_METHOD = "icon2i-resolved-warm-edge-v22"
 ANALYSIS_PRESSURE_PA = 85_000.0
 LOWER_PRESSURE_PA = 92_500.0
 UPPER_PRESSURE_PA = 70_000.0
@@ -891,7 +895,6 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
 
     def _apply_physical_character(self, candidates, engine_fields, hour):
         """Frontogenesis and thermal-wind gates, plus ana/kata character."""
-        import front_character as fch
         evidence = (engine_fields or {}).get("evidence") or {}
         if not evidence:
             return candidates
@@ -918,7 +921,9 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                 dropped += 1
         if engine_fields is not None:
             funnel = engine_fields.setdefault("funnel", {})
-            funnel["droppedPhysicalGate"] = dropped
+            funnel["droppedPhysicalGate"] = (
+                funnel.get("droppedPhysicalGate", 0) + dropped
+            )
         return kept
 
     def _detect_hour(self, hour: int) -> list[dict]:
@@ -1008,6 +1013,11 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         wet_candidates = self._apply_physical_character(
             wet_candidates, engine_fields, hour
         )
+        # The gate writes into engine_fields["funnel"]; ``engine_funnel`` is a
+        # copy taken before it ran, so the count never reached front_qc.json.
+        engine_funnel["droppedPhysicalGate"] = (
+            (engine_fields or {}).get("funnel") or {}
+        ).get("droppedPhysicalGate", 0)
         # Independent directional ridge geometry.  It confirms position and
         # method agreement, but it is deliberately NOT an autonomous seed:
         # both Hewson and Laplacian geometry can follow opposite edges of the
@@ -1264,6 +1274,12 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                 except Exception:
                     wnd = None
 
+        zone_gradient = np.hypot(
+            kinematics["thetaWGradientEast"], kinematics["thetaWGradientNorth"]
+        )
+        warm_edge_km = fch.WARM_EDGE_FRACTION * fe.reference_front_scales(
+            fe.SYNOPTIC_SIGMA_KM
+        )["widthKm"]
         accepted = []
         rejected: list[dict] = []
         reject_counts: dict[str, int] = {}
@@ -1274,6 +1290,21 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             hewson = np.asarray(candidate["hewsonDir"], dtype=float)
             if len(coordinates) < 4 or normal.shape != coordinates.shape:
                 continue
+            # Measure on the zone axis, publish on the warm edge.  Every
+            # threshold below was set on axis lines; sampled from the warm
+            # edge the cold-side points land near the zone centre and the
+            # thermal core fails on a real front.  The axis is re-read on
+            # theta_w at the refinement scale, because a line located at
+            # 100-150 km smoothing sits that far into the warm air.
+            coordinates, snap_shift = fch.snap_to_zone_axis(
+                fch.zone_axis(candidate), normal, zone_gradient, self._sample
+            )
+            candidate["coordinates"] = fch.place_on_warm_edge(
+                coordinates, np.nan_to_num(normal), warm_edge_km
+            )
+            candidate["warmEdgeOffsetKm"] = round(warm_edge_km, 1)
+            candidate["axisSnapKm"] = round(float(np.median(np.abs(snap_shift))), 1)
+            candidate["positionSource"] = "warm-edge-of-resolved-zone"
 
             # Sample the air masses at three metric distances.  A single
             # 55-km pair can accidentally cross a local perturbation; the

@@ -1,5 +1,32 @@
 # Changelog - Migliorie Scientifiche ICON-2I
 
+## Metodo fronti v22 (`icon2i-resolved-warm-edge-v22`) - 2026-10-17
+
+Dal 7 ottobre (v21) il run non pubblicava più alcun fronte; prima la resa era
+già di 0-3 tracce per run. Cause trovate sui GRIB ICON-2I veri (run 15/10 00Z
+e 17/10 12Z) e corrette:
+
+- **Vento termico col segno invertito** (`front_character.thermal_wind_alignment`):
+  la direzione attesa era `-(k × n)` invece di `k × n`. Sul dominio baroclino
+  il coseno misurato valeva -0,97 ovunque, quindi il cancello scartava ogni
+  fronte reale. Ora vale +0,97.
+- **ω invertito nel carattere ana/kata**: il motore passava `ascent = -ω`
+  col nome `omega`, e `frontal_character` lo rinegava.
+- **Linea misurata fuori dalla zona**: la linea del motore era spostata di
+  0,35·w' = 60 km verso il caldo, e quella di ripiego (contorno TFL, già sul
+  fianco caldo) veniva spostata di altri 60 km. Le soglie fisiche (ΔΘw ≥ 1,2 K
+  a 30/55/85 km, ecc.) erano tarate sull'asse: misurate così il contrasto si
+  dimezzava. Ora l'asse si rilegge su Θw a 45 km (`snap_to_zone_axis`), le
+  misure si fanno sull'asse e la linea si pubblica 34 km (0,20·w') verso
+  l'aria calda.
+- Il contatore `droppedPhysicalGate` non arrivava in `front_qc.json`.
+
+L'approssimazione di Θw (σ 30 km + winsorizzazione) è stata misurata e **non**
+è la causa: a scala d'analisi toglie il 2-4% del gradiente.
+
+Risultato: 17/10 12Z da 0 a 2 tracce (25 ore), 15/10 00Z da 0 a 1 traccia;
+lo stesso fronte freddo su Francia/Alpi compare in entrambi i run.
+
 ## Versione 2.1.0 - 2026-10-09
 
 ### 🎯 Classificazione Completa dei Fronti (Priorità Alta - Completato)
