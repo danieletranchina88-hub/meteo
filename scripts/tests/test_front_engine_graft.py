@@ -144,6 +144,41 @@ if detected:
            "lunghezza minima dichiarata %.0f km" % v12.ENGINE_MIN_LENGTH_KM)
 
 # --------------------------------------------------------------------------
+print("\n1b) Lo stesso fronte con il vento a 700 hPa, come in produzione")
+# --------------------------------------------------------------------------
+# Il caso 1 non ha vento a 700 hPa, quindi il cancello del vento termico non
+# si accende mai: e' per questo che la suite passava mentre il run operativo
+# del 17 ottobre 2026 perdeva ogni fronte in 73 ore su 73.  Qui il vento a
+# 700 hPa e' quello del bilancio di vento termico, (R/f) ln(850/700) k x grad T,
+# cioe' il caso normale di un fronte vero.
+R_DRY, CORIOLIS = 287.0, 1.0e-4
+peak_gradient = 3.0 * 2.0 / (np.sqrt(2.0 * np.pi) * 80.0e3)          # K/m
+thermal_wind = (R_DRY / CORIOLIS) * np.log(850.0 / 700.0) * peak_gradient * np.exp(
+    -0.5 * (ACROSS / 80.0) ** 2
+)
+balanced_fields = dict(front_fields)
+balanced_fields["u700"] = front_u + thermal_wind * -0.8   # k x (0.6, 0.8)
+balanced_fields["v700"] = front_v + thermal_wind * 0.6
+balanced_analyzer = build_analyzer(balanced_fields, front_thermo)
+balanced = balanced_analyzer._detect_hour(0)
+balanced_diag = balanced_analyzer._pipeline_diag.get(0, {})
+balanced_funnel = balanced_diag.get("engineFunnel") or {}
+report(len(balanced) == 1,
+       "con il vento termico il fronte sparisce o si spezza in piu' identita'",
+       "accettati %d, scartati dal cancello fisico %s %s" % (
+           len(balanced),
+           balanced_funnel.get("droppedAnalyzerPhysicalGate"),
+           balanced_funnel.get("analyzerPhysicalGateFailures")))
+if balanced:
+    report(float(balanced[0].get("thermalWindAlignment") or 0.0) > 0.9,
+           "il taglio verticale di un fronte bilanciato non e' allineato",
+           "allineamento %.2f, L=%.0f km" % (
+               float(balanced[0].get("thermalWindAlignment") or 0.0),
+               float(balanced[0]["lengthKm"])))
+report("droppedAnalyzerPhysicalGate" in balanced_funnel,
+       "il diagnostico del cancello fisico non arriva al QC")
+
+# --------------------------------------------------------------------------
 print("\n2) Il bordo montuoso: stesso contrasto termico, nessuna dinamica")
 # --------------------------------------------------------------------------
 SLOPE = (LATG - 46.2) * fl.EARTH_KM_PER_DEG

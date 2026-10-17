@@ -37,7 +37,10 @@ from front_analysis import SynopticFrontAnalyzer, _blend_lines, _line_length_km,
 # campo termico ma dalla cresta di un campo di evidenza fuso, a scala
 # sinottica dichiarata: e' un metodo diverso, non una taratura diversa, e
 # chi confronta run archiviati deve poterlo distinguere dalla stringa.
-FRONT_METHOD = "icon2i-warm-edge-frontogenesis-v21"
+# v22: same method as v21 with its physical gate repaired (thermal-wind sign,
+# omega sign, fallback warm-edge offset).  The v21 gate rejected every
+# balanced front, so v21 and v22 archives are not comparable.
+FRONT_METHOD = "icon2i-warm-edge-frontogenesis-v22"
 ANALYSIS_PRESSURE_PA = 85_000.0
 LOWER_PRESSURE_PA = 92_500.0
 UPPER_PRESSURE_PA = 70_000.0
@@ -181,6 +184,8 @@ ENGINE_MIN_LENGTH_KM = 250.0
 # erased by an all-or-nothing survival rule.  Six hours is the tracking window
 # doubled -- beyond it the interpolation would be stating more than the data.
 MAX_INFERRED_GAP_HOURS = 6
+# Consistent estimator of a Gaussian standard deviation from a MAD.
+MAD_TO_STD = 1.4826
 GEOMETRY_CORRIDOR_KM = 120.0
 BOUNDARY_MARGIN_KM = 25.0
 
@@ -386,7 +391,11 @@ def fill_track_gaps(
     local = dict(track.get("localClassifications", {}))
     inferred_position_km: dict[int, float] = {}
     detected = sorted(track["lines"])
-    motion_spread = float(track.get("motionMadKmh", 0.0) or 0.0)
+    # ``motionMadKmh`` is a median absolute deviation; the bridge formula
+    # needs a standard deviation, which for Gaussian increments is 1.4826
+    # MAD.  Using the MAD directly under-stated the published position
+    # uncertainty of every inferred hour by a third.
+    motion_spread = MAD_TO_STD * float(track.get("motionMadKmh", 0.0) or 0.0)
     for first, second in zip(detected[:-1], detected[1:]):
         gap = second - first
         if gap < 2 or gap - 1 > int(max_gap_hours):
@@ -889,8 +898,19 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         )
 
 
-    def _apply_physical_character(self, candidates, engine_fields, hour):
-        """Frontogenesis and thermal-wind gates, plus ana/kata character."""
+    def _apply_physical_character(self, candidates, engine_fields, hour,
+                                  funnel: dict | None = None):
+        """Frontogenesis and thermal-wind gates, plus ana/kata character.
+
+        The 700 hPa wind is filtered at the same analysis scale as the
+        850 hPa wind it is compared with (the engine's ``uWind``/``vWind``):
+        the raw kilometre-scale field made the layer shear mostly mesoscale
+        noise.  Drops are counted in ``funnel`` -- the dictionary that is
+        actually published in front_qc.json -- by the reason that failed.
+        Up to v21 the counter was written to a different dictionary than the
+        one copied into the QC, so the one gate that was removing every
+        candidate of the run showed up there as ``null``.
+        """
         import front_character as fch
         evidence = (engine_fields or {}).get("evidence") or {}
         if not evidence:
@@ -898,12 +918,16 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         u_upper = v_upper = None
         if self.has_upper_wind:
             try:
-                u_upper = self._field("u700", hour)
-                v_upper = self._field("v700", hour)
+                sigma = float(evidence.get("sigmaKm", fe.SYNOPTIC_SIGMA_KM))
+                metrics = evidence.get("metrics") or fl.grid_metrics(
+                    self.longitudes, self.latitudes
+                )
+                u_upper = fl.smooth_km(self._field("u700", hour), sigma, metrics)
+                v_upper = fl.smooth_km(self._field("v700", hour), sigma, metrics)
             except Exception:
                 u_upper = v_upper = None
         kept = []
-        dropped = 0
+        failures: dict[str, int] = {}
         for candidate in candidates:
             fch.annotate_candidate(
                 candidate, evidence, self.longitudes, self.latitudes,
@@ -915,10 +939,11 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             if fch.passes_physical_gate(candidate):
                 kept.append(candidate)
             else:
-                dropped += 1
-        if engine_fields is not None:
-            funnel = engine_fields.setdefault("funnel", {})
-            funnel["droppedPhysicalGate"] = dropped
+                for reason in str(candidate.get("physicalGate", "")).split(":", 1)[-1].split("+"):
+                    failures[reason] = failures.get(reason, 0) + 1
+        if funnel is not None:
+            funnel["droppedAnalyzerPhysicalGate"] = len(candidates) - len(kept)
+            funnel["analyzerPhysicalGateFailures"] = failures
         return kept
 
     def _detect_hour(self, hour: int) -> list[dict]:
@@ -996,17 +1021,21 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             # confine termico orografico che il motore esiste per togliere:
             # misurato, il rilevatore a due scale restituisce la linea alpina
             # di 1730 km nel momento in cui gli si lascia pubblicare da solo.
+            # The TFL contour already sits on the warm edge of its zone, so
+            # the engine must not move it a second time toward the warm air.
             wet_candidates = fe.score_lines(
                 [np.asarray(item["coordinates"], dtype=float)
                  for item in fallback],
                 engine_fields,
                 min_length_km=ENGINE_MIN_LENGTH_KM,
                 source="thetaW-laplacian-fallback",
+                on_warm_edge=True,
+                funnel=engine_funnel,
             )
             engine_funnel["fallbackOffered"] = len(fallback)
             engine_funnel["fallbackAccepted"] = len(wet_candidates)
         wet_candidates = self._apply_physical_character(
-            wet_candidates, engine_fields, hour
+            wet_candidates, engine_fields, hour, funnel=engine_funnel
         )
         # Independent directional ridge geometry.  It confirms position and
         # method agreement, but it is deliberately NOT an autonomous seed:
@@ -1267,13 +1296,26 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         accepted = []
         rejected: list[dict] = []
         reject_counts: dict[str, int] = {}
+        # Candidates that never reach the physical gates: they cannot be
+        # sampled across the line.  Counted, because an empty map with no
+        # rejection on file is exactly what made the v20/v21 losses invisible.
+        unsampled: dict[str, int] = {}
         for source in candidates:
             candidate = dict(source)
             coordinates = np.asarray(candidate["coordinates"], dtype=float)
             normal = np.asarray(candidate["warmNormal"], dtype=float)
             hewson = np.asarray(candidate["hewsonDir"], dtype=float)
-            if len(coordinates) < 4 or normal.shape != coordinates.shape:
+            if (len(coordinates) < 4 or normal.shape != coordinates.shape
+                    or hewson.shape != coordinates.shape
+                    or not np.all(np.isfinite(coordinates))):
+                unsampled["malformed-geometry"] = unsampled.get("malformed-geometry", 0) + 1
                 continue
+            # A missing direction would turn every offset into NaN; keep the
+            # vertex and borrow the nearest finite normal along the line.
+            normal = fe._unit_vectors(normal[:, 0], normal[:, 1])
+            hewson = fe._unit_vectors(hewson[:, 0], hewson[:, 1])
+            candidate["warmNormal"] = normal
+            candidate["hewsonDir"] = hewson
 
             # Sample the air masses at three metric distances.  A single
             # 55-km pair can accidentally cross a local perturbation; the
@@ -1323,6 +1365,9 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
 
             validity = central_validity
             if validity is None or float(np.mean(validity)) < 0.75:
+                unsampled["cross-front-samples-missing"] = (
+                    unsampled.get("cross-front-samples-missing", 0) + 1
+                )
                 continue
             warm, cold = samples[CROSS_FRONT_KM]
             delta_temperature_points = np.nanmedian(np.stack(temperature_deltas), axis=0)
@@ -1394,6 +1439,9 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                 & np.isfinite(cold_u) & np.isfinite(cold_v)
             )
             if float(np.mean(wind_valid)) < 0.70:
+                unsampled["cross-front-wind-missing"] = (
+                    unsampled.get("cross-front-wind-missing", 0) + 1
+                )
                 continue
             wind_shift = np.hypot(warm_u - cold_u, warm_v - cold_v)
             warm_speed = np.hypot(warm_u, warm_v)
@@ -1688,6 +1736,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             "finalPolylines": len(accepted),
             "rejectedLines": len(rejected),
             "rejected": reject_counts,
+            "unsampledLines": sum(unsampled.values()),
+            "unsampled": unsampled,
             "candidateSource": candidate_source,
             "engineCandidates": engine_count,
             "engineFunnel": engine_funnel,
@@ -2197,9 +2247,12 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             properties["qualityScore"] = round(float(hourly_quality), 2)
             properties["confidence"] = properties["qualityScore"]
             properties["existenceConfidence"] = properties["qualityScore"]
-            properties["uncertaintyIndex"] = _json_number(
+            # Explicit None test: ``or`` treated a legitimate 0.0 as missing.
+            hourly_uncertainty = _json_number(
                 (track.get("hourlyUncertainty") or {}).get(hour), 2
-            ) or properties["uncertaintyIndex"]
+            )
+            if hourly_uncertainty is not None:
+                properties["uncertaintyIndex"] = hourly_uncertainty
             properties["detectionQuality"] = _json_number(
                 (track.get("detectionQuality") or {}).get(hour), 3
             )
@@ -2352,7 +2405,12 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         # by ``deconflict_shared_front_trunks``, which trims the shared ridge
         # and keeps a genuine independent branch of the weaker line instead of
         # discarding it whole.
-        for coordinates, properties in entries[:MAX_FRONTS_PER_HOUR]:
+        # The cap counts drawable features: applying it before the length
+        # filter let a sub-100 km stub (an occlusion remnant, a trimmed
+        # branch) take one of the slots and push a real front off the map.
+        for coordinates, properties in entries:
+            if len(features) >= MAX_FRONTS_PER_HOUR:
+                break
             simplified = _rdp(coordinates, 0.025)
             if len(simplified) < 2 or _line_length_km(simplified) < 100.0:
                 continue

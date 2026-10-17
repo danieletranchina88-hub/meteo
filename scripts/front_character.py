@@ -15,12 +15,20 @@ import numpy as np
 import front_locator as fl
 
 EARTH_KM_PER_DEG = 111.32
-# Gaussian |grad| falls to about 70% of its peak at 0.35 widths. That is the
-# warm boundary an analyst marks, short of the half-power point, which already
-# sits in the warm air and would move the line off the zone.
-WARM_EDGE_FRACTION = 0.20
+# Distance of the published warm boundary from the |grad theta_w| ridge, as a
+# fraction of the analysis width w' of front_engine.reference_front_scales.
+# For a Gaussian gradient bump of width w' the gradient there is still
+# exp(-0.35^2 / 2) = 94% of its peak: the line stays inside the frontal zone,
+# on its warm flank, and never wanders into the homogeneous warm air.  This is
+# the value the engine has always applied (it used to be a literal 0.35 in
+# front_engine._build_candidate next to an unused constant of 0.20 whose
+# comment quoted the wrong percentage).
+WARM_EDGE_FRACTION = 0.35
 MIN_FRONTOGENESIS_FRACTION = 0.30
 MIN_THERMAL_WIND_ALIGNMENT = 0.0
+# Below this layer shear the direction of the shear vector is not informative
+# (ageostrophic noise of a few m/s); such vertices abstain from the vote.
+MIN_SHEAR_FOR_ALIGNMENT_MS = 2.0
 
 
 def place_on_warm_edge(
@@ -66,15 +74,22 @@ def thermal_wind_alignment(
     """Agreement between observed shear and the thermal-wind direction.
 
     Thermal wind puts the shear (upper minus lower) parallel to k x grad T,
-    so in the northern hemisphere it points with the warm air to the right.
-    The score is the median cosine of that angle, in [-1, 1].
+    so in the northern hemisphere it blows with the warm air on its right
+    (cold air on the left).  The score is the median cosine of that angle, in
+    [-1, 1]: +1 for a baroclinic zone in thermal-wind balance.
+
+    ``warm_normal`` points toward the warm air, i.e. along grad T, so the
+    expected direction is k x n = (-n_north, n_east).  Up to v21 the code used
+    (n_north, -n_east) = -k x n: every balanced front scored -1 and was
+    rejected as ``fail:thermal-wind`` -- on the operational run of
+    2026-10-17 00Z that removed every candidate in all 73 hours.
     """
     if u_lower is None or u_upper is None:
         return float("nan")
     normal = np.asarray(warm_normal, dtype=float)
-    # k x warm-normal points along the front with warm air to the right.
-    expected_east = normal[:, 1]
-    expected_north = -normal[:, 0]
+    # k x warm-normal: along the front, warm air on the right (NH).
+    expected_east = -normal[:, 1]
+    expected_north = normal[:, 0]
     lower_u = _sample(u_lower, line, longitudes, latitudes, metrics)
     lower_v = _sample(v_lower, line, longitudes, latitudes, metrics)
     upper_u = _sample(u_upper, line, longitudes, latitudes, metrics)
@@ -83,7 +98,7 @@ def thermal_wind_alignment(
     shear_north = upper_v - lower_v
     shear = np.hypot(shear_east, shear_north)
     cosine = (shear_east * expected_east + shear_north * expected_north) / np.maximum(shear, 1.0e-6)
-    finite = cosine[np.isfinite(cosine) & (shear >= 2.0)]
+    finite = cosine[np.isfinite(cosine) & (shear >= MIN_SHEAR_FOR_ALIGNMENT_MS)]
     if len(finite) < 3:
         return float("nan")
     return float(np.median(finite))
@@ -103,6 +118,10 @@ def frontal_character(
     Anafront: the front-normal wind weakens with height and the warm side
     ascends (rearward sloping ascent). Katafront: the normal wind strengthens
     with height, or the warm side descends (forward sloping, split front).
+
+    ``omega`` is the pressure vertical velocity in Pa/s with its physical
+    sign (negative = ascent), never the already sign-flipped "ascent" field.
+    Passing the ascent field swaps the omega vote between ana and kata.
     """
     normal = np.asarray(warm_normal, dtype=float)
     normal_wind = None
@@ -155,7 +174,14 @@ def annotate_candidate(
     u_upper=None, v_upper=None,
     omega=None,
 ) -> dict:
-    """Attach the physical character and drop the line if a necessary witness fails."""
+    """Attach the physical character and drop the line if a necessary witness fails.
+
+    All wind and omega fields should be filtered at the same analysis scale
+    as ``evidence`` (``front_engine.frontal_evidence`` returns them as
+    ``uWind``/``vWind``/``omega``): a shear between a 150 km mean at one level
+    and the raw kilometre-scale wind at the other is dominated by mesoscale
+    noise, not by the thermal wind.
+    """
     metrics = evidence["metrics"]
     line = np.asarray(candidate["coordinates"], dtype=float)
     normal = np.asarray(candidate["warmNormal"], dtype=float)

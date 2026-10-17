@@ -215,5 +215,51 @@ if crossing_changes != 0 or len(crossed) != 2:
     print("FAIL: una giunzione puntuale e' stata confusa con un tronco duplicato")
     ok = False
 
+# --- v22: regressioni dell'analizzatore -----------------------------------
+# 1. Una coordinata NaN (offset lungo una normale indefinita) deve dare un
+#    campione NaN, non un indice -2**63: l'IndexError faceva cadere l'intera
+#    ora, e oltre quattro ore cosi' fallisce l'intero run.
+sampler = object.__new__(v12.IconSynopticFrontAnalyzer)
+sampler.longitudes = np.arange(5.0, 15.0, 0.1)
+sampler.latitudes = np.arange(38.0, 48.0, 0.1)
+sampler.delta_longitude = 0.1
+sampler.delta_latitude = 0.1
+ones = np.ones((len(sampler.latitudes), len(sampler.longitudes)))
+try:
+    sampled = sampler._sample(ones, np.array([[10.0, 43.0], [np.nan, 43.0]]))
+    nan_ok = sampled[0] == 1.0 and np.isnan(sampled[1])
+except IndexError as error:
+    nan_ok = False
+    print("errore:", error)
+print("campione con coordinata NaN:", "NaN" if nan_ok else "CRASH")
+if not nan_ok:
+    print("FAIL: una coordinata NaN fa cadere l'ora di analisi")
+    ok = False
+
+# 2. Un'incertezza oraria di 0.0 e' un valore, non un dato mancante.
+certain_track = dict(fake_track)
+certain_track["hourlyUncertainty"] = {5: 0.0, 6: 0.60, 8: 0.22}
+certain = stub._track_properties(certain_track, hour=5)
+print("incertezza oraria nulla pubblicata come:", certain["uncertaintyIndex"])
+if certain["uncertaintyIndex"] != 0.0:
+    print("FAIL: un'incertezza oraria di 0.0 e' sostituita da quella di traccia")
+    ok = False
+
+# 3. Il tetto di fronti per ora conta le feature disegnabili: un moncone
+#    sotto i 100 km non puo' occupare uno dei posti e spingere fuori un
+#    fronte vero.
+capped = analyzer_with(lambda hour: [])
+capped.analyze(0)
+stub_line = np.array([[10.0, 43.0], [10.3, 43.0]])                 # ~24 km
+long_line = np.array([[8.0, 43.0], [12.0, 43.0]])                  # ~325 km
+entries = [(stub_line, {"qualityScore": 0.95})] * v12.MAX_FRONTS_PER_HOUR
+entries = entries + [(long_line, {"qualityScore": 0.70})]
+capped._by_hour = {0: entries}
+drawn = capped.analyze(0)["features"]
+print("feature disegnate con %d monconi davanti:" % v12.MAX_FRONTS_PER_HOUR, len(drawn))
+if len(drawn) != 1:
+    print("FAIL: i monconi scartati occupano i posti del tetto orario")
+    ok = False
+
 print("ESITO:", "SUPERATO" if ok else "DA RIVEDERE")
 raise SystemExit(0 if ok else 1)

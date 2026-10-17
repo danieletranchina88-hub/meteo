@@ -566,8 +566,11 @@ class SynopticFrontAnalyzer:
             & (y >= 0.0)
             & (y <= len(self.latitudes) - 1.001)
         )
-        xc = np.clip(x, 0.0, len(self.longitudes) - 1.001)
-        yc = np.clip(y, 0.0, len(self.latitudes) - 1.001)
+        # A NaN coordinate (an offset along an undefined normal) must give a
+        # NaN sample, not an index: np.floor(NaN).astype(int) is -2**63 and
+        # the IndexError it raised took the whole forecast hour down.
+        xc = np.where(np.isfinite(x), np.clip(x, 0.0, len(self.longitudes) - 1.001), 0.0)
+        yc = np.where(np.isfinite(y), np.clip(y, 0.0, len(self.latitudes) - 1.001), 0.0)
         x0, y0 = np.floor(xc).astype(int), np.floor(yc).astype(int)
         x1 = np.minimum(x0 + 1, field.shape[1] - 1)
         y1 = np.minimum(y0 + 1, field.shape[0] - 1)
