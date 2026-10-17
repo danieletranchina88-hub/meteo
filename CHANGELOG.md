@@ -27,6 +27,15 @@ L'approssimazione di Θw (σ 30 km + winsorizzazione) è stata misurata e **non*
 Risultato: 17/10 12Z da 0 a 2 tracce (25 ore), 15/10 00Z da 0 a 1 traccia;
 lo stesso fronte freddo su Francia/Alpi compare in entrambi i run.
 
+**Dati in ingresso.** Verificati log e GRIB di produzione: i 21 campi dei fronti
+arrivano completi (73 ore, griglia 761×761, nessun valore mancante, unità
+corrette). Ma un campo opzionale che non passava un controllo veniva scartato
+senza dirlo: il 07/10 00Z ω700 è stato scaricato e poi tolto dall'analisi,
+perché il limite p99.9 |ω| < 20 Pa/s scambiava le correnti convettive di
+ICON-2I per un errore di unità (e lasciava passare ω in hPa/s). Ora l'unità si
+controlla sulla mediana |ω| (0,05–1,5 Pa/s) e ogni campo scartato è scritto
+nel log e in `front_qc.json` (`inputRejections`).
+
 ## Versione 2.1.0 - 2026-10-09
 
 ### 🎯 Classificazione Completa dei Fronti (Priorità Alta - Completato)

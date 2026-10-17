@@ -328,6 +328,7 @@ jobs:
         run: |
           python scripts/tests/test_front_engine.py
           python scripts/tests/test_front_character.py
+          python scripts/tests/test_front_inputs.py
           python scripts/tests/test_front_engine_graft.py
           python scripts/tests/test_front_continuity.py
           python scripts/tests/test_front_locator.py
@@ -418,6 +419,7 @@ jobs:
         run: |
           python scripts/tests/test_front_engine.py
           python scripts/tests/test_front_character.py
+          python scripts/tests/test_front_inputs.py
           python scripts/tests/test_front_engine_graft.py
           python scripts/tests/test_front_continuity.py
           python scripts/tests/test_front_locator.py

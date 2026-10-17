@@ -491,6 +491,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         if lower_temperature_path and lower_humidity_path:
             added = []
             opened = None
+            keys_tried = ("t925", "q925")
             try:
                 for key, path in (
                     ("t925", lower_temperature_path),
@@ -509,7 +510,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys[key] = variable
                     added.append(key)
                     opened = None
-            except Exception:
+            except Exception as error:
+                self._reject_input("/".join(keys_tried), error)
                 if opened is not None:
                     opened.close()
                 for key in added:
@@ -519,6 +521,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         if lower_u_wind_path and lower_v_wind_path:
             added = []
             opened = None
+            keys_tried = ("u925", "v925")
             try:
                 for key, path in (
                     ("u925", lower_u_wind_path),
@@ -534,7 +537,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys[key] = variable
                     added.append(key)
                     opened = None
-            except Exception:
+            except Exception as error:
+                self._reject_input("/".join(keys_tried), error)
                 if opened is not None:
                     opened.close()
                 for key in added:
@@ -544,6 +548,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         if upper_temperature_path and upper_humidity_path:
             added = []
             opened = None
+            keys_tried = ("t700", "q700")
             try:
                 for key, path in (
                     ("t700", upper_temperature_path),
@@ -562,7 +567,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys[key] = variable
                     added.append(key)
                     opened = None
-            except Exception:
+            except Exception as error:
+                self._reject_input("/".join(keys_tried), error)
                 if opened is not None:
                     opened.close()
                 for key in added:
@@ -578,6 +584,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                 continue
             added = []
             opened = None
+            keys_tried = keys
             try:
                 for key, path in zip(keys, paths):
                     opened = self._open_field(path, key)
@@ -590,7 +597,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys[key] = variable
                     added.append(key)
                     opened = None
-            except Exception:
+            except Exception as error:
+                self._reject_input("/".join(keys_tried), error)
                 if opened is not None:
                     opened.close()
                 for key in added:
@@ -598,6 +606,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys.pop(key, None)
 
         if surface_pressure_path:
+            name_tried = "ps"
+            dataset = None
             try:
                 dataset = self._open_field(surface_pressure_path, "ps")
                 self._validate_optional_dataset(dataset, "ps", None)
@@ -608,13 +618,16 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     raise ValueError("pressione al suolo non espressa in Pa")
                 self.datasets["ps"] = dataset
                 self.keys["ps"] = variable
-            except Exception:
+            except Exception as error:
+                self._reject_input(name_tried, error)
                 try:
                     dataset.close()
                 except Exception:
                     pass
 
         if geopotential_500_path:
+            name_tried = "fi500"
+            dataset = None
             try:
                 dataset = self._open_field(geopotential_500_path, "fi500")
                 self._validate_optional_dataset(dataset, "fi500", 500.0)
@@ -625,27 +638,49 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     raise ValueError("geopotenziale 500 hPa fuori scala")
                 self.datasets["fi500"] = dataset
                 self.keys["fi500"] = variable
-            except Exception:
+            except Exception as error:
+                self._reject_input(name_tried, error)
                 try:
                     dataset.close()
                 except Exception:
                     pass
 
         if omega_700_path:
+            name_tried = "omega700"
+            dataset = None
             try:
                 dataset = self._open_field(omega_700_path, "omega700")
                 self._validate_optional_dataset(dataset, "omega700", 700.0)
                 variable = next(iter(dataset.data_vars))
                 values = np.asarray(dataset[variable].values, dtype=float)
-                if np.nanpercentile(np.abs(values), 99.9) > 20.0:
-                    raise ValueError("omega 700 hPa fuori scala Pa/s")
+                # The unit is checked on the typical value.  A 2.2-km model
+                # puts convective updrafts of 20-100 Pa/s in the tail: the
+                # former p99.9 < 20 Pa/s test dropped omega on stormy days
+                # (run 2026-10-07 00Z) and nobody was told.  Median |omega|
+                # is 0.15-0.3 Pa/s; hPa/s would read ~0.002, w in m/s ~0.02.
+                typical = _finite_median(np.abs(values))
+                if not 0.05 <= typical <= 1.5:
+                    raise ValueError(
+                        f"omega 700 hPa: mediana |omega| {typical:.3g}, attesa in Pa/s"
+                    )
                 self.datasets["omega700"] = dataset
                 self.keys["omega700"] = variable
-            except Exception:
+            except Exception as error:
+                self._reject_input(name_tried, error)
                 try:
                     dataset.close()
                 except Exception:
                     pass
+
+    def _reject_input(self, name: str, error: Exception) -> None:
+        """An optional field that fails validation is dropped, never silently.
+
+        The analysis still runs without it, but the log and front_qc.json say
+        which field is missing and why.
+        """
+        rejections = self.__dict__.setdefault("input_rejections", {})
+        rejections[name] = str(error)
+        print(f"   fronti: campo {name} scartato: {error}", flush=True)
 
     def _validate_optional_dataset(
         self, dataset, name: str, expected_level_hpa: float | None
@@ -1812,6 +1847,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             "omega700": "omega700" in self.datasets,
             "pressure": "p" in self.datasets,
             "mlFusion": getattr(self, "ml_guidance", None) is not None,
+            "inputRejections": dict(getattr(self, "input_rejections", {})),
             "thresholdClimatology": (
                 self.run_month if self._threshold_climatology else None
             ),
