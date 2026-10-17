@@ -1,5 +1,42 @@
 # Changelog - Migliorie Scientifiche ICON-2I
 
+## Versione 2.1.1 - 2026-10-17 — Fronti v22: debug del cancello fisico
+
+Il run del 17/10/2026 00Z ha pubblicato zero fronti in 73 scadenze su 73.
+Dettagli e misure in `docs/algoritmo_fronti.md`, sezione «Revisione v22».
+
+### Correzioni critiche
+- **Vento termico con il segno invertito** (`front_character.py`): la
+  direzione attesa era −k×∇T, quindi ogni fronte bilanciato valeva −1 e veniva
+  scartato come `fail:thermal-wind`. Era la causa dei run senza fronti.
+- **Ricucitura dei frammenti mai riuscita** (`front_engine.merge_fragments`):
+  la tangente del secondo frammento era presa all'indietro, nessuna
+  continuazione poteva passare. Aggiunta la tolleranza sub-pixel sui ponti
+  corti.
+- **Ripiego spostato due volte verso l'aria calda** (`front_engine.score_lines`):
+  il contorno TFL, già sul bordo caldo, veniva spostato di altri ~60 km.
+- **Crash di un'ora per una normale NaN** (`front_analysis._sample`,
+  `front_engine._unit_vectors`): oltre quattro ore in errore fanno fallire il
+  run intero.
+
+### Correzioni di qualità
+- `omega` esportato dal motore con il segno fisico (prima era −ω): voto
+  ana/katafronte non più scambiato. Vento e omega del cancello alla stessa
+  scala d'analisi a tutti i livelli.
+- Cancello di vicinato unico per maschera, taglio dei pezzi e ponti.
+- Tetto `MAX_FRONTS_PER_HOUR` applicato dopo il filtro di lunghezza; incertezza
+  oraria 0,0 conservata; ponte browniano con 1,4826·MAD.
+- Diagnostica: `droppedAnalyzerPhysicalGate` e motivi nel QC, `unsampled`,
+  `candidatePieces`, scarti del ripiego per motivo.
+- `FRONT_METHOD` → `icon2i-warm-edge-frontogenesis-v22` (archivi v21 e v22 non
+  confrontabili).
+
+### Test
+- Nuovi: `test_front_character.py`, `test_front_engine_regressions.py`;
+  estesi `test_front_engine_graft.py` (caso con vento a 700 hPa) e
+  `test_front_analysis_status.py`. Tutti in CI; `front_character.py` aggiunto
+  ai percorsi che attivano il workflow.
+
 ## Versione 2.1.0 - 2026-10-09
 
 ### 🎯 Classificazione Completa dei Fronti (Priorità Alta - Completato)

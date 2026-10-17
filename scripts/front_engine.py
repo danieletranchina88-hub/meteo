@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import numpy as np
 
+import front_character as fch
 import front_locator as fl
 
 
@@ -337,8 +338,11 @@ def frontal_evidence(
     else:
         witnesses["pressure"] = np.zeros_like(grad_mag)
 
+    omega_smooth = None
+    ascent = None
     if omega is not None:
-        ascent = -fl.smooth_km(np.asarray(omega, dtype=float), sigma_km, metrics)
+        omega_smooth = fl.smooth_km(np.asarray(omega, dtype=float), sigma_km, metrics)
+        ascent = -omega_smooth
         witnesses["ascent"] = _support(ascent, 0.0, 0.35)  # Pa/s upward
     else:
         witnesses["ascent"] = np.zeros_like(grad_mag)
@@ -401,7 +405,13 @@ def frontal_evidence(
         "frontogenesis": frontogenesis,
         "uWind": u_smooth,
         "vWind": v_smooth,
-        "omega": ascent if omega is not None else None,
+        # Pressure vertical velocity at the analysis scale, physical sign
+        # (Pa/s, negative = ascent).  Up to v21 this key held the *ascent*
+        # (-omega), while front_character reads omega with its physical sign:
+        # the omega vote of the ana/kata diagnosis came out swapped.  The
+        # sign-flipped field now has its own name.
+        "omega": omega_smooth,
+        "ascent": ascent,
         "vorticity1e5": vorticity,
         "convergence1e5": convergence,
         "windShift": wind_shift,
@@ -477,13 +487,43 @@ def smoothing_support(
     )
 
 
+GATE_NEIGHBOURHOOD_KM = 50.0
+
+
+def neighbourhood_gate(
+    evidence: dict, neighbourhood_km: float = GATE_NEIGHBOURHOOD_KM
+) -> np.ndarray:
+    """The evidence a front is judged on: point value or its neighbourhood mean.
+
+    The union ``max(point, mean over neighbourhood_km)`` keeps every cell the
+    pointwise test accepts and fills only the pinholes, because a front does
+    not stop existing for 20 km (the full argument is in
+    ``admissible_mask``).  It is computed once per hour and used wherever the
+    engine asks "is there a front here": the ridge mask, the cut of a
+    polished line into pieces, and the evidence under a fragment bridge.
+    Before v22 only the mask used it; the cut read the raw point value, so a
+    dip the mask had deliberately bridged split the same boundary again into
+    two lines -- and two track identities -- a few kilometres apart.
+    """
+    cached = evidence.get("_neighbourhoodGate")
+    if cached is not None and cached[0] == float(neighbourhood_km):
+        return cached[1]
+    point_gate = np.nan_to_num(evidence["probability"], nan=0.0)
+    gate = np.maximum(point_gate, fl.smooth_km(
+        point_gate, float(neighbourhood_km), evidence["metrics"]
+    ))
+    gate = np.where(np.isfinite(evidence["probability"]), gate, np.nan)
+    evidence["_neighbourhoodGate"] = (float(neighbourhood_km), gate)
+    return gate
+
+
 def admissible_mask(
     evidence: dict,
     *,
     min_strength: float = 0.5,
     min_probability: float = 0.5,
     min_support: float = 0.90,
-    neighbourhood_km: float = 50.0,
+    neighbourhood_km: float = GATE_NEIGHBOURHOOD_KM,
 ) -> np.ndarray:
     """Where a ridge is allowed to be a front at all.
 
@@ -509,16 +549,13 @@ def admissible_mask(
     # found was still not publishable.  A front does not stop existing for
     # 20 km, so the question is asked over a neighbourhood the size of the
     # frontal zone itself.
-    point_gate = np.nan_to_num(evidence["probability"], nan=0.0)
     # Union, not replacement.  Smoothing then thresholding erodes the edges of
     # the band as much as it fills the holes inside it -- measured, it cut the
     # ridge points by more than a third.  Taking the union keeps every cell
     # the pointwise test already accepted and only *adds* the ones where the
     # neighbourhood average holds, which is exactly the pinhole-filling that
     # was wanted and nothing else.
-    gate = np.maximum(point_gate, fl.smooth_km(
-        point_gate, float(neighbourhood_km), evidence["metrics"]
-    ))
+    gate = np.nan_to_num(neighbourhood_gate(evidence, neighbourhood_km), nan=0.0)
     support = smoothing_support(
         np.isfinite(evidence["thetaW"]).astype(float),
         evidence["sigmaKm"], evidence["metrics"],
@@ -838,6 +875,7 @@ def merge_fragments(
     end_tangent_km: float = 40.0,
     max_curvature_deg_per_km: float = 0.25,
     bridge_ok=None,
+    position_jitter_km: float = 0.0,
 ) -> list[np.ndarray]:
     """Rejoin collinear pieces of the same boundary, in any orientation.
 
@@ -872,7 +910,21 @@ def merge_fragments(
     merged line must still come out under
     ``max_merged_turn_deg_per_20km``, the figure this project's own
     documentation sets for a publishable geometry.
+
+    ``position_jitter_km`` is the positional uncertainty of a ridge point:
+    each sub-pixel point lies within half a cell of the true crest, so two of
+    them can differ laterally by up to one cell diagonal.  An angle measured
+    over a short baseline cannot be trusted below ``atan(jitter / baseline)``
+    -- the same reasoning ``link_ridge_points`` applies with
+    ``step_jitter_deg``.  Without it a 16 km bridge was held to 5 degrees,
+    i.e. to 1.4 km of lateral offset, a fifth of a grid cell.
     """
+    jitter = max(float(position_jitter_km), 0.0)
+
+    def tolerance_deg(baseline_km: float) -> float:
+        if jitter <= 0.0:
+            return 0.0
+        return float(np.degrees(np.arctan2(jitter, max(baseline_km, 1.0e-6))))
     remaining = [np.asarray(line, dtype=float) for line in lines if len(line) >= 2]
 
     def end_tangent(line: np.ndarray, at_end: bool) -> np.ndarray:
@@ -905,18 +957,31 @@ def merge_fragments(
         # degrees regardless of gap length is what turned a straight analytic
         # front into a 9 degrees per 20 km line once reversed pairings made
         # those joins reachable.
+        budget = max(max_curvature_deg_per_km * gap, 5.0)
+        # Tangents are measured over end_tangent_km, the bridge over the gap:
+        # each gets the jitter allowance of its own baseline.
+        tangent_limit = np.cos(np.deg2rad(min(
+            max(budget, tolerance_deg(end_tangent_km)), max_angle_deg
+        )))
         limit = np.cos(np.deg2rad(min(
-            max(max_curvature_deg_per_km * gap, 5.0), max_angle_deg
+            max(budget, tolerance_deg(gap)), max_angle_deg
         )))
         out_tangent = end_tangent(first, True)
-        in_tangent = end_tangent(second, False)
+        # The direction *entering* the second fragment at its start.
+        # ``end_tangent(second, False)`` is the direction leaving it there,
+        # i.e. pointing backwards; compared as it was with the forward
+        # out-tangent and bridge, every genuine continuation measured ~180
+        # degrees and no join ever passed -- two collinear segments 12 km
+        # apart stayed two lines.  That is why the operational funnel showed
+        # ~60 raw lines an hour with ~57 of them "too short".
+        in_tangent = -end_tangent(second, False)
         kx, ky = _km_per_degree(0.5 * (tail[1] + head[1]))
         bridge = np.array([(head[0] - tail[0]) * kx, (head[1] - tail[1]) * ky])
         length = float(np.hypot(bridge[0], bridge[1]))
         # Two ends on top of each other carry no direction of their own; the
         # tangents alone then decide.
         bridge = out_tangent if length < 1.0e-6 else bridge / length
-        if not (float(np.dot(out_tangent, in_tangent)) >= limit
+        if not (float(np.dot(out_tangent, in_tangent)) >= tangent_limit
                 and float(np.dot(out_tangent, bridge)) >= limit
                 and float(np.dot(bridge, in_tangent)) >= limit):
             return False
@@ -1223,10 +1288,38 @@ def _line_pieces(line: np.ndarray, keep: np.ndarray) -> list[np.ndarray]:
     return pieces
 
 
+def _unit_vectors(east: np.ndarray, north: np.ndarray) -> np.ndarray:
+    """Per-vertex unit vectors, with no NaN ever reaching the caller.
+
+    A vertex whose sampled gradient is missing (a stencil touching masked
+    data, or a vertex pushed beyond the analysable area) borrows the nearest
+    finite direction along the line.  A NaN here used to travel into the
+    analyzer's cross-front offsets, where the base sampler turned it into an
+    integer index of -2**63 and took the whole forecast hour down with an
+    IndexError -- five such hours fail the entire run.
+    """
+    east = np.asarray(east, dtype=float)
+    north = np.asarray(north, dtype=float)
+    magnitude = np.hypot(east, north)
+    good = np.isfinite(magnitude) & (magnitude > 1.0e-12)
+    vectors = np.zeros((len(east), 2))
+    if not np.any(good):
+        return vectors
+    vectors[good, 0] = east[good] / magnitude[good]
+    vectors[good, 1] = north[good] / magnitude[good]
+    if not np.all(good):
+        index = np.arange(len(east))
+        donors = index[good]
+        nearest = donors[np.abs(index[:, None] - donors[None, :]).argmin(axis=1)]
+        vectors[~good] = vectors[nearest[~good]]
+    return vectors
+
+
 def _build_candidate(
     line: np.ndarray, evidence: dict, abz_gradient: np.ndarray,
     longitudes, latitudes, metrics: dict, *,
     min_probability: float, source: str,
+    warm_edge_offset_km: float | None = None,
 ) -> dict:
     """Assemble one candidate in the contract shape, scored on the evidence.
 
@@ -1234,54 +1327,54 @@ def _build_candidate(
     actually published -- never carried over from wherever the line came from,
     because the variational pass moves them and the caller silently drops a
     candidate whose three arrays disagree in length.
+
+    ``warm_edge_offset_km`` is how far the line is moved toward the warm air.
+    ``None`` means the engine's own ridge of |grad theta_w|, which is the
+    centre of the zone and is moved by ``WARM_EDGE_FRACTION`` of the analysis
+    width.  A line that is already on the warm edge -- the TFL contour of the
+    two-scale fallback is by construction -- must pass ``0``: moving it again
+    put the fallback geometry some 60 km inside the warm air, where the
+    cross-front contrast tested downstream is gone and the line is rejected
+    as ``thermal-core``.
     """
     dlon, dlat = float(metrics["dlon"]), float(metrics["dlat"])
 
-    def sample(values):
-        return fl._sample(values, line, longitudes, latitudes, dlon, dlat)
+    def sample(values, where):
+        return fl._sample(values, where, longitudes, latitudes, dlon, dlat)
 
     reference = evidence["reference"]
-    east = sample(evidence["gradientEast"])
-    north = sample(evidence["gradientNorth"])
-    magnitude = np.maximum(np.hypot(east, north), 1.0e-12)
-    hewson_e = sample(evidence["hewsonEast"])
-    hewson_n = sample(evidence["hewsonNorth"])
-    hewson_mag = np.maximum(np.hypot(hewson_e, hewson_n), 1.0e-12)
-    line_tfp = sample(evidence["tfp"])
-    line_abz = sample(abz_gradient)
-    line_probability = sample(evidence["probability"])
     sinuosity, net_turn, closure, total_turn = _shape_metrics(line)
-    # The ridge of |grad theta_w| is the centre of the zone. The published
-    # line is the warm boundary, a fixed fraction of the analysis width
-    # toward the warm air. Normals are recomputed on the moved vertices.
-    width = float(reference.get("widthKm", 80.0))
-    offset = 0.35 * width
-    import front_character as fch
-    line = fch.place_on_warm_edge(
-        line, np.column_stack((east / magnitude, north / magnitude)), offset
-    )
-    east = sample(evidence["gradientEast"]) if False else fl._sample(
-        evidence["gradientEast"], line, longitudes, latitudes, dlon, dlat)
-    north = fl._sample(evidence["gradientNorth"], line, longitudes, latitudes, dlon, dlat)
-    magnitude = np.maximum(np.hypot(east, north), 1.0e-12)
-    hewson_e = fl._sample(evidence["hewsonEast"], line, longitudes, latitudes, dlon, dlat)
-    hewson_n = fl._sample(evidence["hewsonNorth"], line, longitudes, latitudes, dlon, dlat)
-    hewson_mag = np.maximum(np.hypot(hewson_e, hewson_n), 1.0e-12)
-    line_tfp = fl._sample(evidence["tfp"], line, longitudes, latitudes, dlon, dlat)
-    line_abz = fl._sample(abz_gradient, line, longitudes, latitudes, dlon, dlat)
-    line_probability = fl._sample(evidence["probability"], line, longitudes, latitudes, dlon, dlat)
+    if warm_edge_offset_km is None:
+        width = float(reference.get("widthKm", 80.0))
+        offset = fch.WARM_EDGE_FRACTION * width
+    else:
+        offset = max(float(warm_edge_offset_km), 0.0)
+    if offset > 0.0:
+        # Normals are recomputed on the moved vertices below.
+        normal = _unit_vectors(sample(evidence["gradientEast"], line),
+                               sample(evidence["gradientNorth"], line))
+        line = fch.place_on_warm_edge(line, normal, offset)
+    warm_normal = _unit_vectors(sample(evidence["gradientEast"], line),
+                                sample(evidence["gradientNorth"], line))
+    hewson_dir = _unit_vectors(sample(evidence["hewsonEast"], line),
+                               sample(evidence["hewsonNorth"], line))
+    line_tfp = sample(evidence["tfp"], line)
+    line_abz = sample(abz_gradient, line)
+    line_probability = sample(evidence["probability"], line)
 
     return {
         "coordinates": line,
         "warmEdgeOffsetKm": round(offset, 1),
-        "positionSource": "warm-edge-of-baroclinic-zone",
-        "warmNormal": np.column_stack((east / magnitude, north / magnitude)),
-        "hewsonDir": np.column_stack((hewson_e / hewson_mag,
-                                      hewson_n / hewson_mag)),
+        "positionSource": (
+            "warm-edge-of-baroclinic-zone" if warm_edge_offset_km is None
+            else "supplied-warm-edge-geometry"
+        ),
+        "warmNormal": warm_normal,
+        "hewsonDir": hewson_dir,
         "medianTfp": float(np.nanmedian(line_tfp)),
         "medianTfpStrength": float(np.nanmedian(-line_tfp * 10_000.0)),
         "medianThetaWGradient": float(
-            np.nanmedian(sample(evidence["gradientMagnitude"])) * 100.0
+            np.nanmedian(sample(evidence["gradientMagnitude"], line)) * 100.0
         ),
         "medianAbzGradient": float(np.nanmedian(line_abz)),
         "peakAbzGradient": float(np.nanmax(line_abz)),
@@ -1356,6 +1449,7 @@ def detect_fronts(
     )
     field = locating_field(evidence)
     mask = admissible_mask(evidence, min_probability=min_probability)
+    gate = neighbourhood_gate(evidence)
     points = ridge_points(
         field, longitudes, latitudes, metrics=metrics, mask=mask,
         min_curvature=0.25 * ridge_curvature_scale(sigma_km),
@@ -1367,12 +1461,19 @@ def detect_fronts(
             tail[0] + steps * (head[0] - tail[0]),
             tail[1] + steps * (head[1] - tail[1]),
         ))
-        along = fl._sample(evidence["probability"], span, longitudes, latitudes,
+        along = fl._sample(gate, span, longitudes, latitudes,
                            float(metrics["dlon"]), float(metrics["dlat"]))
+        if not np.any(np.isfinite(along)):
+            return False
         return bool(np.nanmedian(along) >= min_probability)
 
+    cell_diagonal_km = float(np.hypot(
+        np.nanmax(np.asarray(metrics["dx_km_col"], dtype=float)),
+        float(metrics["dy_km"]),
+    ))
     raw_lines = merge_fragments(link_ridge_points(points),
-                                bridge_ok=bridge_has_evidence)
+                                bridge_ok=bridge_has_evidence,
+                                position_jitter_km=cell_diagonal_km)
 
     reference = evidence["reference"]
     # Hewson tests the baroclinic zone *behind* the front, not the value on
@@ -1413,9 +1514,14 @@ def detect_fronts(
         "rawLines": len(raw_lines),
         "longestRawKm": round(max((line_length_km(line) for line in raw_lines),
                                   default=0.0), 1),
+        # Pieces, not raw lines, are what the drop counters below count: the
+        # evidence cut splits one raw line into several, and without this
+        # number the funnel showed more lines "too short" than raw lines.
+        "candidatePieces": 0,
         "droppedTooShort": 0,
         "droppedShape": 0,
         "droppedTooRough": 0,
+        "droppedPhysicalGate": 0,
     }
 
     candidates: list[dict] = []
@@ -1428,9 +1534,10 @@ def detect_fronts(
         # split there rather than publishing a tail with no evidence behind
         # it, and re-check the length afterwards -- checking it before the
         # cut is how a 300 km rule ends up publishing a 120 km stub.
-        probability = sample(evidence["probability"], polished)
+        probability = sample(gate, polished)
         for piece in _line_pieces(polished, np.isfinite(probability)
                                   & (probability >= min_probability)):
+            funnel["candidatePieces"] += 1
             line = resample_km(piece, vertex_spacing_km)
             length = line_length_km(line)
             if length < min_length_km or len(line) < 4:
@@ -1458,13 +1565,16 @@ def detect_fronts(
                 line, evidence, abz_gradient, longitudes, latitudes, metrics,
                 min_probability=min_probability, source=LOCATOR_NAME,
             )
-            import front_character as fch
+            # The same analysis-scale fields score_lines and the analyzer
+            # use: the raw kilometre-scale wind and omega gave this call a
+            # different answer from the other two for the same line.
             fch.annotate_candidate(
                 built, evidence, longitudes, latitudes,
-                u_lower=u_wind, v_lower=v_wind, omega=omega,
+                u_lower=evidence["uWind"], v_lower=evidence["vWind"],
+                omega=evidence["omega"],
             )
             if not fch.passes_physical_gate(built):
-                funnel["droppedPhysicalGate"] = funnel.get("droppedPhysicalGate", 0) + 1
+                funnel["droppedPhysicalGate"] += 1
                 continue
             candidates.append(built)
 
@@ -1514,6 +1624,8 @@ def score_lines(
     min_supported_fraction: float = 0.6,
     max_turn_deg_per_20km: float = MAX_PUBLISHED_TURN_DEG_PER_20KM,
     source: str = "external-line",
+    on_warm_edge: bool = False,
+    funnel: dict | None = None,
 ) -> list[dict]:
     """Judge lines produced elsewhere with this engine's own evidence.
 
@@ -1527,6 +1639,11 @@ def score_lines(
     A supplied line is kept only where the fused evidence stands at even odds
     or better, is cut where it does not, and must still clear the length it
     was asked for *after* the cut.
+
+    ``on_warm_edge`` says the supplied geometry is already the warm boundary
+    of its zone (a TFL contour is), so it must not be moved again.  When
+    ``funnel`` is given, every discarded line is counted there by reason, so
+    a fallback that offers lines and accepts none is diagnosable.
     """
     evidence = fields["evidence"]
     abz_gradient = fields["abzGradient"]
@@ -1534,36 +1651,49 @@ def score_lines(
     longitudes = fields["longitudes"]
     latitudes = fields["latitudes"]
     dlon, dlat = float(metrics["dlon"]), float(metrics["dlat"])
-
+    counts = {
+        "fallbackDroppedUnsupported": 0,
+        "fallbackDroppedTooShort": 0,
+        "fallbackDroppedTooRough": 0,
+        "fallbackDroppedPhysicalGate": 0,
+    }
+    gate = neighbourhood_gate(evidence)
     kept: list[dict] = []
     for raw in lines:
         line = resample_km(np.asarray(raw, dtype=float), vertex_spacing_km)
         if len(line) < 4:
+            counts["fallbackDroppedTooShort"] += 1
             continue
-        probability = fl._sample(evidence["probability"], line,
-                                 longitudes, latitudes, dlon, dlat)
+        probability = fl._sample(gate, line, longitudes, latitudes, dlon, dlat)
         supported = np.isfinite(probability) & (probability >= min_probability)
         if float(np.mean(supported)) < min_supported_fraction:
+            counts["fallbackDroppedUnsupported"] += 1
             continue
         for piece in _line_pieces(line, supported):
             piece = resample_km(piece, vertex_spacing_km)
             if line_length_km(piece) < min_length_km or len(piece) < 4:
+                counts["fallbackDroppedTooShort"] += 1
                 continue
             if mean_turn_deg_per_km(piece) > float(max_turn_deg_per_20km):
+                counts["fallbackDroppedTooRough"] += 1
                 continue
             built = _build_candidate(
                 piece, evidence, abz_gradient, longitudes, latitudes, metrics,
                 min_probability=min_probability, source=source,
+                warm_edge_offset_km=0.0 if on_warm_edge else None,
             )
-            import front_character as fch
             fch.annotate_candidate(
                 built, evidence, longitudes, latitudes,
                 u_lower=evidence.get("uWind"), v_lower=evidence.get("vWind"),
                 omega=evidence.get("omega"),
             )
             if not fch.passes_physical_gate(built):
+                counts["fallbackDroppedPhysicalGate"] += 1
                 continue
             kept.append(built)
+    if funnel is not None:
+        for key, value in counts.items():
+            funnel[key] = funnel.get(key, 0) + value
     kept.sort(key=lambda item: item["lengthKm"], reverse=True)
     return kept
 

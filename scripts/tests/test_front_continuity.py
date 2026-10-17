@@ -89,7 +89,9 @@ report(sorted(bridge) == [11, 12, 13, 14, 15],
        "ore inferite: %s" % sorted(bridge))
 middle = bridge.get(13, 0.0)
 edge = bridge.get(11, 0.0)
-analytic = 20.0 * np.sqrt(3.0 * 3.0 / 6.0)   # s sqrt(t (T-t) / T), t=3, T=6
+# s sqrt(t (T-t) / T), t=3, T=6, with s the standard deviation of the hourly
+# motion: 1.4826 times the median absolute deviation the track carries.
+analytic = v12.MAD_TO_STD * 20.0 * np.sqrt(3.0 * 3.0 / 6.0)
 report(abs(middle - analytic) < 1.0e-6 and middle > edge,
        "l'incertezza inferita non segue il ponte browniano",
        "a meta' del buco %.1f km (analitico %.1f), a un'ora dall'osservazione "

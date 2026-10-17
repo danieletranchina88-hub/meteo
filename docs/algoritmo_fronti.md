@@ -12,7 +12,8 @@ Meteorologico. `qualityScore` e `uncertaintyIndex` descrivono la coerenza
 interna delle prove in un singolo run deterministico: non sono probabilità
 calibrate e non misurano l'errore previsionale assoluto.
 
-Il metodo operativo è `icon2i-ofa-evidence-ridge-v20-auditable`.
+Il metodo operativo è `icon2i-warm-edge-frontogenesis-v22` (vedi «Revisione
+v22» più sotto: stesso metodo della v21, con il cancello fisico riparato).
 
 ## Dati usati
 
@@ -323,6 +324,88 @@ analitica, la sparizione dell'artefatto orografico e il miglioramento
 geometrico misurato; **non** si può dimostrare che i fronti nuovi siano più
 vicini a un'analisi manuale ufficiale, perché quell'archivio non esiste nel
 repository.
+
+### Revisione v22: il cancello fisico che cancellava tutto
+
+Il run operativo del 17 ottobre 2026 00Z ha pubblicato **zero fronti in 73
+scadenze su 73**. Il `front_qc.json` lo mostrava senza spiegarlo: nelle ore
+in cui il motore produceva una linea (`engineCandidates: 1`) o il ripiego ne
+accettava fino a quattro, a valle risultavano **0 candidati e 0 respinti**.
+Le linee sparivano fra il motore e i cancelli, senza lasciare un motivo.
+
+**Il vento termico con il segno sbagliato.** `front_character` scarta una
+linea se il taglio del vento 850→700 hPa non concorda con il vento termico.
+Il vento termico è parallelo a k × ∇T (aria calda a destra, in emisfero nord),
+e la normale pubblicata punta verso l'aria calda, quindi la direzione attesa è
+(−n_y, n_x). Il codice usava (n_y, −n_x), cioè −k × ∇T: un fronte in perfetto
+equilibrio di vento termico otteneva allineamento **−1** ed era scartato come
+`fail:thermal-wind`. Poiché il vento termico è quasi sempre rispettato, il
+cancello eliminava proprio i fronti veri. I test non se ne accorgevano perché
+nessun fronte sintetico aveva vento a 700 hPa, e il contatore delle linee
+scartate veniva scritto in un dizionario diverso da quello copiato nel QC: nel
+file risultava `null`.
+
+**La ricucitura dei frammenti non poteva mai unire nulla.** `merge_fragments`
+confrontava la tangente in uscita del primo frammento con la tangente *in
+uscita all'indietro* del secondo: per una vera continuazione l'angolo misurato
+era circa 180 gradi, e due segmenti collineari a 12 km restavano due linee.
+È il dato più vistoso del funnel operativo: circa 60 linee grezze ogni ora,
+circa 57 scartate come «troppo corte». La tangente del secondo frammento è ora
+quella entrante. Il ponte fra due estremi ha anche una tolleranza esplicita
+per la posizione sub-pixel della cresta (ogni punto di Steger sta entro mezza
+cella dalla cresta vera, quindi due estremi possono differire di una
+diagonale di cella): su un ponte di 16 km il limite di 5 gradi corrispondeva a
+1,4 km di scarto laterale, un quinto di cella. Gomiti, frammenti affiancati e
+ponti senza evidenza restano respinti dagli stessi controlli di prima.
+
+**Il ripiego spostato due volte verso l'aria calda.** Il contorno TFL del
+rilevatore a due scale sta già sul bordo caldo della zona, ma `score_lines` lo
+spostava di altri 0,35 w′ ≈ 60 km verso il caldo. Lì il contrasto fra le masse
+d'aria misurato a 30/55/85 km non esiste più, e la linea cadeva su
+`thermal-core`. Ora una geometria già sul bordo caldo non viene spostata.
+
+**Lo stesso cancello in tutti i punti.** La maschera della cresta giudica
+l'evidenza con l'unione fra valore puntuale e media su 50 km, perché un fronte
+non smette di esistere per 20 km; il taglio della linea rifinita in pezzi e il
+ponte fra frammenti leggevano invece il valore puntuale, e un buco che la
+maschera aveva colmato spezzava di nuovo il confine in due identità.
+`neighbourhood_gate` è ora calcolato una volta e usato da tutti e tre.
+
+**Omega.** Il motore esportava come `omega` l'ascendenza (−ω), mentre
+`front_character` legge ω con il suo segno fisico: il voto dell'ascesa per
+anafronte/katafronte risultava scambiato, e l'etichetta è visibile sulla mappa.
+La chiave `omega` porta ora ω (Pa/s, negativo = ascesa) e `ascent` il campo
+invertito. Vento e omega del cancello fisico sono filtrati alla stessa scala
+d'analisi a tutti i livelli: prima il taglio confrontava una media di 150 km a
+850 hPa con il vento grezzo chilometrico a 700 hPa.
+
+**Robustezza e diagnostica.**
+
+- una normale NaN su un vertice arrivava al campionatore della classe base, che
+  la trasformava in un indice −2⁶³: l'`IndexError` faceva cadere l'intera ora,
+  e oltre quattro ore così l'intero run falliva. Le normali sono ora sempre
+  finite (il vertice prende la direzione finita più vicina) e il campionatore
+  restituisce NaN;
+- le linee che non arrivano ai cancelli perché non campionabili attraverso il
+  fronte sono contate in `unsampled`; il funnel conta `candidatePieces`
+  (prima i pezzi «troppo corti» potevano superare le linee grezze), gli scarti
+  del ripiego per motivo e quelli del cancello fisico per testimone
+  (`analyzerPhysicalGateFailures`);
+- il tetto di `MAX_FRONTS_PER_HOUR` conta le feature disegnabili: prima un
+  moncone sotto i 100 km poteva occupare un posto e spingere fuori un fronte;
+- un'incertezza oraria di 0,0 non viene più sostituita da quella di traccia;
+- il ponte browniano usa una deviazione standard (1,4826 · MAD) invece della
+  MAD grezza: l'incertezza di posizione delle ore inferite era sottostimata di
+  un terzo.
+
+**Cosa cambia sul prodotto.** Sul fronte sintetico del test d'integrazione,
+con il vento a 700 hPa in equilibrio di vento termico, la v21 non pubblica
+nulla; la v22 pubblica un unico fronte di 799 km a 2,1 gradi ogni 20 km, dove
+prima del vento termico ne uscivano due pezzi (419 e 264 km) dello stesso
+confine. Il confine orografico senza dinamica resta respinto. Restano valide
+le avvertenze della v20: senza un archivio di analisi ufficiali non si può
+misurare quanto i fronti siano vicini a un'analisi manuale, e la resa sul
+campo vero va letta nel `front_qc.json` dei prossimi run.
 
 ## 1. Variabili termiche indipendenti
 
@@ -1077,6 +1160,27 @@ misurato: le 25 ore osservate fra +32h e +71h diventano 30 ore pubblicabili, il
 buco autentico di dieci ore fra +53h e +62h resta aperto perché è oltre il
 limite dichiarato, e l'incertezza a metà di un buco di sei ore coincide con la
 forma analitica del ponte browniano.
+
+### Test di regressione della v22
+
+Ognuno fallisce sul codice v21 e passa sulla v22, e l'atteso è fissato dalla
+fisica, non dall'output corrente:
+
+- `test_front_character.py` — vento termico +1 per un fronte bilanciato a
+  qualunque orientazione e −1 per il taglio opposto; ascesa sul lato caldo
+  letta come anafronte e subsidenza come katafronte; omega esportato dal
+  motore con il segno fisico;
+- `test_front_engine_regressions.py` — ricucitura di frammenti collineari in
+  entrambi i versi, rifiuto di gomiti, frammenti affiancati e ponti senza
+  evidenza; tolleranza sub-pixel sui ponti corti ma non sui salti laterali di
+  30 km; normali sempre finite; ripiego non spostato due volte; cancello di
+  vicinato coerente fra maschera e taglio;
+- `test_front_engine_graft.py`, caso 1b — il fronte sintetico con vento a
+  700 hPa in equilibrio di vento termico esce come **una** linea, con
+  allineamento positivo e il contatore del cancello fisico nel QC;
+- `test_front_analysis_status.py` — coordinata NaN che non fa cadere l'ora,
+  incertezza oraria 0,0 conservata, tetto orario applicato alle sole feature
+  disegnabili.
 
 ## Riferimenti primari
 
