@@ -18,6 +18,7 @@ import os
 
 import numpy as np
 
+import front_character as fch
 import front_consensus as fcon
 import front_detection as fd
 import front_engine as fe
@@ -37,7 +38,10 @@ from front_analysis import SynopticFrontAnalyzer, _blend_lines, _line_length_km,
 # campo termico ma dalla cresta di un campo di evidenza fuso, a scala
 # sinottica dichiarata: e' un metodo diverso, non una taratura diversa, e
 # chi confronta run archiviati deve poterlo distinguere dalla stringa.
-FRONT_METHOD = "icon2i-warm-edge-frontogenesis-v21"
+# v22: l'asse della zona si rilegge su theta_w a 45 km, le misure fisiche si
+# fanno sull'asse e la linea si pubblica 34 km verso l'aria calda; corretto il
+# segno del vento termico, che dalla v21 scartava ogni fronte reale.
+FRONT_METHOD = "icon2i-resolved-warm-edge-v22"
 ANALYSIS_PRESSURE_PA = 85_000.0
 LOWER_PRESSURE_PA = 92_500.0
 UPPER_PRESSURE_PA = 70_000.0
@@ -487,6 +491,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         if lower_temperature_path and lower_humidity_path:
             added = []
             opened = None
+            keys_tried = ("t925", "q925")
             try:
                 for key, path in (
                     ("t925", lower_temperature_path),
@@ -505,7 +510,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys[key] = variable
                     added.append(key)
                     opened = None
-            except Exception:
+            except Exception as error:
+                self._reject_input("/".join(keys_tried), error)
                 if opened is not None:
                     opened.close()
                 for key in added:
@@ -515,6 +521,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         if lower_u_wind_path and lower_v_wind_path:
             added = []
             opened = None
+            keys_tried = ("u925", "v925")
             try:
                 for key, path in (
                     ("u925", lower_u_wind_path),
@@ -530,7 +537,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys[key] = variable
                     added.append(key)
                     opened = None
-            except Exception:
+            except Exception as error:
+                self._reject_input("/".join(keys_tried), error)
                 if opened is not None:
                     opened.close()
                 for key in added:
@@ -540,6 +548,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         if upper_temperature_path and upper_humidity_path:
             added = []
             opened = None
+            keys_tried = ("t700", "q700")
             try:
                 for key, path in (
                     ("t700", upper_temperature_path),
@@ -558,7 +567,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys[key] = variable
                     added.append(key)
                     opened = None
-            except Exception:
+            except Exception as error:
+                self._reject_input("/".join(keys_tried), error)
                 if opened is not None:
                     opened.close()
                 for key in added:
@@ -574,6 +584,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                 continue
             added = []
             opened = None
+            keys_tried = keys
             try:
                 for key, path in zip(keys, paths):
                     opened = self._open_field(path, key)
@@ -586,7 +597,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys[key] = variable
                     added.append(key)
                     opened = None
-            except Exception:
+            except Exception as error:
+                self._reject_input("/".join(keys_tried), error)
                 if opened is not None:
                     opened.close()
                 for key in added:
@@ -594,6 +606,8 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     self.keys.pop(key, None)
 
         if surface_pressure_path:
+            name_tried = "ps"
+            dataset = None
             try:
                 dataset = self._open_field(surface_pressure_path, "ps")
                 self._validate_optional_dataset(dataset, "ps", None)
@@ -604,13 +618,16 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     raise ValueError("pressione al suolo non espressa in Pa")
                 self.datasets["ps"] = dataset
                 self.keys["ps"] = variable
-            except Exception:
+            except Exception as error:
+                self._reject_input(name_tried, error)
                 try:
                     dataset.close()
                 except Exception:
                     pass
 
         if geopotential_500_path:
+            name_tried = "fi500"
+            dataset = None
             try:
                 dataset = self._open_field(geopotential_500_path, "fi500")
                 self._validate_optional_dataset(dataset, "fi500", 500.0)
@@ -621,27 +638,49 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     raise ValueError("geopotenziale 500 hPa fuori scala")
                 self.datasets["fi500"] = dataset
                 self.keys["fi500"] = variable
-            except Exception:
+            except Exception as error:
+                self._reject_input(name_tried, error)
                 try:
                     dataset.close()
                 except Exception:
                     pass
 
         if omega_700_path:
+            name_tried = "omega700"
+            dataset = None
             try:
                 dataset = self._open_field(omega_700_path, "omega700")
                 self._validate_optional_dataset(dataset, "omega700", 700.0)
                 variable = next(iter(dataset.data_vars))
                 values = np.asarray(dataset[variable].values, dtype=float)
-                if np.nanpercentile(np.abs(values), 99.9) > 20.0:
-                    raise ValueError("omega 700 hPa fuori scala Pa/s")
+                # The unit is checked on the typical value.  A 2.2-km model
+                # puts convective updrafts of 20-100 Pa/s in the tail: the
+                # former p99.9 < 20 Pa/s test dropped omega on stormy days
+                # (run 2026-10-07 00Z) and nobody was told.  Median |omega|
+                # is 0.15-0.3 Pa/s; hPa/s would read ~0.002, w in m/s ~0.02.
+                typical = _finite_median(np.abs(values))
+                if not 0.05 <= typical <= 1.5:
+                    raise ValueError(
+                        f"omega 700 hPa: mediana |omega| {typical:.3g}, attesa in Pa/s"
+                    )
                 self.datasets["omega700"] = dataset
                 self.keys["omega700"] = variable
-            except Exception:
+            except Exception as error:
+                self._reject_input(name_tried, error)
                 try:
                     dataset.close()
                 except Exception:
                     pass
+
+    def _reject_input(self, name: str, error: Exception) -> None:
+        """An optional field that fails validation is dropped, never silently.
+
+        The analysis still runs without it, but the log and front_qc.json say
+        which field is missing and why.
+        """
+        rejections = self.__dict__.setdefault("input_rejections", {})
+        rejections[name] = str(error)
+        print(f"   fronti: campo {name} scartato: {error}", flush=True)
 
     def _validate_optional_dataset(
         self, dataset, name: str, expected_level_hpa: float | None
@@ -891,7 +930,6 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
 
     def _apply_physical_character(self, candidates, engine_fields, hour):
         """Frontogenesis and thermal-wind gates, plus ana/kata character."""
-        import front_character as fch
         evidence = (engine_fields or {}).get("evidence") or {}
         if not evidence:
             return candidates
@@ -918,7 +956,9 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                 dropped += 1
         if engine_fields is not None:
             funnel = engine_fields.setdefault("funnel", {})
-            funnel["droppedPhysicalGate"] = dropped
+            funnel["droppedPhysicalGate"] = (
+                funnel.get("droppedPhysicalGate", 0) + dropped
+            )
         return kept
 
     def _detect_hour(self, hour: int) -> list[dict]:
@@ -1008,6 +1048,11 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
         wet_candidates = self._apply_physical_character(
             wet_candidates, engine_fields, hour
         )
+        # The gate writes into engine_fields["funnel"]; ``engine_funnel`` is a
+        # copy taken before it ran, so the count never reached front_qc.json.
+        engine_funnel["droppedPhysicalGate"] = (
+            (engine_fields or {}).get("funnel") or {}
+        ).get("droppedPhysicalGate", 0)
         # Independent directional ridge geometry.  It confirms position and
         # method agreement, but it is deliberately NOT an autonomous seed:
         # both Hewson and Laplacian geometry can follow opposite edges of the
@@ -1264,6 +1309,12 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                 except Exception:
                     wnd = None
 
+        zone_gradient = np.hypot(
+            kinematics["thetaWGradientEast"], kinematics["thetaWGradientNorth"]
+        )
+        warm_edge_km = fch.WARM_EDGE_FRACTION * fe.reference_front_scales(
+            fe.SYNOPTIC_SIGMA_KM
+        )["widthKm"]
         accepted = []
         rejected: list[dict] = []
         reject_counts: dict[str, int] = {}
@@ -1274,6 +1325,21 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             hewson = np.asarray(candidate["hewsonDir"], dtype=float)
             if len(coordinates) < 4 or normal.shape != coordinates.shape:
                 continue
+            # Measure on the zone axis, publish on the warm edge.  Every
+            # threshold below was set on axis lines; sampled from the warm
+            # edge the cold-side points land near the zone centre and the
+            # thermal core fails on a real front.  The axis is re-read on
+            # theta_w at the refinement scale, because a line located at
+            # 100-150 km smoothing sits that far into the warm air.
+            coordinates, snap_shift = fch.snap_to_zone_axis(
+                fch.zone_axis(candidate), normal, zone_gradient, self._sample
+            )
+            candidate["coordinates"] = fch.place_on_warm_edge(
+                coordinates, np.nan_to_num(normal), warm_edge_km
+            )
+            candidate["warmEdgeOffsetKm"] = round(warm_edge_km, 1)
+            candidate["axisSnapKm"] = round(float(np.median(np.abs(snap_shift))), 1)
+            candidate["positionSource"] = "warm-edge-of-resolved-zone"
 
             # Sample the air masses at three metric distances.  A single
             # 55-km pair can accidentally cross a local perturbation; the
@@ -1781,6 +1847,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             "omega700": "omega700" in self.datasets,
             "pressure": "p" in self.datasets,
             "mlFusion": getattr(self, "ml_guidance", None) is not None,
+            "inputRejections": dict(getattr(self, "input_rejections", {})),
             "thresholdClimatology": (
                 self.run_month if self._threshold_climatology else None
             ),
