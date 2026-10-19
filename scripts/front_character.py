@@ -72,9 +72,10 @@ def thermal_wind_alignment(
     if u_lower is None or u_upper is None:
         return float("nan")
     normal = np.asarray(warm_normal, dtype=float)
-    # k x warm-normal points along the front with warm air to the right.
-    expected_east = normal[:, 1]
-    expected_north = -normal[:, 0]
+    # k x warm-normal = (-n_north, n_east) points along the front with warm
+    # air to the right (cold to the left), the NH thermal-wind direction.
+    expected_east = -normal[:, 1]
+    expected_north = normal[:, 0]
     lower_u = _sample(u_lower, line, longitudes, latitudes, metrics)
     lower_v = _sample(v_lower, line, longitudes, latitudes, metrics)
     upper_u = _sample(u_upper, line, longitudes, latitudes, metrics)
