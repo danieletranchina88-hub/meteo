@@ -27,6 +27,13 @@ L'approssimazione di Θw (σ 30 km + winsorizzazione) è stata misurata e **non*
 Risultato: 17/10 12Z da 0 a 2 tracce (25 ore), 15/10 00Z da 0 a 1 traccia;
 lo stesso fronte freddo su Francia/Alpi compare in entrambi i run.
 
+**Deploy fallito il 19/10 (run 1453).** Con il segno del vento termico corretto
+più linee arrivano a valle, e 8 ore su 73 cadevano con `IndexError`: un vertice
+spostato lungo una normale NaN diventava una coordinata NaN, che il campionatore
+di `front_analysis` convertiva in -2⁶³. Oltre 4 ore in errore il run si ferma
+per scelta e il deploy fallisce. Ora la normale NaN lascia il vertice dov'è e
+il campionatore tratta le coordinate non finite come fuori griglia.
+
 **Dati in ingresso.** Verificati log e GRIB di produzione: i 21 campi dei fronti
 arrivano completi (73 ore, griglia 761×761, nessun valore mancante, unità
 corrette). Ma un campo opzionale che non passava un controllo veniva scartato

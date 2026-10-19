@@ -566,8 +566,12 @@ class SynopticFrontAnalyzer:
             & (y >= 0.0)
             & (y <= len(self.latitudes) - 1.001)
         )
-        xc = np.clip(x, 0.0, len(self.longitudes) - 1.001)
-        yc = np.clip(y, 0.0, len(self.latitudes) - 1.001)
+        # A NaN coordinate (a vertex moved along an undefined normal) is
+        # outside the grid: cast to int it became -2**63 and an IndexError
+        # dropped the whole hour (8/73 hours on run 2026-10-19 00Z, which
+        # failed the deploy).  Same guard as front_locator._sample.
+        xc = np.where(np.isfinite(x), np.clip(x, 0.0, len(self.longitudes) - 1.001), 0.0)
+        yc = np.where(np.isfinite(y), np.clip(y, 0.0, len(self.latitudes) - 1.001), 0.0)
         x0, y0 = np.floor(xc).astype(int), np.floor(yc).astype(int)
         x1 = np.minimum(x0 + 1, field.shape[1] - 1)
         y1 = np.minimum(y0 + 1, field.shape[0] - 1)

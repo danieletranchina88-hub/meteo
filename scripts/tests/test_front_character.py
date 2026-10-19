@@ -121,5 +121,32 @@ if not np.all(np.isfinite(kept)):
     print("  FAIL: una normale NaN produce coordinate NaN")
     ok = False
 
+# 5) NaN normals and coordinates ---------------------------------------------
+# Run 2026-10-19 00Z failed the deploy: a vertex moved along a NaN normal
+# became a NaN coordinate, the analyzer's sampler cast it to -2**63 and an
+# IndexError dropped 8 of 73 hours.
+from front_analysis import SynopticFrontAnalyzer
+nan_normal = warm_normal.copy()
+nan_normal[5] = np.nan
+shifted = fch.place_on_warm_edge(line, nan_normal, 34.0)
+probe = object.__new__(SynopticFrontAnalyzer)
+probe.longitudes, probe.latitudes = LON, LAT
+probe.delta_longitude = probe.delta_latitude = 0.1
+holes = line.copy()
+holes[3] = np.nan
+try:
+    sampled = probe._sample(np.ones_like(LONG), holes)
+    sampler_ok = np.isnan(sampled[3]) and np.all(np.isfinite(np.delete(sampled, 3)))
+except IndexError:
+    sampler_ok = False
+print("5) normale NaN -> coordinate finite:", bool(np.all(np.isfinite(shifted))),
+      "| campionatore con coordinata NaN:", "ok" if sampler_ok else "IndexError/errato")
+if not np.all(np.isfinite(shifted)):
+    print("  FAIL: lo spostamento sul bordo caldo crea coordinate NaN")
+    ok = False
+if not sampler_ok:
+    print("  FAIL: il campionatore dell'analizzatore non tollera coordinate NaN")
+    ok = False
+
 print("\nESITO:", "SUPERATO" if ok else "DA RIVEDERE")
 raise SystemExit(0 if ok else 1)

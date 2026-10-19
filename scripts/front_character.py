@@ -36,6 +36,9 @@ def place_on_warm_edge(
     normal = np.asarray(warm_normal, dtype=float)
     if offset_km <= 0.0 or len(line) < 2 or len(normal) != len(line):
         return line.copy()
+    # Where the gradient is undefined (grid edge, masked terrain) the normal
+    # is NaN; that vertex stays where it is rather than becoming NaN itself.
+    normal = np.where(np.isfinite(normal), normal, 0.0)
     latitude = np.deg2rad(line[:, 1])
     lon_scale = EARTH_KM_PER_DEG * np.maximum(np.cos(latitude), 0.25)
     shifted = line.copy()
