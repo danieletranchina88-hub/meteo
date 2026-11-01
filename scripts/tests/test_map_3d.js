@@ -2094,3 +2094,18 @@ console.log("volumetric clouds removed: OK");
   });
   console.log("Aspetto mappa prima: blocchi staccabili, marchio tolto, campi spostati non copiati");
 }
+
+// ASPETTO RAFFINATO: solo aspetto, in un blocco staccabile. Fuori dal blocco
+// ogni colore che ne deriva ha un valore di riserva, e il blocco non tocca i
+// nomi interni dell'aspetto mappa prima.
+{
+  const raffinato = html.match(/<style id="aspetto-raffinato">[\s\S]*?<\/style>/);
+  assert.ok(raffinato, "manca il blocco dell'aspetto raffinato");
+  assert.ok(!/am-cerca|am-menu|am-riquadri/.test(raffinato[0]),
+    "l'aspetto raffinato dipende dai nomi interni dell'aspetto mappa prima");
+  const resto = html.replace(raffinato[0], "");
+  const senzaRiserva = resto.match(/var\(--ar-[a-z-]+\)/g) || [];
+  assert.deepEqual(senzaRiserva, [],
+    "fuori dal blocco un colore dell'aspetto raffinato non ha valore di riserva");
+  console.log("Aspetto raffinato: blocco staccabile, colori con riserva");
+}
