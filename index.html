@@ -2236,7 +2236,11 @@
         position: fixed; z-index: 45; width: 58px; height: 58px; border: 0; border-radius: 50%;
         display: grid; place-items: center; background: var(--accent); color: #182334;
         box-shadow: 0 6px 22px rgba(0, 0, 0, .35); cursor: pointer;
+        transition: background-color .16s ease, transform .12s ease;
       }
+      #am-menu:hover { background: var(--ar-accento-forte, var(--accent)); }
+      #am-menu:active { transform: scale(.96); }
+      @media (prefers-reduced-motion: reduce) { #am-menu { transition: none; } #am-menu:active { transform: none; } }
       #am-menu .icon { width: 26px; height: 26px; stroke-width: 2.2; }
       #am-menu span { display: none; }
 
@@ -2297,7 +2301,9 @@
       .am-riquadri .layer-card[data-layer=cloud] b::after { content: "Nubi"; font-size: 12px; }
       .am-riquadri .layer-swatch { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 9px; background: transparent; box-shadow: none; }
       .am-riquadri .layer-swatch .icon { width: 24px; height: 24px; stroke-width: 1.7; }
-      .am-riquadri .layer-card.active { color: #ffb89e; }
+      .am-riquadri .layer-card { border: 1px solid transparent; }
+      .am-riquadri .layer-card:hover { background: rgba(255, 255, 255, .07); }
+      .am-riquadri .layer-card.active { color: var(--ar-accento-testo, #ffb89e); }
       .am-run { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
 
       /* ---- TELEFONO ---------------------------------------------------- */
@@ -2390,6 +2396,148 @@
       }
     </style>
     <!-- ===== FINE ASPETTO "MAPPA PRIMA" (stili) ================================ -->
+    <!-- ===== ASPETTO RAFFINATO ===================================================
+         Solo aspetto: un accento unico al posto di corallo e azzurro mischiati,
+         vetro piu' leggero e piu' sfocato sui comandi, cursore del tempo
+         disegnato, zoom e bottoni coerenti. Nessuna regola cambia posizione,
+         dimensione o comportamento dei comandi: togliendo questo blocco torna
+         l'aspetto di prima. -->
+    <style id="aspetto-raffinato">
+      :root {
+        /* Un solo accento. Azzurro e non corallo: sulla carta il caldo e'
+           gia' arancione e rosso, e un comando arancione si confondeva con
+           la temperatura sotto. */
+        --ar-accento: #46b4e6;
+        --ar-accento-forte: #74c9f0;
+        --ar-accento-velo: rgba(70, 180, 230, .17);
+        --ar-accento-filo: rgba(70, 180, 230, .5);
+        --ar-accento-testo: #c9ecfc;
+        --ar-su-accento: #06141f;
+        --ar-vetro: rgba(16, 22, 30, .7);
+        --ar-vetro-pieno: rgba(16, 22, 30, .88);
+        --ar-filo: rgba(255, 255, 255, .1);
+        --ar-luce: inset 0 1px 0 rgba(255, 255, 255, .07);
+        --ar-ombra: 0 10px 30px rgba(0, 0, 0, .3), 0 1px 3px rgba(0, 0, 0, .28);
+        --ar-sfoca: blur(18px) saturate(160%);
+        --accent: var(--ar-accento);
+        --am-vetro: var(--ar-vetro);
+        --am-vetro-pieno: var(--ar-vetro-pieno);
+        --am-bordo: var(--ar-filo);
+        --am-ombra: var(--ar-ombra), var(--ar-luce);
+      }
+
+      /* Vetro: piu' trasparente ma piu' sfocato, con un filo di luce in alto. */
+      body #place-search, body #view-switch, body #quick-layers,
+      body .am-tondo, body #timeline, body .maplibregl-ctrl-group {
+        backdrop-filter: var(--ar-sfoca); -webkit-backdrop-filter: var(--ar-sfoca);
+      }
+      body #place-search, body #view-switch, body #quick-layers {
+        border: 1px solid var(--ar-filo); box-shadow: var(--ar-ombra), var(--ar-luce);
+      }
+      /* Sul telefono #header-actions e' solo la colonna che regge i bottoni
+         tondi: il vetro va sui bottoni, non sulla colonna. */
+      @media (min-width: 960px) {
+        body #header-actions {
+          border: 1px solid var(--ar-filo); box-shadow: var(--ar-ombra), var(--ar-luce);
+          backdrop-filter: var(--ar-sfoca); -webkit-backdrop-filter: var(--ar-sfoca);
+        }
+      }
+
+      /* Bottoni: risposta al tocco uniforme. */
+      body .header-button, body .am-tondo, body #play-button,
+      body #view-switch button, body .layer-card, body .speed-controls button,
+      body .maplibregl-ctrl-group button {
+        transition: background-color .16s ease, color .16s ease, box-shadow .16s ease, transform .12s ease;
+      }
+      body .header-button:active, body .am-tondo:active,
+      body #play-button:active, body .layer-card:active { transform: scale(.96); }
+      body .header-button:hover { background: rgba(255, 255, 255, .08); border-color: transparent; }
+
+      /* Il bottone principale (Livelli sul PC, menu sul telefono). */
+      body #drawer-button, body #drawer-button:hover {
+        background: var(--ar-accento); color: var(--ar-su-accento);
+        box-shadow: 0 6px 20px rgba(70, 180, 230, .32), var(--ar-luce);
+      }
+      body #drawer-button:hover { background: var(--ar-accento-forte); }
+      body .am-tondo[aria-pressed="true"] { background: var(--ar-accento); color: var(--ar-su-accento); }
+
+      /* Voce attiva: lo stesso accento dappertutto. */
+      body #quick-layers .active, body .layer-card.active {
+        background: var(--ar-accento-velo); border-color: var(--ar-accento-filo); color: var(--ar-accento-testo);
+      }
+      body #view-switch button[aria-pressed=true] {
+        background: rgba(255, 255, 255, .16); color: #fff; box-shadow: var(--ar-luce);
+      }
+
+      /* Ricerca: anello d'accento quando si scrive. */
+      body #place-search:focus-within {
+        border-color: var(--ar-accento-filo);
+        box-shadow: 0 0 0 3px rgba(70, 180, 230, .16), var(--ar-ombra);
+      }
+      body #place-query::placeholder { color: rgba(226, 236, 246, .58); }
+
+      /* Barra del tempo. */
+      body #timeline {
+        background: var(--ar-vetro-pieno); border-top: 1px solid var(--ar-filo);
+      }
+      body #play-button {
+        border-radius: 50%; background: var(--ar-accento); color: var(--ar-su-accento);
+        box-shadow: 0 0 0 4px rgba(70, 180, 230, .16);
+      }
+      body #play-button:hover { background: var(--ar-accento-forte); }
+      body #time-label { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
+      body #lead-label { background: var(--ar-accento-velo); color: var(--ar-accento-testo); }
+      body #timeline-days button { color: rgba(226, 236, 246, .72); font-weight: 600; letter-spacing: .02em; }
+      body #timeline-days button:hover { color: #fff; }
+      body .speed-controls button.active { background: var(--ar-accento-velo); color: var(--ar-accento-testo); }
+      body #timeline-buffer i.ready { background: rgba(70, 180, 230, .55); }
+
+      /* Il cursore del tempo: una pista sottile e una manopola bianca con
+         l'anello d'accento, al posto del cursore di sistema. */
+      body #time-slider {
+        -webkit-appearance: none; appearance: none; background: transparent; accent-color: var(--ar-accento);
+      }
+      body #time-slider::-webkit-slider-runnable-track {
+        height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .24);
+      }
+      body #time-slider::-moz-range-track {
+        height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .24);
+      }
+      body #time-slider::-moz-range-progress { height: 4px; border-radius: 4px; background: var(--ar-accento); }
+      body #time-slider::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none; width: 18px; height: 18px; margin-top: -7px;
+        border: 3px solid var(--ar-accento); border-radius: 50%; background: #fff;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, .45);
+      }
+      body #time-slider::-moz-range-thumb {
+        width: 12px; height: 12px; border: 3px solid var(--ar-accento); border-radius: 50%; background: #fff;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, .45);
+      }
+      body #time-slider:focus-visible { outline: none; }
+      body #time-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 5px rgba(70, 180, 230, .3); }
+
+      /* Zoom: stesso vetro degli altri comandi. */
+      body .maplibregl-ctrl-group {
+        overflow: hidden; border: 1px solid var(--ar-filo) !important; border-radius: 14px !important;
+        background: var(--ar-vetro) !important; box-shadow: var(--ar-ombra), var(--ar-luce) !important;
+      }
+      body .maplibregl-ctrl-group button { background: transparent !important; }
+      body .maplibregl-ctrl-group button:hover { background: rgba(255, 255, 255, .09) !important; }
+      body .maplibregl-ctrl-group button + button { border-top-color: var(--ar-filo) !important; }
+
+      /* Scala dei colori: un'ombra sopra la stacca dalla carta. */
+      body #legend-card { box-shadow: 0 -1px 0 var(--ar-filo); }
+      body #legend-card #legend-unit { color: rgba(226, 236, 246, .8); }
+
+      @media (prefers-reduced-motion: reduce) {
+        body .header-button, body .am-tondo, body #play-button,
+        body #view-switch button, body .layer-card, body .speed-controls button,
+        body .maplibregl-ctrl-group button { transition: none; }
+        body .header-button:active, body .am-tondo:active,
+        body #play-button:active, body .layer-card:active { transform: none; }
+      }
+    </style>
+    <!-- ===== FINE ASPETTO RAFFINATO ============================================ -->
   </head>
   <body>
     <div id="map" aria-label="Mappa meteorologica interattiva"></div>
@@ -10436,8 +10584,18 @@
       // densità. Un secondo filtro lineare in MapLibre mescolerebbe nuovamente
       // i colori delle fasce: nearest qui conserva i contorni senza mostrare la
       // griglia del modello, perché il raster è prodotto alla risoluzione display.
+      //
+      // Il raster pero' non e' sempre alla risoluzione dello schermo: per
+      // tenere in memoria tutte le scadenze del run viene rimpicciolito, e
+      // ingrandito a pixel pieni un campo continuo mostra i quadretti (sulle
+      // Alpi si vedevano blocchi di 4-5 px). Le fasce e le classi restano
+      // nearest; i campi sfumati, dove non c'e' alcun bordo da conservare,
+      // si ingrandiscono con il filtro lineare.
       function applyWeatherPaint(info) {
-        map.setPaintProperty("weather-layer", "raster-resampling", "nearest");
+        const keepEdges = useNearestCell || info.discrete || info.categorical;
+        map.setPaintProperty(
+          "weather-layer", "raster-resampling", keepEdges ? "nearest" : "linear"
+        );
         // In prospettiva lascio filtrare una piccola quota della cartografia e
         // del chiaroscuro senza alterare in modo apprezzabile i colori della
         // legenda. I layer categorici di pericolo restano più coprenti.
@@ -11595,13 +11753,13 @@
         if (map.getLayer("base-coast-layer")) {
           map.setPaintProperty(
             "base-coast-layer", "line-color",
-            onPhoto ? "rgba(248,252,255,0.9)" : "rgba(16,32,44,0.92)"
+            onPhoto ? "rgba(248,252,255,0.9)" : "rgba(16,32,44,0.74)"
           );
         }
         if (map.getLayer("base-borders-layer")) {
           map.setPaintProperty(
             "base-borders-layer", "line-color",
-            onPhoto ? "rgba(232,244,255,0.8)" : "rgba(28,48,62,0.78)"
+            onPhoto ? "rgba(232,244,255,0.8)" : "rgba(28,48,62,0.5)"
           );
         }
         if (map.getLayer("base-rivers-layer")) {
@@ -11612,7 +11770,7 @@
         if (map.getLayer("regions-layer")) {
           map.setPaintProperty(
             "regions-layer", "line-color",
-            onPhoto ? "rgba(222,235,250,0.72)" : "rgba(38,58,72,0.5)"
+            onPhoto ? "rgba(222,235,250,0.72)" : "rgba(38,58,72,0.3)"
           );
         }
         if (map.getLayer("graticule-layer")) {
@@ -12481,7 +12639,11 @@
       // per lo schermo; le scie regolano quanto lentamente il tratto svanisce
       // (valore più alto = coda più lunga, aspetto da texture di flusso).
       const PARTICLE_DENSITY_FACTOR = { light: 0.55, medium: 1, dense: 1.6 };
-      const PARTICLE_TRAIL_FADE = { short: 0.9, medium: 0.955, long: 0.978 };
+      // Scie a cometa: una testa netta e una coda che si spegne in mezzo
+      // secondo. Con 0,955 la coda durava oltre due secondi e migliaia di
+      // tratti sottili si fondevano in una peluria uniforme, in cui il verso
+      // del vento non si leggeva piu'.
+      const PARTICLE_TRAIL_FADE = { short: 0.88, medium: 0.925, long: 0.958 };
 
       function particleDensityFactor() {
         return PARTICLE_DENSITY_FACTOR[particleDensity] || 1;
@@ -12494,7 +12656,9 @@
       function calculateParticleTarget() {
         const area = Math.max(window.innerWidth * window.innerHeight, 1);
         const mobile = isMobile();
-        const base = clamp(area / (mobile ? 340 : 280), mobile ? 700 : 1400, mobile ? 2200 : 6000);
+        // Meno particelle ma piu' visibili: fra una e l'altra deve restare
+        // abbastanza carta per vedere la temperatura sotto.
+        const base = clamp(area / (mobile ? 440 : 420), mobile ? 600 : 1100, mobile ? 1700 : 3600);
         particleTarget = Math.round(base * particleDensityFactor());
       }
 
@@ -12672,13 +12836,13 @@
       // cromatica del campo sotto (temperatura, pioggia), che è l'informazione
       // principale. La velocità resta leggibile da spessore e luminosità.
       function particleStyle(speed) {
-        if (speed < 10) return { color: "rgba(255,255,255,0.50)", width: 0.55 };
-        if (speed < 20) return { color: "rgba(255,255,255,0.58)", width: 0.6 };
-        if (speed < 35) return { color: "rgba(255,255,255,0.66)", width: 0.68 };
-        if (speed < 50) return { color: "rgba(255,255,255,0.74)", width: 0.76 };
-        if (speed < 70) return { color: "rgba(255,255,255,0.82)", width: 0.84 };
-        if (speed < 90) return { color: "rgba(255,255,255,0.9)", width: 0.92 };
-        return { color: "rgba(255,255,255,0.97)", width: 1 };
+        if (speed < 10) return { color: "rgba(255,255,255,0.46)", width: 0.95 };
+        if (speed < 20) return { color: "rgba(255,255,255,0.58)", width: 1.1 };
+        if (speed < 35) return { color: "rgba(255,255,255,0.7)", width: 1.3 };
+        if (speed < 50) return { color: "rgba(255,255,255,0.8)", width: 1.5 };
+        if (speed < 70) return { color: "rgba(255,255,255,0.88)", width: 1.7 };
+        if (speed < 90) return { color: "rgba(255,255,255,0.94)", width: 1.85 };
+        return { color: "rgba(255,255,255,0.98)", width: 2 };
       }
 
       function startParticles() {
@@ -16202,9 +16366,9 @@
             type: "line",
             source: "regions",
             paint: {
-              "line-color": "rgba(38,58,72,0.5)",
+              "line-color": "rgba(38,58,72,0.3)",
               "line-dasharray": [3, 2.4],
-              "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.45, 10, 1.0]
+              "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.4, 10, 0.9]
             }
           });
 
@@ -16213,9 +16377,10 @@
             type: "line",
             source: "base-borders",
             paint: {
-              "line-color": "rgba(28,48,62,0.78)",
-              "line-dasharray": [4, 2.2],
-              "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.8, 10, 1.8]
+              // Confini continui e leggeri, come sulle carte delle app meteo:
+              // il tratteggio scuro competeva con le isobare e i fronti.
+              "line-color": "rgba(28,48,62,0.5)",
+              "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 10, 1.3]
             }
           });
 
@@ -16226,8 +16391,8 @@
             type: "line",
             source: "base-coast",
             paint: {
-              "line-color": "rgba(16,32,44,0.92)",
-              "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.7, 7, 1.2, 10, 2.2]
+              "line-color": "rgba(16,32,44,0.74)",
+              "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.6, 7, 1.0, 10, 1.8]
             }
           });
 
@@ -16243,7 +16408,10 @@
             id: "model-mask-layer",
             type: "fill",
             source: "model-mask",
-            paint: { "fill-color": "#f4f2ec", "fill-opacity": 0.72 }
+            // Fuori dal dominio un velo grigio chiaro e neutro: il beige
+            // sembrava un'altra campitura della legenda, questo dice
+            // semplicemente "qui il modello non arriva".
+            paint: { "fill-color": "#d9dee3", "fill-opacity": 0.62 }
           });
 
           map.addSource("model-edge", { type: "geojson", data: generateModelEdge() });
@@ -16252,9 +16420,9 @@
             type: "line",
             source: "model-edge",
             paint: {
-              "line-color": "rgba(40,60,76,0.55)",
+              "line-color": "rgba(20,34,46,0.34)",
               "line-dasharray": [5, 3],
-              "line-width": 1.1
+              "line-width": 1
             }
           });
 
