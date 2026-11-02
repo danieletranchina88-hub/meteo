@@ -25,30 +25,32 @@ def js(anchors, indent=8):
 
 out = {}
 
-# --- Temperatura: scala fornita, in kelvin ----------------------------------
-# Questa non viene da una libreria: e' una scala fornita, espressa in kelvin.
-# Qui si limita a essere convertita in gradi Celsius, senza ricampionarla ne'
-# rimappare i valori, perche' le posizioni degli ancoraggi fanno parte della
-# scala tanto quanto i colori.
+# --- Temperatura: scala "turbo", in kelvin ----------------------------------
+# Scelta il 02/11/2026 fra tre proposte provate sulla mappa vera: alto
+# contrasto fra 6 e 24 gradi, le temperature che in Italia capitano davvero.
+# Le posizioni degli ancoraggi fanno parte della scala quanto i colori.
 #
-# Il salto fra 273,15 K e 274 K -- blu [93,133,198] e verde [68,125,99] in
+# Il salto fra 273,15 K e 274 K -- ciano [36,236,166] e verde [97,252,108] in
 # meno di un kelvin -- e' la linea del gelo e va conservato. Perche' cada
 # davvero a zero, le fasce discrete del sito vanno campionate al centro e non
 # al bordo inferiore: vedi ``sampleAtMidpoint`` in index.html.
 TEMPERATURE_KELVIN = [
-    (203.0, [115, 70, 105]),
-    (218.0, [202, 172, 195]),
-    (233.0, [162, 70, 145]),
-    (248.0, [143, 89, 169]),
-    (258.0, [157, 219, 217]),
-    (265.0, [106, 191, 181]),
-    (269.0, [100, 166, 189]),
-    (273.15, [93, 133, 198]),
-    (274.0, [68, 125, 99]),
-    (283.0, [128, 147, 24]),
-    (294.0, [243, 183, 4]),
-    (303.0, [232, 83, 25]),
-    (320.0, [71, 14, 0]),
+    (203.0, [30, 10, 45]),
+    (218.0, [48, 18, 59]),
+    (233.0, [60, 40, 120]),
+    (248.0, [65, 69, 171]),
+    (258.0, [70, 117, 237]),
+    (265.0, [57, 162, 252]),
+    (269.0, [27, 207, 212]),
+    (273.15, [36, 236, 166]),
+    (274.0, [97, 252, 108]),
+    (279.15, [164, 252, 59]),
+    (285.15, [209, 232, 52]),
+    (291.15, [243, 198, 58]),
+    (297.15, [254, 155, 45]),
+    (303.15, [243, 99, 21]),
+    (311.15, [199, 47, 5]),
+    (320.0, [122, 4, 3]),
 ]
 out["TEMP_ANCHORS"] = [
     {"v": round(kelvin - 273.15, 2), "c": colour}
@@ -69,25 +71,22 @@ out["TEMP_ANCHORS"] = [
 # senza leggere la legenda (50 km/h vento forte, 75 burrasca forte, 103
 # tempesta violenta) cadono su salti cromatici volutamente ampi.
 #
-# Ai gradi bassi non si aggiungono fasce, per quanto il vento medio in Italia
-# viva quasi sempre sotto i 20 km/h: fra il bianco della calma e il verde acqua
-# dei 20 km/h ci sono 20,5 unita' CAM02-UCS in tutto, e quattro fasce
-# disterebbero 5,1 l'una dall'altra -- sotto la soglia di 7,6 che questa scala
-# si e' data, e sotto i 4,9 del daltonismo. Sarebbe dettaglio solo apparente.
+# I colori, scelti il 02/11/2026, vanno dal blu della calma al verde acqua dei
+# venti moderati; dai 50 km/h la scala passa a giallo, arancio, rosso e viola.
 #
 out["WIND_SPEED_STOPS"] = [
-    {"v": 0, "c": [236, 242, 244]},
-    {"v": 12, "c": [206, 232, 226]},
-    {"v": 20, "c": [160, 214, 200]},
-    {"v": 29, "c": [108, 190, 176]},
-    {"v": 39, "c": [96, 176, 118]},
-    {"v": 50, "c": [214, 199, 74]},
-    {"v": 62, "c": [232, 155, 53]},
-    {"v": 75, "c": [222, 106, 47]},
-    {"v": 89, "c": [199, 56, 56]},
-    {"v": 103, "c": [160, 28, 74]},
-    {"v": 118, "c": [110, 30, 110]},
-    {"v": 140, "c": [70, 22, 92]},
+    {"v": 0, "c": [44, 72, 130]},
+    {"v": 12, "c": [52, 110, 170]},
+    {"v": 20, "c": [60, 150, 190]},
+    {"v": 29, "c": [70, 185, 175]},
+    {"v": 39, "c": [120, 200, 120]},
+    {"v": 50, "c": [220, 215, 80]},
+    {"v": 62, "c": [245, 170, 60]},
+    {"v": 75, "c": [235, 110, 50]},
+    {"v": 89, "c": [210, 55, 60]},
+    {"v": 103, "c": [160, 30, 90]},
+    {"v": 118, "c": [120, 30, 130]},
+    {"v": 140, "c": [80, 20, 110]},
 ]
 
 # Probabilita'. Una grandezza sola, quindi una scala sola per tutti i livelli
@@ -149,34 +148,34 @@ out["ALTITUDE_STOPS"] = [
 
 out["RAIN_STOPS"] = [
     {"v": 0, "c": [0, 0, 0], "a": 0},
-    {"v": 0.1, "c": [213, 240, 255], "a": 0.78},
-    {"v": 0.5, "c": [134, 210, 255], "a": 0.9},
-    {"v": 1, "c": [57, 168, 242], "a": 0.95},
-    {"v": 2, "c": [37, 102, 212], "a": 0.98},
-    {"v": 4, "c": [32, 180, 134], "a": 0.98},
-    {"v": 10, "c": [242, 211, 79], "a": 1},
-    {"v": 20, "c": [242, 142, 43], "a": 1},
-    {"v": 40, "c": [214, 69, 69], "a": 1},
-    {"v": 80, "c": [142, 47, 143], "a": 1},
+    {"v": 0.1, "c": [160, 220, 255], "a": 0.72},
+    {"v": 0.5, "c": [90, 180, 250], "a": 0.86},
+    {"v": 1, "c": [40, 130, 240], "a": 0.93},
+    {"v": 2, "c": [30, 90, 210], "a": 0.97},
+    {"v": 4, "c": [40, 190, 90], "a": 0.98},
+    {"v": 10, "c": [250, 230, 50], "a": 1},
+    {"v": 20, "c": [250, 150, 30], "a": 1},
+    {"v": 40, "c": [230, 40, 40], "a": 1},
+    {"v": 80, "c": [200, 40, 200], "a": 1},
 ]
 
 out["CLOUD_ANCHORS"] = [
-    {"v": 0, "c": [247, 250, 250], "a": 0},
-    {"v": 10, "c": [241, 245, 246], "a": 0.28},
-    {"v": 30, "c": [221, 230, 233], "a": 0.62},
-    {"v": 50, "c": [187, 200, 205], "a": 0.78},
-    {"v": 70, "c": [139, 154, 162], "a": 0.88},
-    {"v": 90, "c": [91, 105, 113], "a": 0.95},
-    {"v": 100, "c": [57, 70, 77], "a": 0.99},
+    {"v": 0, "c": [230, 236, 244], "a": 0},
+    {"v": 10, "c": [210, 220, 232], "a": 0.3},
+    {"v": 30, "c": [175, 190, 210], "a": 0.55},
+    {"v": 50, "c": [140, 158, 182], "a": 0.72},
+    {"v": 70, "c": [105, 122, 150], "a": 0.84},
+    {"v": 90, "c": [75, 88, 115], "a": 0.92},
+    {"v": 100, "c": [52, 62, 85], "a": 0.97},
 ]
 
 out["RH_ANCHORS"] = [
-    {"v": 0, "c": [112, 64, 37]},
-    {"v": 20, "c": [185, 120, 62]},
-    {"v": 40, "c": [217, 185, 110]},
-    {"v": 60, "c": [121, 185, 158]},
-    {"v": 80, "c": [42, 145, 163]},
-    {"v": 100, "c": [39, 75, 143]},
+    {"v": 0, "c": [140, 80, 40]},
+    {"v": 20, "c": [205, 140, 70]},
+    {"v": 40, "c": [238, 218, 145]},
+    {"v": 60, "c": [140, 210, 150]},
+    {"v": 80, "c": [45, 160, 172]},
+    {"v": 100, "c": [28, 78, 160]},
 ]
 
 # Pressione. I valori non vengono campionati qui a ogni esecuzione: questo file

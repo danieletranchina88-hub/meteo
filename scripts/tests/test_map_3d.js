@@ -1458,24 +1458,21 @@ assert.ok(!/strokeText/.test(paperIsobar[0]),
   )();
   const info = { stops: temperature.TEMP_BANDS, discrete: true };
   const at = (value) => temperature.colorFor(value, info).slice(0, 3).map(Math.round);
-  const isBlueish = (c) => c[2] > c[1] && c[2] > c[0];
-  const isGreenish = (c) => c[1] > c[2] && c[1] >= c[0];
-
-  assert.ok(isBlueish(at(-0.1)),
-    "sotto zero deve restare il blu del gelo, trovato " + at(-0.1));
-  assert.ok(isGreenish(at(0)),
-    "a zero gradi deve iniziare il verde, trovato " + at(0));
-  assert.ok(isGreenish(at(1.9)),
-    "la fascia sopra lo zero non deve tornare blu, trovato " + at(1.9));
-  // Gli estremi della scala fornita devono arrivare intatti.
-  assert.match(anchorsSource[1], /\{ v: 0, c: \[93, 133, 198\] \}/,
-    "l'ancoraggio a 0 gradi non e' quello della scala fornita");
-  assert.match(anchorsSource[1], /\{ v: 0\.85, c: \[68, 125, 99\] \}/,
-    "l'ancoraggio subito sopra lo zero non e' quello della scala fornita");
-  assert.match(anchorsSource[1], /\{ v: -70\.15, c: \[115, 70, 105\] \}/,
-    "l'estremo freddo non e' quello della scala fornita");
-  assert.match(anchorsSource[1], /\{ v: 46\.85, c: \[71, 14, 0\] \}/,
-    "l'estremo caldo non e' quello della scala fornita");
+  const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  // La linea del gelo: un salto netto fra la fascia sotto lo zero e quella
+  // sopra, molto piu' grande del passo fra due fasce vicine qualsiasi.
+  const freezing = distance(at(-0.1), at(0));
+  assert.ok(freezing > 60,
+    "a zero gradi non c'e' piu' un salto di colore: " + at(-0.1) + " -> " + at(0));
+  assert.ok(distance(at(1.9), at(-0.1)) > 60,
+    "la fascia sopra lo zero torna al colore del gelo, trovato " + at(1.9));
+  assert.ok(freezing > 1.5 * distance(at(4), at(6)),
+    "il salto del gelo non si distingue dal passo normale della scala");
+  // Gli ancoraggi a 0 e 0,85 gradi esistono: e' fra loro che cade il salto.
+  assert.match(anchorsSource[1], /\{ v: 0, c: \[/, "manca l'ancoraggio a 0 gradi");
+  assert.match(anchorsSource[1], /\{ v: 0\.85, c: \[/, "manca l'ancoraggio subito sopra lo zero");
+  assert.match(anchorsSource[1], /\{ v: -70\.15, c: \[/, "la scala non copre piu' il freddo estremo");
+  assert.match(anchorsSource[1], /\{ v: 46\.85, c: \[/, "la scala non copre piu' il caldo estremo");
 }
 // --- Palette meteorologiche ---
 // Le tre temperature al suolo sono una scelta grafica consolidata e devono
@@ -1516,12 +1513,18 @@ assert.match(html, /t850:\s*\{[\s\S]{0,180}?stops:\s*T850_STOPS,/,
   // scala vale anche sulla media: Beaufort e' definito sul vento medio.
   assert.deepEqual(edges, [0, 12, 20, 29, 39, 50, 62, 75, 89, 103, 118, 140],
     "i bordi delle fasce non sono piu' i gradi Beaufort in km/h");
-  assert.match(windSource[1], /\{ v: 0, c: \[236, 242, 244\] \}/,
-    "la calma non e' quasi bianca");
-  assert.match(windSource[1], /\{ v: 50, c: \[214, 199, 74\] \}/,
+  const windColour = (v) => {
+    const found = windSource[1].match(new RegExp("\\{ v: " + v + ", c: \\[(\\d+), (\\d+), (\\d+)\\]"));
+    assert.ok(found, "manca il colore a " + v + " km/h");
+    return found.slice(1, 4).map(Number);
+  };
+  const step = (a, b) => Math.hypot(...windColour(a).map((x, i) => x - windColour(b)[i]));
+  // Il vento forte (50 km/h) e' lo scalino piu' visibile della meta' bassa.
+  assert.ok(step(39, 50) > step(29, 39) && step(39, 50) > step(20, 29),
     "manca lo scalino del vento forte a 50 km/h");
-  assert.match(windSource[1], /\{ v: 140, c: \[70, 22, 92\] \}/,
-    "l'estremo oltre scala torna bianco e diventa invisibile");
+  // L'estremo oltre scala resta scuro, non sbiadisce sulla carta chiara.
+  assert.ok(windColour(140).reduce((a, b) => a + b) < 300,
+    "l'estremo oltre scala torna chiaro e diventa invisibile");
 
   // Nessuna fascia in piu' ai gradi bassi: fra il bianco della calma e il
   // verde acqua dei 20 km/h ci sono 20,5 unita' CAM02-UCS in tutto, e quattro
