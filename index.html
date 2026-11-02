@@ -2407,12 +2407,12 @@
         /* Un solo accento. Azzurro e non corallo: sulla carta il caldo e'
            gia' arancione e rosso, e un comando arancione si confondeva con
            la temperatura sotto. */
-        --ar-accento: #46b4e6;
-        --ar-accento-forte: #74c9f0;
-        --ar-accento-velo: rgba(70, 180, 230, .17);
-        --ar-accento-filo: rgba(70, 180, 230, .5);
-        --ar-accento-testo: #c9ecfc;
-        --ar-su-accento: #06141f;
+        --ar-accento: #e8edf2;
+        --ar-accento-forte: #ffffff;
+        --ar-accento-velo: rgba(232, 237, 242, .17);
+        --ar-accento-filo: rgba(232, 237, 242, .5);
+        --ar-accento-testo: #ffffff;
+        --ar-su-accento: #0b141d;
         --ar-vetro: rgba(16, 22, 30, .7);
         --ar-vetro-pieno: rgba(16, 22, 30, .88);
         --ar-filo: rgba(255, 255, 255, .1);
@@ -2456,7 +2456,7 @@
       /* Il bottone principale (Livelli sul PC, menu sul telefono). */
       body #drawer-button, body #drawer-button:hover {
         background: var(--ar-accento); color: var(--ar-su-accento);
-        box-shadow: 0 6px 20px rgba(70, 180, 230, .32), var(--ar-luce);
+        box-shadow: 0 6px 20px rgba(232, 237, 242, .32), var(--ar-luce);
       }
       body #drawer-button:hover { background: var(--ar-accento-forte); }
       body .am-tondo[aria-pressed="true"] { background: var(--ar-accento); color: var(--ar-su-accento); }
@@ -2472,7 +2472,7 @@
       /* Ricerca: anello d'accento quando si scrive. */
       body #place-search:focus-within {
         border-color: var(--ar-accento-filo);
-        box-shadow: 0 0 0 3px rgba(70, 180, 230, .16), var(--ar-ombra);
+        box-shadow: 0 0 0 3px rgba(232, 237, 242, .16), var(--ar-ombra);
       }
       body #place-query::placeholder { color: rgba(226, 236, 246, .58); }
 
@@ -2482,7 +2482,7 @@
       }
       body #play-button {
         border-radius: 50%; background: var(--ar-accento); color: var(--ar-su-accento);
-        box-shadow: 0 0 0 4px rgba(70, 180, 230, .16);
+        box-shadow: 0 0 0 4px rgba(232, 237, 242, .16);
       }
       body #play-button:hover { background: var(--ar-accento-forte); }
       body #time-label { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
@@ -2490,7 +2490,7 @@
       body #timeline-days button { color: rgba(226, 236, 246, .72); font-weight: 600; letter-spacing: .02em; }
       body #timeline-days button:hover { color: #fff; }
       body .speed-controls button.active { background: var(--ar-accento-velo); color: var(--ar-accento-testo); }
-      body #timeline-buffer i.ready { background: rgba(70, 180, 230, .55); }
+      body #timeline-buffer i.ready { background: rgba(232, 237, 242, .55); }
 
       /* Il cursore del tempo: una pista sottile e una manopola bianca con
          l'anello d'accento, al posto del cursore di sistema. */
@@ -2514,7 +2514,7 @@
         box-shadow: 0 2px 6px rgba(0, 0, 0, .45);
       }
       body #time-slider:focus-visible { outline: none; }
-      body #time-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 5px rgba(70, 180, 230, .3); }
+      body #time-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 5px rgba(232, 237, 242, .3); }
 
       /* Zoom: stesso vetro degli altri comandi. */
       body .maplibregl-ctrl-group {
@@ -2744,25 +2744,25 @@
               <button class="layer-card map-only" type="button" data-layer="none" aria-pressed="false">
                 <span class="layer-swatch"></span><span><b>Solo carta</b><small>nessun campo o analisi sovrapposta</small></span>
               </button>
-              <button class="layer-card active" type="button" data-layer="temp" style="--swatch: linear-gradient(#ffcc3e,#ec3c68)">
+              <button class="layer-card active" type="button" data-layer="temp" style="--swatch: linear-gradient(#61fc6c,#f3c63a,#c72f05)">
                 <span class="layer-swatch"></span><span><b>Temperatura</b><small>a 2 metri</small></span>
               </button>
               <button class="layer-card" type="button" data-layer="feels" style="--swatch: linear-gradient(#ffcd3a,#e24078)">
                 <span class="layer-swatch"></span><span><b>Percepita</b><small>caldo · freddo · comfort</small></span>
               </button>
-              <button class="layer-card" type="button" data-layer="wind" style="--swatch: linear-gradient(90deg,#e8f1f2,#31b7a5,#f2d55c,#d64562,#6f2a8e)">
+              <button class="layer-card" type="button" data-layer="wind" style="--swatch: linear-gradient(90deg,#2c4882,#46b9af,#dcd750,#d2373c,#50146e)">
                 <span class="layer-swatch"></span><span><b>Vento</b><small>a 10 metri</small></span>
               </button>
               <button class="layer-card" type="button" data-layer="gust" style="--swatch: linear-gradient(90deg,#cee8e2,#6cbeb0,#60b076,#d6c74a,#de6a2f,#a01c4a,#6e1e6e)">
                 <span class="layer-swatch"></span><span><b>Raffiche</b><small>a 10 metri · scala Beaufort</small></span>
               </button>
-              <button class="layer-card" type="button" data-layer="rain" style="--swatch: linear-gradient(90deg,#d5f0ff,#2566d4,#20b486,#f2d34f,#d64545,#8e2f8f)">
+              <button class="layer-card" type="button" data-layer="rain" style="--swatch: linear-gradient(90deg,#a0dcff,#2882f0,#28be5a,#fae632,#e62828,#c828c8)">
                 <span class="layer-swatch"></span><span><b>Precipitazioni</b><small>accumulo del passo</small></span>
               </button>
-              <button class="layer-card" type="button" data-layer="cloud" style="--swatch: linear-gradient(90deg,#f1f5f6,#bbc8cd,#39464d)">
+              <button class="layer-card" type="button" data-layer="cloud" style="--swatch: linear-gradient(90deg,#d2dce8,#8c9eb6,#343e55)">
                 <span class="layer-swatch"></span><span><b>Nuvolosità</b><small>copertura totale</small></span>
               </button>
-              <button class="layer-card" type="button" data-layer="rh" style="--swatch: linear-gradient(90deg,#704025,#d9b96e,#79b99e,#274b8f)">
+              <button class="layer-card" type="button" data-layer="rh" style="--swatch: linear-gradient(90deg,#8c5028,#eedaa1,#2da0ac,#1c4ea0)">
                 <span class="layer-swatch"></span><span><b>Umidità</b><small>relativa</small></span>
               </button>
               <button class="layer-card" type="button" data-layer="wetbulb" style="--swatch: linear-gradient(#3656a8,#7fc9a8,#e8a33d)">
@@ -3201,24 +3201,29 @@
         return bands;
       }
 
+      // Scala "turbo", scelta il 02/11/2026 fra tre proposte provate sulla
+      // mappa vera: alto contrasto nelle temperature che in Italia capitano
+      // davvero, verde-giallo-arancio fra 6 e 24 gradi, dove la scala
+      // precedente era un'unica distesa giallo-olivastra. Il salto fra 0 e
+      // 0,85 gradi -- ciano [36,236,166] e verde [97,252,108] -- resta la linea
+      // del gelo: piu' tenue di prima, ma visibile.
       const TEMP_ANCHORS = [
-        // Scala fornita, espressa in kelvin e convertita qui in gradi
-        // Celsius una volta sola. Il salto fra 273,15 K e 274 K -- blu
-        // [93,133,198] e verde [68,125,99] in meno di un kelvin -- non e' un
-        // artefatto: e' la linea del gelo, e va conservata cosi' com'e'.
-        { v: -70.15, c: [115, 70, 105] },
-        { v: -55.15, c: [202, 172, 195] },
-        { v: -40.15, c: [162, 70, 145] },
-        { v: -25.15, c: [143, 89, 169] },
-        { v: -15.15, c: [157, 219, 217] },
-        { v: -8.15, c: [106, 191, 181] },
-        { v: -4.15, c: [100, 166, 189] },
-        { v: 0, c: [93, 133, 198] },
-        { v: 0.85, c: [68, 125, 99] },
-        { v: 9.85, c: [128, 147, 24] },
-        { v: 20.85, c: [243, 183, 4] },
-        { v: 29.85, c: [232, 83, 25] },
-        { v: 46.85, c: [71, 14, 0] }
+        { v: -70.15, c: [30, 10, 45] },
+        { v: -55.15, c: [48, 18, 59] },
+        { v: -40.15, c: [60, 40, 120] },
+        { v: -25.15, c: [65, 69, 171] },
+        { v: -15.15, c: [70, 117, 237] },
+        { v: -8.15, c: [57, 162, 252] },
+        { v: -4.15, c: [27, 207, 212] },
+        { v: 0, c: [36, 236, 166] },
+        { v: 0.85, c: [97, 252, 108] },
+        { v: 6, c: [164, 252, 59] },
+        { v: 12, c: [209, 232, 52] },
+        { v: 18, c: [243, 198, 58] },
+        { v: 24, c: [254, 155, 45] },
+        { v: 30, c: [243, 99, 21] },
+        { v: 38, c: [199, 47, 5] },
+        { v: 46.85, c: [122, 4, 3] }
       ];
       const TEMP_BANDS = buildDiscreteBands(TEMP_ANCHORS, -76, 46, 2, 1, true);
       // La stessa scala, ma SFUMATA: e' quella delle carte che si leggono a
@@ -3243,31 +3248,24 @@
       // definita sul vento MEDIO, non sulla raffica. Era gia' la scala giusta
       // per il vento medio, applicata al campo sbagliato.
       //
-      // Un cambio di colore E' un salto di grado, e i tre gradini che fanno
-      // danni -- 50, 75, 103 km/h -- si riconoscono senza leggere la legenda.
-      // Misurato in CAM02-UCS: distanza minima fra fasce adiacenti 7,6, e 4,9
-      // simulando il daltonismo piu' penalizzante. Il salto piu' grande, 26,4,
-      // cade a 50 km/h: la prima soglia che si nota davvero.
-      //
-      // Ai gradi bassi non si aggiungono fasce, per quanto il vento medio in
-      // Italia viva quasi sempre sotto i 20 km/h. Fra il bianco della calma e
-      // il verde acqua dei 20 km/h ci sono 20,5 unita' CAM02-UCS in tutto:
-      // quattro fasce disterebbero 5,1 l'una dall'altra, sotto la soglia di
-      // 7,6 che questa scala si e' data e sotto i 4,9 del daltonismo. Sarebbero
-      // fasce che non si distinguono, cioe' dettaglio solo apparente.
+      // Un cambio di colore E' un salto di grado. I colori, scelti il
+      // 02/11/2026, vanno dal blu della calma al verde acqua dei venti
+      // moderati, e dal giallo dei 50 km/h (vento forte) passano ad arancio,
+      // rosso e viola: le soglie che fanno danni -- 50, 75, 103 km/h -- cadono
+      // tutte nella meta' calda della scala e si riconoscono senza legenda.
       const WIND_SPEED_STOPS = [
-        { v: 0, c: [236, 242, 244] },
-        { v: 12, c: [206, 232, 226] },
-        { v: 20, c: [160, 214, 200] },
-        { v: 29, c: [108, 190, 176] },
-        { v: 39, c: [96, 176, 118] },
-        { v: 50, c: [214, 199, 74] },
-        { v: 62, c: [232, 155, 53] },
-        { v: 75, c: [222, 106, 47] },
-        { v: 89, c: [199, 56, 56] },
-        { v: 103, c: [160, 28, 74] },
-        { v: 118, c: [110, 30, 110] },
-        { v: 140, c: [70, 22, 92] }
+        { v: 0, c: [44, 72, 130] },
+        { v: 12, c: [52, 110, 170] },
+        { v: 20, c: [60, 150, 190] },
+        { v: 29, c: [70, 185, 175] },
+        { v: 39, c: [120, 200, 120] },
+        { v: 50, c: [220, 215, 80] },
+        { v: 62, c: [245, 170, 60] },
+        { v: 75, c: [235, 110, 50] },
+        { v: 89, c: [210, 55, 60] },
+        { v: 103, c: [160, 30, 90] },
+        { v: 118, c: [120, 30, 130] },
+        { v: 140, c: [80, 20, 110] }
       ];
 
       // Probabilita'. Una grandezza sola, quindi una scala sola, usata da
@@ -3327,35 +3325,35 @@
 
       const RAIN_STOPS = [
         { v: 0, c: [0, 0, 0], a: 0 },
-        { v: 0.1, c: [213, 240, 255], a: 0.78 },
-        { v: 0.5, c: [134, 210, 255], a: 0.9 },
-        { v: 1, c: [57, 168, 242], a: 0.95 },
-        { v: 2, c: [37, 102, 212], a: 0.98 },
-        { v: 4, c: [32, 180, 134], a: 0.98 },
-        { v: 10, c: [242, 211, 79], a: 1 },
-        { v: 20, c: [242, 142, 43], a: 1 },
-        { v: 40, c: [214, 69, 69], a: 1 },
-        { v: 80, c: [142, 47, 143], a: 1 }
+        { v: 0.1, c: [160, 220, 255], a: 0.72 },
+        { v: 0.5, c: [90, 180, 250], a: 0.86 },
+        { v: 1, c: [40, 130, 240], a: 0.93 },
+        { v: 2, c: [30, 90, 210], a: 0.97 },
+        { v: 4, c: [40, 190, 90], a: 0.98 },
+        { v: 10, c: [250, 230, 50], a: 1 },
+        { v: 20, c: [250, 150, 30], a: 1 },
+        { v: 40, c: [230, 40, 40], a: 1 },
+        { v: 80, c: [200, 40, 200], a: 1 }
       ];
 
       const CLOUD_ANCHORS = [
-        { v: 0, c: [247, 250, 250], a: 0 },
-        { v: 10, c: [241, 245, 246], a: 0.28 },
-        { v: 30, c: [221, 230, 233], a: 0.62 },
-        { v: 50, c: [187, 200, 205], a: 0.78 },
-        { v: 70, c: [139, 154, 162], a: 0.88 },
-        { v: 90, c: [91, 105, 113], a: 0.95 },
-        { v: 100, c: [57, 70, 77], a: 0.99 }
+        { v: 0, c: [230, 236, 244], a: 0 },
+        { v: 10, c: [210, 220, 232], a: 0.3 },
+        { v: 30, c: [175, 190, 210], a: 0.55 },
+        { v: 50, c: [140, 158, 182], a: 0.72 },
+        { v: 70, c: [105, 122, 150], a: 0.84 },
+        { v: 90, c: [75, 88, 115], a: 0.92 },
+        { v: 100, c: [52, 62, 85], a: 0.97 }
       ];
       const CLOUD_STOPS = buildDiscreteBands(CLOUD_ANCHORS, 0, 100, 10);
 
       const RH_ANCHORS = [
-        { v: 0, c: [112, 64, 37] },
-        { v: 20, c: [185, 120, 62] },
-        { v: 40, c: [217, 185, 110] },
-        { v: 60, c: [121, 185, 158] },
-        { v: 80, c: [42, 145, 163] },
-        { v: 100, c: [39, 75, 143] }
+        { v: 0, c: [140, 80, 40] },
+        { v: 20, c: [205, 140, 70] },
+        { v: 40, c: [238, 218, 145] },
+        { v: 60, c: [140, 210, 150] },
+        { v: 80, c: [45, 160, 172] },
+        { v: 100, c: [28, 78, 160] }
       ];
       const RH_STOPS = buildDiscreteBands(RH_ANCHORS, 0, 100, 5, 1);
 
