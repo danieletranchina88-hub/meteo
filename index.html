@@ -2407,12 +2407,12 @@
         /* Un solo accento. Azzurro e non corallo: sulla carta il caldo e'
            gia' arancione e rosso, e un comando arancione si confondeva con
            la temperatura sotto. */
-        --ar-accento: #e8edf2;
-        --ar-accento-forte: #ffffff;
-        --ar-accento-velo: rgba(232, 237, 242, .17);
-        --ar-accento-filo: rgba(232, 237, 242, .5);
-        --ar-accento-testo: #ffffff;
-        --ar-su-accento: #0b141d;
+        --ar-accento: #46b4e6;
+        --ar-accento-forte: #74c9f0;
+        --ar-accento-velo: rgba(70, 180, 230, .17);
+        --ar-accento-filo: rgba(70, 180, 230, .5);
+        --ar-accento-testo: #c9ecfc;
+        --ar-su-accento: #06141f;
         --ar-vetro: rgba(16, 22, 30, .7);
         --ar-vetro-pieno: rgba(16, 22, 30, .88);
         --ar-filo: rgba(255, 255, 255, .1);
@@ -2456,7 +2456,7 @@
       /* Il bottone principale (Livelli sul PC, menu sul telefono). */
       body #drawer-button, body #drawer-button:hover {
         background: var(--ar-accento); color: var(--ar-su-accento);
-        box-shadow: 0 6px 20px rgba(232, 237, 242, .32), var(--ar-luce);
+        box-shadow: 0 6px 20px rgba(70, 180, 230, .32), var(--ar-luce);
       }
       body #drawer-button:hover { background: var(--ar-accento-forte); }
       body .am-tondo[aria-pressed="true"] { background: var(--ar-accento); color: var(--ar-su-accento); }
@@ -2472,7 +2472,7 @@
       /* Ricerca: anello d'accento quando si scrive. */
       body #place-search:focus-within {
         border-color: var(--ar-accento-filo);
-        box-shadow: 0 0 0 3px rgba(232, 237, 242, .16), var(--ar-ombra);
+        box-shadow: 0 0 0 3px rgba(70, 180, 230, .16), var(--ar-ombra);
       }
       body #place-query::placeholder { color: rgba(226, 236, 246, .58); }
 
@@ -2482,7 +2482,7 @@
       }
       body #play-button {
         border-radius: 50%; background: var(--ar-accento); color: var(--ar-su-accento);
-        box-shadow: 0 0 0 4px rgba(232, 237, 242, .16);
+        box-shadow: 0 0 0 4px rgba(70, 180, 230, .16);
       }
       body #play-button:hover { background: var(--ar-accento-forte); }
       body #time-label { font-size: 13px; font-weight: 600; letter-spacing: .01em; }
@@ -2490,7 +2490,7 @@
       body #timeline-days button { color: rgba(226, 236, 246, .72); font-weight: 600; letter-spacing: .02em; }
       body #timeline-days button:hover { color: #fff; }
       body .speed-controls button.active { background: var(--ar-accento-velo); color: var(--ar-accento-testo); }
-      body #timeline-buffer i.ready { background: rgba(232, 237, 242, .55); }
+      body #timeline-buffer i.ready { background: rgba(70, 180, 230, .55); }
 
       /* Il cursore del tempo: una pista sottile e una manopola bianca con
          l'anello d'accento, al posto del cursore di sistema. */
@@ -2514,7 +2514,7 @@
         box-shadow: 0 2px 6px rgba(0, 0, 0, .45);
       }
       body #time-slider:focus-visible { outline: none; }
-      body #time-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 5px rgba(232, 237, 242, .3); }
+      body #time-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 5px rgba(70, 180, 230, .3); }
 
       /* Zoom: stesso vetro degli altri comandi. */
       body .maplibregl-ctrl-group {
@@ -2744,7 +2744,7 @@
               <button class="layer-card map-only" type="button" data-layer="none" aria-pressed="false">
                 <span class="layer-swatch"></span><span><b>Solo carta</b><small>nessun campo o analisi sovrapposta</small></span>
               </button>
-              <button class="layer-card active" type="button" data-layer="temp" style="--swatch: linear-gradient(#61fc6c,#f3c63a,#c72f05)">
+              <button class="layer-card active" type="button" data-layer="temp" style="--swatch: linear-gradient(#6ec85a,#fad23c,#e13c28)">
                 <span class="layer-swatch"></span><span><b>Temperatura</b><small>a 2 metri</small></span>
               </button>
               <button class="layer-card" type="button" data-layer="feels" style="--swatch: linear-gradient(#ffcd3a,#e24078)">
@@ -2756,10 +2756,10 @@
               <button class="layer-card" type="button" data-layer="gust" style="--swatch: linear-gradient(90deg,#cee8e2,#6cbeb0,#60b076,#d6c74a,#de6a2f,#a01c4a,#6e1e6e)">
                 <span class="layer-swatch"></span><span><b>Raffiche</b><small>a 10 metri · scala Beaufort</small></span>
               </button>
-              <button class="layer-card" type="button" data-layer="rain" style="--swatch: linear-gradient(90deg,#a0dcff,#2882f0,#28be5a,#fae632,#e62828,#c828c8)">
+              <button class="layer-card" type="button" data-layer="rain" style="--swatch: linear-gradient(90deg,#cde4fa,#699be8,#3c48c0,#aa28a0,#dc286e,#78003c)">
                 <span class="layer-swatch"></span><span><b>Precipitazioni</b><small>accumulo del passo</small></span>
               </button>
-              <button class="layer-card" type="button" data-layer="cloud" style="--swatch: linear-gradient(90deg,#d2dce8,#8c9eb6,#343e55)">
+              <button class="layer-card" type="button" data-layer="cloud" style="--swatch: linear-gradient(90deg,#60a0dc,#cddcec,#a0a8b2)">
                 <span class="layer-swatch"></span><span><b>Nuvolosità</b><small>copertura totale</small></span>
               </button>
               <button class="layer-card" type="button" data-layer="rh" style="--swatch: linear-gradient(90deg,#8c5028,#eedaa1,#2da0ac,#1c4ea0)">
@@ -3201,29 +3201,28 @@
         return bands;
       }
 
-      // Scala "turbo", scelta il 02/11/2026 fra tre proposte provate sulla
-      // mappa vera: alto contrasto nelle temperature che in Italia capitano
-      // davvero, verde-giallo-arancio fra 6 e 24 gradi, dove la scala
-      // precedente era un'unica distesa giallo-olivastra. Il salto fra 0 e
-      // 0,85 gradi -- ciano [36,236,166] e verde [97,252,108] -- resta la linea
-      // del gelo: piu' tenue di prima, ma visibile.
+      // Scala "arcobaleno vivo", scelta il 03/11/2026 fra le proposte provate
+      // sulla mappa vera: viola e blu nel freddo, verde, giallo e arancio fra
+      // 6 e 24 gradi, rosso e vino nel caldo estremo. Il salto fra 0 e 0,85
+      // gradi -- celeste ghiaccio [150,225,250] e verde [55,180,120] -- e' la
+      // linea del gelo, e va conservato.
       const TEMP_ANCHORS = [
-        { v: -70.15, c: [30, 10, 45] },
-        { v: -55.15, c: [48, 18, 59] },
-        { v: -40.15, c: [60, 40, 120] },
-        { v: -25.15, c: [65, 69, 171] },
-        { v: -15.15, c: [70, 117, 237] },
-        { v: -8.15, c: [57, 162, 252] },
-        { v: -4.15, c: [27, 207, 212] },
-        { v: 0, c: [36, 236, 166] },
-        { v: 0.85, c: [97, 252, 108] },
-        { v: 6, c: [164, 252, 59] },
-        { v: 12, c: [209, 232, 52] },
-        { v: 18, c: [243, 198, 58] },
-        { v: 24, c: [254, 155, 45] },
-        { v: 30, c: [243, 99, 21] },
-        { v: 38, c: [199, 47, 5] },
-        { v: 46.85, c: [122, 4, 3] }
+        { v: -70.15, c: [60, 20, 70] },
+        { v: -55.15, c: [110, 40, 130] },
+        { v: -40.15, c: [150, 40, 160] },
+        { v: -25.15, c: [80, 50, 180] },
+        { v: -15.15, c: [40, 95, 205] },
+        { v: -8.15, c: [45, 150, 230] },
+        { v: -4.15, c: [85, 190, 240] },
+        { v: 0, c: [150, 225, 250] },
+        { v: 0.85, c: [55, 180, 120] },
+        { v: 6, c: [110, 200, 90] },
+        { v: 12, c: [190, 220, 70] },
+        { v: 18, c: [250, 210, 60] },
+        { v: 24, c: [248, 150, 40] },
+        { v: 30, c: [225, 60, 40] },
+        { v: 38, c: [160, 15, 60] },
+        { v: 46.85, c: [90, 0, 40] }
       ];
       const TEMP_BANDS = buildDiscreteBands(TEMP_ANCHORS, -76, 46, 2, 1, true);
       // La stessa scala, ma SFUMATA: e' quella delle carte che si leggono a
@@ -3325,25 +3324,25 @@
 
       const RAIN_STOPS = [
         { v: 0, c: [0, 0, 0], a: 0 },
-        { v: 0.1, c: [160, 220, 255], a: 0.72 },
-        { v: 0.5, c: [90, 180, 250], a: 0.86 },
-        { v: 1, c: [40, 130, 240], a: 0.93 },
-        { v: 2, c: [30, 90, 210], a: 0.97 },
-        { v: 4, c: [40, 190, 90], a: 0.98 },
-        { v: 10, c: [250, 230, 50], a: 1 },
-        { v: 20, c: [250, 150, 30], a: 1 },
-        { v: 40, c: [230, 40, 40], a: 1 },
-        { v: 80, c: [200, 40, 200], a: 1 }
+        { v: 0.1, c: [205, 228, 250], a: 0.72 },
+        { v: 0.5, c: [155, 195, 242], a: 0.86 },
+        { v: 1, c: [105, 155, 232], a: 0.93 },
+        { v: 2, c: [70, 112, 214], a: 0.97 },
+        { v: 4, c: [60, 72, 192], a: 0.98 },
+        { v: 10, c: [112, 52, 182], a: 1 },
+        { v: 20, c: [170, 40, 160], a: 1 },
+        { v: 40, c: [220, 40, 110], a: 1 },
+        { v: 80, c: [120, 0, 60], a: 1 }
       ];
 
       const CLOUD_ANCHORS = [
-        { v: 0, c: [230, 236, 244], a: 0 },
-        { v: 10, c: [210, 220, 232], a: 0.3 },
-        { v: 30, c: [175, 190, 210], a: 0.55 },
-        { v: 50, c: [140, 158, 182], a: 0.72 },
-        { v: 70, c: [105, 122, 150], a: 0.84 },
-        { v: 90, c: [75, 88, 115], a: 0.92 },
-        { v: 100, c: [52, 62, 85], a: 0.97 }
+        { v: 0, c: [96, 160, 220], a: 0.72 },
+        { v: 10, c: [120, 175, 226], a: 0.76 },
+        { v: 30, c: [170, 200, 232], a: 0.82 },
+        { v: 50, c: [205, 220, 236], a: 0.88 },
+        { v: 70, c: [225, 231, 238], a: 0.92 },
+        { v: 90, c: [200, 206, 214], a: 0.95 },
+        { v: 100, c: [160, 168, 178], a: 0.97 }
       ];
       const CLOUD_STOPS = buildDiscreteBands(CLOUD_ANCHORS, 0, 100, 10);
 
