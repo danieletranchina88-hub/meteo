@@ -25,32 +25,32 @@ def js(anchors, indent=8):
 
 out = {}
 
-# --- Temperatura: scala "turbo", in kelvin ----------------------------------
-# Scelta il 02/11/2026 fra tre proposte provate sulla mappa vera: alto
-# contrasto fra 6 e 24 gradi, le temperature che in Italia capitano davvero.
-# Le posizioni degli ancoraggi fanno parte della scala quanto i colori.
+# --- Temperatura: scala "arcobaleno vivo", in kelvin ------------------------
+# Scelta il 03/11/2026 fra le proposte provate sulla mappa vera: viola e blu
+# nel freddo, verde, giallo e arancio fra 6 e 24 gradi, rosso e vino nel caldo
+# estremo. Le posizioni degli ancoraggi fanno parte della scala quanto i colori.
 #
-# Il salto fra 273,15 K e 274 K -- ciano [36,236,166] e verde [97,252,108] in
-# meno di un kelvin -- e' la linea del gelo e va conservato. Perche' cada
-# davvero a zero, le fasce discrete del sito vanno campionate al centro e non
-# al bordo inferiore: vedi ``sampleAtMidpoint`` in index.html.
+# Il salto fra 273,15 K e 274 K -- celeste ghiaccio [150,225,250] e verde
+# [55,180,120] in meno di un kelvin -- e' la linea del gelo e va conservato.
+# Perche' cada davvero a zero, le fasce discrete del sito vanno campionate al
+# centro e non al bordo inferiore: vedi ``sampleAtMidpoint`` in index.html.
 TEMPERATURE_KELVIN = [
-    (203.0, [30, 10, 45]),
-    (218.0, [48, 18, 59]),
-    (233.0, [60, 40, 120]),
-    (248.0, [65, 69, 171]),
-    (258.0, [70, 117, 237]),
-    (265.0, [57, 162, 252]),
-    (269.0, [27, 207, 212]),
-    (273.15, [36, 236, 166]),
-    (274.0, [97, 252, 108]),
-    (279.15, [164, 252, 59]),
-    (285.15, [209, 232, 52]),
-    (291.15, [243, 198, 58]),
-    (297.15, [254, 155, 45]),
-    (303.15, [243, 99, 21]),
-    (311.15, [199, 47, 5]),
-    (320.0, [122, 4, 3]),
+    (203.0, [60, 20, 70]),
+    (218.0, [110, 40, 130]),
+    (233.0, [150, 40, 160]),
+    (248.0, [80, 50, 180]),
+    (258.0, [40, 95, 205]),
+    (265.0, [45, 150, 230]),
+    (269.0, [85, 190, 240]),
+    (273.15, [150, 225, 250]),
+    (274.0, [55, 180, 120]),
+    (279.15, [110, 200, 90]),
+    (285.15, [190, 220, 70]),
+    (291.15, [250, 210, 60]),
+    (297.15, [248, 150, 40]),
+    (303.15, [225, 60, 40]),
+    (311.15, [160, 15, 60]),
+    (320.0, [90, 0, 40]),
 ]
 out["TEMP_ANCHORS"] = [
     {"v": round(kelvin - 273.15, 2), "c": colour}
@@ -148,25 +148,25 @@ out["ALTITUDE_STOPS"] = [
 
 out["RAIN_STOPS"] = [
     {"v": 0, "c": [0, 0, 0], "a": 0},
-    {"v": 0.1, "c": [160, 220, 255], "a": 0.72},
-    {"v": 0.5, "c": [90, 180, 250], "a": 0.86},
-    {"v": 1, "c": [40, 130, 240], "a": 0.93},
-    {"v": 2, "c": [30, 90, 210], "a": 0.97},
-    {"v": 4, "c": [40, 190, 90], "a": 0.98},
-    {"v": 10, "c": [250, 230, 50], "a": 1},
-    {"v": 20, "c": [250, 150, 30], "a": 1},
-    {"v": 40, "c": [230, 40, 40], "a": 1},
-    {"v": 80, "c": [200, 40, 200], "a": 1},
+    {"v": 0.1, "c": [205, 228, 250], "a": 0.72},
+    {"v": 0.5, "c": [155, 195, 242], "a": 0.86},
+    {"v": 1, "c": [105, 155, 232], "a": 0.93},
+    {"v": 2, "c": [70, 112, 214], "a": 0.97},
+    {"v": 4, "c": [60, 72, 192], "a": 0.98},
+    {"v": 10, "c": [112, 52, 182], "a": 1},
+    {"v": 20, "c": [170, 40, 160], "a": 1},
+    {"v": 40, "c": [220, 40, 110], "a": 1},
+    {"v": 80, "c": [120, 0, 60], "a": 1},
 ]
 
 out["CLOUD_ANCHORS"] = [
-    {"v": 0, "c": [230, 236, 244], "a": 0},
-    {"v": 10, "c": [210, 220, 232], "a": 0.3},
-    {"v": 30, "c": [175, 190, 210], "a": 0.55},
-    {"v": 50, "c": [140, 158, 182], "a": 0.72},
-    {"v": 70, "c": [105, 122, 150], "a": 0.84},
-    {"v": 90, "c": [75, 88, 115], "a": 0.92},
-    {"v": 100, "c": [52, 62, 85], "a": 0.97},
+    {"v": 0, "c": [96, 160, 220], "a": 0.72},
+    {"v": 10, "c": [120, 175, 226], "a": 0.76},
+    {"v": 30, "c": [170, 200, 232], "a": 0.82},
+    {"v": 50, "c": [205, 220, 236], "a": 0.88},
+    {"v": 70, "c": [225, 231, 238], "a": 0.92},
+    {"v": 90, "c": [200, 206, 214], "a": 0.95},
+    {"v": 100, "c": [160, 168, 178], "a": 0.97},
 ]
 
 out["RH_ANCHORS"] = [
