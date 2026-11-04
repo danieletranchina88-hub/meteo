@@ -240,7 +240,7 @@ function ambienteSatellite() {
     document: { hidden: false }, cloudProduct: 'geocolour',
     CLOUD_PRODUCTS: { geocolour: product }, cloudToken: 0,
     CLOUD_MAX_PASSI_INDIETRO: 2, cloudFrames: new Map(),
-    showRadar: false, cloudPublishedKey: '',
+    showRadar: false, cloudPublishedKey: '', cloudForecastStep: 0,
     URL: { revokeObjectURL: u => revocati.push(u) },
     setTimeout: fn => fn(),
     map: { getSource: () => source, setPaintProperty: () => {} },
@@ -304,7 +304,7 @@ provaAsync('i tasselli: istante nell\'URL, vecchi nascosti subito, nuovi solo a 
   const visibilita = [], setTiles = [];
   let sorgente = null;
   const ctx = {
-    window: { devicePixelRatio: 1 },
+    window: { devicePixelRatio: 1 }, cloudForecastStep: 0,
     CLOUD_DOMAIN: { west: -40, south: 26, east: 42, north: 68 },
     setTimeout: fn => { timers.push(fn); return timers.length; },
     clearTimeout: () => {},

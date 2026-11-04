@@ -321,29 +321,146 @@ body.clean-mode #place-search, body.clean-mode #quick-layers, body.clean-mode #v
 }
 #satellite-controls .level-picker select { width: 100%; max-width: none; }
 #satellite-controls .level-picker label { font-size: 11px; }
-#satellite-controls .sat-time {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* ---- Barra del tempo del satellite --------------------------------
+   In fondo, larga quanto lo schermo, al posto della barra della
+   previsione (che in vista satellite e' nascosta). Sotto il cursore una
+   tacca per istante: accesa quando il fotogramma e' gia' in memoria.
+   Dopo il segno "ora" i passi di previsione delle nubi, in viola. */
+.sat-bar {
+  display: none;
+  position: fixed;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  bottom: var(--safe-bottom, 0px);
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px 7px 10px;
+  color: #fff;
+  background: var(--ar-vetro-pieno, rgba(16, 22, 30, 0.9));
+  border-top: 1px solid var(--ar-filo, rgba(255, 255, 255, 0.1));
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
 }
-#satellite-controls .sat-scrub { display: block; }
-#satellite-scrub {
-  width: 100%;
-  margin: 0;
-  accent-color: #f0704f;
+body.satellite-view .sat-bar { display: flex; }
+.sat-play {
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ar-accento, #46b4e6);
+  color: var(--ar-su-accento, #06141f);
+  box-shadow: 0 0 0 4px rgba(70, 180, 230, 0.16);
   cursor: pointer;
 }
-#satellite-controls .sat-scrub-row {
+.sat-play:hover { background: var(--ar-accento-forte, #74c9f0); }
+.sat-play svg { width: 18px; height: 18px; fill: currentColor; stroke: none; }
+.sat-play .sat-play-off, .sat-play.in-corso .sat-play-on { display: none; }
+.sat-play.in-corso .sat-play-off { display: inline; }
+.sat-bar .sat-time {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sat-bar .sat-scrub { position: relative; display: block; height: 24px; }
+.sat-buffer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 5px;
+  margin-top: -2.5px;
+  display: flex;
+  gap: 1px;
+  pointer-events: none;
+}
+.sat-buffer i { flex: 1; border-radius: 1px; background: rgba(255, 255, 255, 0.13); }
+.sat-buffer i.pronto { background: rgba(70, 180, 230, 0.62); }
+.sat-buffer i.futuro { background: rgba(185, 160, 255, 0.12); }
+.sat-buffer i.futuro.pronto { background: rgba(185, 160, 255, 0.66); }
+.sat-ora {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+#satellite-scrub {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  accent-color: var(--ar-accento, #46b4e6);
+  cursor: pointer;
+}
+#satellite-scrub::-webkit-slider-runnable-track { height: 5px; background: transparent; }
+#satellite-scrub::-moz-range-track { height: 5px; background: transparent; }
+#satellite-scrub::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6.5px;
+  border: 3px solid var(--ar-accento, #46b4e6);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+#satellite-scrub::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 3px solid var(--ar-accento, #46b4e6);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+#satellite-scrub:focus-visible { outline: none; }
+#satellite-scrub:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 5px rgba(70, 180, 230, 0.3); }
+/* In previsione la manopola prende il colore dei passi previsti. */
+.sat-bar.previsione #satellite-scrub::-webkit-slider-thumb { border-color: #b9a0ff; }
+.sat-bar.previsione #satellite-scrub::-moz-range-thumb { border-color: #b9a0ff; }
+.sat-bar .sat-scrub-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   font-size: 11px;
   line-height: 1.3;
+  min-width: 0;
 }
 #satellite-scrub-label {
-  opacity: 0.82;
+  font-size: 12px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.sat-bar.previsione #satellite-scrub-label { color: #d6c9ff; }
+.sat-legenda {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(226, 236, 246, 0.66);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.sat-legenda i { width: 9px; height: 5px; border-radius: 1px; background: rgba(70, 180, 230, 0.62); }
+.sat-legenda i.prev { margin-left: 6px; background: rgba(185, 160, 255, 0.66); }
 .sat-live {
   flex: none;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -356,13 +473,18 @@ body.clean-mode #place-search, body.clean-mode #quick-layers, body.clean-mode #v
   cursor: pointer;
 }
 /* Acceso solo quando si e' davvero in diretta: e' l'unico modo per sapere,
-   guardando il pannello, se l'immagine sta seguendo il satellite o se e'
+   guardando la barra, se l'immagine sta seguendo il satellite o se e'
    ferma su un istante scelto. */
 .sat-live.active {
-  background: #f0704f;
-  border-color: #f0704f;
-  color: #17110f;
+  background: var(--ar-accento, #46b4e6);
+  border-color: var(--ar-accento, #46b4e6);
+  color: var(--ar-su-accento, #06141f);
   font-weight: 600;
+}
+@media (max-width: 620px) {
+  .sat-bar { gap: 9px; padding: 6px 10px 6px 8px; }
+  .sat-legenda { display: none; }
+  .sat-bar .sat-scrub-row { justify-content: space-between; }
 }
 
 

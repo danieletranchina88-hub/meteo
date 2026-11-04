@@ -36,7 +36,7 @@ function tabella(nome) {
 }
 
 const codice = [
-  'STRIKE_LIFE_MS', 'STRIKE_MAX', 'STRIKE_PING_MS',
+  'STRIKE_LIFE_MS', 'STRIKE_MAX', 'STRIKE_GLIFO_MS', 'STRIKE_PING_MS',
   'STRIKE_ACTIVITY_TAU_MS', 'STRIKE_ACTIVITY_RADIUS_KM',
   'STRIKE_CELL_LAT', 'STRIKE_CELL_LON', 'STRIKE_ACTIVITY_MAX',
   'ATTIVITA_LAMPO_MS', 'ATTIVITA_SALITA_MS', 'ATTIVITA_PICCO_MS',
@@ -44,6 +44,7 @@ const codice = [
   'SFONDO_NOTTE', 'SFONDO_GIORNO', 'CHIARORE_LATO'
 ].map(costante).join('\n')
   + '\n' + tabella('TINTE_NOTTE') + '\n' + tabella('TINTE_GIORNO')
+  + '\n' + tabella('ETA_SCARICA_TAPPE')
   + '\nconst clamp = (v, a, b) => Math.max(a, Math.min(b, v));\n'
   + [
     'tempoScaricaMillis', 'supportoRete', 'stileEtaScarica',
@@ -260,6 +261,26 @@ prova('colore e opacita raccontano soltanto eta del dato', () => {
     'dopo un minuto il colore non vira verso il caldo');
   assert.ok(vecchia.alfa < media.alfa && media.alfa <= nuova.alfa,
     'lopacita non cala con leta');
+});
+
+prova('la scia dura cinque minuti e si spegne alla fine', () => {
+  assert.equal(STRIKE_LIFE, 5 * 60 * 1000, 'la scia non dura piu cinque minuti');
+  const quattro = modulo.stileEtaScarica(4 * 60 * 1000);
+  const fine = modulo.stileEtaScarica(STRIKE_LIFE);
+  assert.ok(quattro.alfa > 0.5, 'a quattro minuti la scarica e gia quasi sparita');
+  assert.ok(fine.alfa < 0.02, 'alla fine dei cinque minuti la scarica non si spegne');
+  assert.ok(modulo.stileEtaScarica(150000).colore[1] < modulo.stileEtaScarica(60000).colore[1],
+    'invecchiando il colore non scende dal giallo verso il rosso');
+  // Il simbolo grande e' solo per le fresche; la scia vale a ogni zoom.
+  for (const zoom of [4, 7, 10]) {
+    assert.ok(modulo.limiteSegni(zoom).eta <= 60000, 'simboli grandi anche per scariche vecchie');
+  }
+  const giro = implementazione('drawLiveStrikes');
+  assert.match(giro, /disegnaScia\(context, punti, adessoEpoca, scala\);[\s\S]*limiteSegni/,
+    'la scia non viene disegnata sotto i simboli');
+  const scia = implementazione('disegnaScia');
+  assert.match(scia, /eta >= STRIKE_LIFE_MS/, 'la scia non rispetta la vita della scarica');
+  assert.match(scia, /stileEtaScarica\(/, 'la scia non usa il colore delleta');
 });
 
 prova('il supporto di rete e logaritmico e non viene spacciato per probabilita', () => {

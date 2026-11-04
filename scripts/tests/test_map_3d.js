@@ -1904,7 +1904,7 @@ assert.match(html, /const CAPE_STOPS = \[\s*\{ v: 0, c: \[238, 244, 240\], a: 0 
   assert.ok(!/host\.innerHTML\s*=/.test(costruisci[0]),
     "la barra del tempo torna a svuotare il contenitore, cancellando il "
     + "selettore del prodotto satellitare che modern-ui.js ci sposta dentro");
-  assert.match(costruisci[0], /host\.appendChild\(/,
+  assert.match(costruisci[0], /(host|document\.body)\.appendChild\(/,
     "la barra del tempo non si aggiunge al contenitore");
 
   const interfaccia = fs.readFileSync(path.join(root, "modern-ui.js"), "utf8");
@@ -1929,12 +1929,18 @@ assert.match(html, /const CAPE_STOPS = \[\s*\{ v: 0, c: \[238, 244, 240\], a: 0 
     "lo scorrimento non prova piu' la cache delle nubi prima della rete");
   assert.match(scorrimento[0], /pubblicaLightningInCache\(\)/,
     "lo scorrimento non prova la cache dei fulmini prima della rete");
-  // Il precaricamento deve restare UNO ALLA VOLTA e distanziato, o brucia
-  // l'intera finestra di richieste del servizio in un gesto.
+  // Il precaricamento va in parallelo (uno alla volta, a ~3 s a richiesta,
+  // riempiva le 6 ore in due minuti) ma con un tetto, una pausa fra un
+  // avvio e l'altro e un freno al primo errore: senza, un gesto
+  // brucerebbe l'intera finestra di richieste del servizio.
   assert.match(html, /const CLOUD_PREFETCH_GAP_MS = \d{3,};/,
     "il precaricamento non ha piu' una pausa fra una richiesta e l'altra");
-  assert.match(html, /if \(cloudPrefetchTimer \|\| cloudPrefetchBusy\) return;/,
-    "il precaricamento puo' partire in parallelo con se stesso");
+  assert.match(html, /const CLOUD_PREFETCH_PARALLEL = isMobile\(\) \? [1-4] : [1-6];/,
+    "il precaricamento non ha piu' un tetto di richieste contemporanee");
+  assert.match(html, /if \(cloudPrefetchTimer \|\| cloudPrefetchActive >= cloudPrefetchLimit\) return;/,
+    "il precaricamento puo' superare il tetto di richieste contemporanee");
+  assert.match(html, /cloudPrefetchLimit = Math\.max\(1, Math\.floor\(cloudPrefetchLimit \/ 2\)\);\s*cloudPrefetchPauseUntil = Date\.now\(\) \+ CLOUD_PREFETCH_BACKOFF_MS;/,
+    "un errore del servizio non rallenta piu' il precaricamento");
   // Sfrattare il fotogramma in mostra ne libererebbe l'object URL, e la
   // mappa resterebbe vuota.
   assert.match(html, /if \(candidata !== cloudPublishedKey\s*&&\s*candidata !== lightningPublishedKey\)/,

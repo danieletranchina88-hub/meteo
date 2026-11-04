@@ -1998,7 +1998,8 @@
         display: none !important;
       }
 
-      body.clean-mode #timeline {
+      body.clean-mode #timeline,
+      body.clean-mode #sat-bar {
         opacity: 0.35;
       }
 
@@ -2359,7 +2360,8 @@
         body #timeline .speed-controls, body #lead-label { display: none; }
         body #timeline-days button { font-size: 10px; }
         #am-menu { right: 12px; bottom: calc(var(--am-legenda) + 76px + var(--safe-bottom)); }
-        body.satellite-view #am-menu { bottom: calc(24px + var(--safe-bottom)); }
+        body.satellite-view #am-menu { bottom: calc(78px + var(--safe-bottom)); }
+        body.satellite-view #toast { bottom: calc(86px + var(--safe-bottom)); }
 
         /* Lo zoom si fa con le dita. */
         body .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group { display: none; }
@@ -2662,7 +2664,7 @@
           </button>
           <button class="sat-layer" type="button" data-toggle="livelightning" aria-pressed="false">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"></path></svg>
-            <span><b>Scariche a terra · Live</b><small id="livelightning-note">Blitzortung · punti e tempi rilevati · traccia 150 s</small></span>
+            <span><b>Scariche a terra · Live</b><small id="livelightning-note">Blitzortung · punti e tempi rilevati · scia 5 min</small></span>
           </button>
           <button class="sat-layer" type="button" data-toggle="lightning" aria-pressed="false">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5a10 10 0 0 1 10 10 M4 9a5.5 5.5 0 0 1 5.5 5.5 M14.5 4 11 9.5h2.8L12 14l4.5-6h-2.9L14.5 4Z M4.5 19.5h.01"></path></svg>
@@ -6022,6 +6024,13 @@
       // capabilities, quindi chiedere il passato e' un'operazione prevista dal
       // servizio, non un trucco.
       let cloudTimeSelected = 0;
+      // Passi di dieci minuti OLTRE l'ultima immagine osservata: zero e'
+      // l'osservato. Nove passi coprono un'ora e mezza dall'ultima immagine,
+      // che con i 20-30 minuti di latenza del servizio arrivano a circa
+      // un'ora da adesso. Mentre si guarda il futuro, cloudTimeSelected resta
+      // fermo sull'ultima immagine: e' la base da cui le nubi si spostano.
+      let cloudForecastStep = 0;
+      const CLOUD_FORECAST_STEPS = 9;
       // Quanto indietro si puo' andare. L'archivio del servizio copre mesi --
       // dal 23/09/2024 per l'infrarosso, dal 30/05/2025 per i fulmini -- ma
       // una barra lunga un anno non si governa con il pollice. Sei ore sono
@@ -6655,7 +6664,7 @@
         const base = map.getLayoutProperty("satellite-clouds-layer", "visibility");
         const pronti = !tasselliTimer;
         map.setLayoutProperty(SAT_TASSELLI_LAYER, "visibility",
-          base === "visible" && pronti ? "visible" : "none");
+          base === "visible" && pronti && !cloudForecastStep ? "visible" : "none");
       }
 
       // Cambiando istante i tasselli vecchi si nascondono SUBITO -- mostrare
@@ -6960,6 +6969,10 @@
         // pesare sul servizio, si riprende alla prossima occasione.
         if (typeof document.hidden === "boolean" && document.hidden) return;
 
+        if (cloudForecastStep) {
+          if (!pubblicaPrevisioneNubi()) preparaPrevisioneNubi();
+          return;
+        }
         const product = CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour;
         // Si tiene fresca la dichiarazione a ogni tentativo: la chiamata e'
         // limitata a una ogni cinque minuti, quindi qui costa niente, ma
@@ -7051,9 +7064,16 @@
       ];
       // Quanto a lungo una scarica resta visibile. Il lampo vero dura
       // frazioni di secondo; qui il segno si trattiene perche' serve a vedere
-      // DOVE sta lavorando la cella, non a riprodurre la durata ottica.
-      const STRIKE_LIFE_MS = 150 * 1000;
-      const STRIKE_MAX = 400;
+      // DOVE sta lavorando la cella e dove si sta spostando: cinque minuti,
+      // come sulle mappe dei fulmini piu' usate. Il primo minuto e' il
+      // simbolo pieno, poi resta un punto che cambia colore con l'eta' e
+      // si spegne alla fine.
+      const STRIKE_LIFE_MS = 5 * 60 * 1000;
+      // Su tutta l'Europa un fronte temporalesco estivo ne manda anche cento
+      // al minuto: cinque minuti stanno larghi in quattromila.
+      const STRIKE_MAX = 4000;
+      // Il simbolo grande vale per la scarica fresca; dopo, punto.
+      const STRIKE_GLIFO_MS = 60 * 1000;
 
       let liveStrikes = [];
       let blitzSocket = null;
@@ -7312,31 +7332,36 @@
         return clamp(Math.log1p(quante) / Math.log(25), 0.3, 1);
       }
 
+      // Il colore e' l'eta' del dato, e nient'altro. Bianco appena arrivata,
+      // un lampo azzurro ghiaccio nei primi secondi, poi giallo, arancio e
+      // rosso via via che invecchia; negli ultimi 45 secondi si spegne.
+      // Colori pieni e luminosi: si devono leggere sopra le nubi bianche di
+      // giorno e sopra il mare scuro di notte.
+      const ETA_SCARICA_TAPPE = [
+        [0, [255, 255, 255]],
+        [15000, [179, 246, 255]],
+        [60000, [255, 238, 84]],
+        [150000, [255, 160, 40]],
+        [STRIKE_LIFE_MS, [244, 60, 52]]
+      ];
+
       function stileEtaScarica(eta) {
         const age = clamp(Number(eta) || 0, 0, STRIKE_LIFE_MS);
-        let colore;
-        if (age < 15000) {
-          const t = age / 15000;
-          colore = [
-            Math.round(255 - 76 * t),
-            Math.round(255 - 9 * t),
-            255
-          ];
-        } else if (age < 60000) {
-          const t = (age - 15000) / 45000;
-          colore = [
-            Math.round(179 + 76 * t),
-            Math.round(246 - 25 * t),
-            Math.round(255 - 121 * t)
-          ];
-        } else {
-          const t = (age - 60000) / (STRIKE_LIFE_MS - 60000);
-          colore = [255, Math.round(221 - 91 * t), Math.round(134 - 76 * t)];
-        }
+        let k = 1;
+        while (k < ETA_SCARICA_TAPPE.length - 1 && age > ETA_SCARICA_TAPPE[k][0]) k += 1;
+        const da = ETA_SCARICA_TAPPE[k - 1];
+        const a = ETA_SCARICA_TAPPE[k];
+        const t = clamp((age - da[0]) / Math.max(1, a[0] - da[0]), 0, 1);
+        const colore = [0, 1, 2].map(function (c) {
+          return Math.round(da[1][c] + (a[1][c] - da[1][c]) * t);
+        });
+        const spegnimento = STRIKE_LIFE_MS - 45000;
         const alfa = age < 60000
-          ? 0.96
-          : clamp(0.96 - 0.76 * ((age - 60000) / (STRIKE_LIFE_MS - 60000)), 0.2, 0.96);
-        return { colore: colore, alfa: alfa };
+          ? 1
+          : age < spegnimento
+            ? 1 - 0.12 * (age - 60000) / (spegnimento - 60000)
+            : 0.88 * Math.pow(1 - (age - spegnimento) / 45000, 1.5);
+        return { colore: colore, alfa: clamp(alfa, 0, 1) };
       }
 
       function aggregaAttivita(scariche, adesso) {
@@ -7443,10 +7468,57 @@
         return Math.hypot(bordo.x - centro.x, bordo.y - centro.y);
       }
 
+      // Quanti simboli grandi, e fino a che eta'. Gli altri restano punti:
+      // la scia di cinque minuti si vede sempre, a qualunque zoom.
       function limiteSegni(zoom) {
-        if (zoom < 6.2) return { eta: 30000, quanti: 35 };
-        if (zoom < 7.6) return { eta: 90000, quanti: 120 };
-        return { eta: STRIKE_LIFE_MS, quanti: STRIKE_MAX };
+        if (zoom < 6.2) return { eta: STRIKE_GLIFO_MS, quanti: 60 };
+        if (zoom < 7.6) return { eta: STRIKE_GLIFO_MS, quanti: 160 };
+        return { eta: STRIKE_GLIFO_MS, quanti: 400 };
+      }
+
+      // LA SCIA. Ogni scarica degli ultimi cinque minuti e' un punto del
+      // colore della sua eta', con un filo scuro attorno per staccarsi dalle
+      // nubi bianche. I punti si raggruppano per fasce di venti secondi:
+      // un solo tracciato per fascia, quindi anche migliaia di punti costano
+      // una ventina di riempimenti. I piu' vecchi sotto, i nuovi sopra.
+      function disegnaScia(context, punti, adessoEpoca, scala) {
+        const fascia = 20000;
+        const raggio = clamp(2.3 + (map.getZoom() - 5) * 0.35, 2.3, 4.2) * scala;
+        const passo = Math.max(1.5, raggio * 0.9);
+        const occupate = new Set();
+        const gruppi = new Map();
+        for (let i = liveStrikes.length - 1; i >= 0; i -= 1) {
+          const punto = punti[i];
+          if (!punto) continue;
+          const eta = adessoEpoca - liveStrikes[i].at;
+          if (eta < 0 || eta >= STRIKE_LIFE_MS) continue;
+          const cella = Math.round(punto.x / passo) + ":" + Math.round(punto.y / passo);
+          if (occupate.has(cella)) continue;
+          occupate.add(cella);
+          const g = Math.floor(eta / fascia);
+          let gruppo = gruppi.get(g);
+          if (!gruppo) { gruppo = []; gruppi.set(g, gruppo); }
+          gruppo.push(punto);
+        }
+        const ordine = Array.from(gruppi.keys()).sort(function (a, b) { return b - a; });
+        context.save();
+        context.globalCompositeOperation = "source-over";
+        context.lineWidth = Math.max(0.8, 1.1 * scala);
+        for (let n = 0; n < ordine.length; n += 1) {
+          const stile = stileEtaScarica((ordine[n] + 0.5) * fascia);
+          if (stile.alfa <= 0.02) continue;
+          const gruppo = gruppi.get(ordine[n]);
+          context.beginPath();
+          for (let i = 0; i < gruppo.length; i += 1) {
+            context.moveTo(gruppo[i].x + raggio, gruppo[i].y);
+            context.arc(gruppo[i].x, gruppo[i].y, raggio, 0, Math.PI * 2);
+          }
+          context.fillStyle = "rgba(" + stile.colore.join(",") + "," + stile.alfa.toFixed(3) + ")";
+          context.strokeStyle = "rgba(6,13,20," + (0.62 * stile.alfa).toFixed(3) + ")";
+          context.stroke();
+          context.fill();
+        }
+        context.restore();
       }
 
       // ---- LA NUBE CHE SI ACCENDE --------------------------------------
@@ -8471,7 +8543,7 @@
         context.save();
         context.lineJoin = "round";
         const raggioPastiglia = alto * 0.98;
-        context.fillStyle = "rgba(" + rgb + "," + (0.94 * stile.alfa).toFixed(3) + ")";
+        context.fillStyle = "rgba(" + rgb + "," + stile.alfa.toFixed(3) + ")";
         context.beginPath();
         context.arc(punto.x, punto.y, raggioPastiglia, 0, Math.PI * 2);
         context.fill();
@@ -8594,9 +8666,11 @@
           );
         }
 
-        // I punti sono etichette osservative. A scala larga vengono diradati
-        // sullo schermo, ma la densita' sopra continua a usare tutte le
-        // scariche: si evita una macchia di simboli senza perdere il segnale.
+        // Prima la scia dei cinque minuti, tutta; sopra i simboli delle
+        // scariche fresche. Questi sono etichette osservative: a scala
+        // larga vengono diradati sullo schermo, mentre la scia e la densita'
+        // continuano a usare tutte le scariche.
+        disegnaScia(context, punti, adessoEpoca, scala);
         context.globalCompositeOperation = "source-over";
         const limite = limiteSegni(map.getZoom());
         // La distanza minima fra due segni segue la taglia del segno: il
@@ -8684,6 +8758,7 @@
           key.textContent = "● punto/età · flash nube stimato · attività 15 km / 90 s · AFA MTG";
         } else if (showLiveLightning) {
           key.textContent = "⚡ scarica rilevata · colore = età · anello = stazioni "
+            + "· scia 5 min: bianco → giallo → rosso "
             + "· flash nube stimato · attività 15 km / 90 s · il bagliore è un "
             + "segno grafico, non una misura ottica";
         } else {
@@ -8695,7 +8770,7 @@
         const label = document.getElementById("livelightning-note");
         if (!label) return;
         if (!showLiveLightning) {
-          label.textContent = "Blitzortung · punti e tempi rilevati · traccia 150 s";
+          label.textContent = "Blitzortung · punti e tempi rilevati · scia 5 min";
           label.title = "";
           updateLightningPhysicsKey();
           return;
@@ -8707,8 +8782,8 @@
           return;
         }
         label.textContent = liveStrikes.length
-          ? liveStrikes.length + " rilevazioni · punti reali · traccia "
-            + Math.round(STRIKE_LIFE_MS / 1000) + " s"
+          ? liveStrikes.length + " rilevazioni · punti reali · scia "
+            + Math.round(STRIKE_LIFE_MS / 60000) + " min"
           : "collegato · nessuna scarica nel dominio";
         label.title = "Posizione e tempo dalla rete a terra. Colore = età del dato; "
           + "chiarore = attività con kernel 15 km e memoria 90 s. Il flash "
@@ -9121,6 +9196,233 @@
         }
       }
 
+      // ---- LE NUBI NELL'ORA CHE VIENE ---------------------------------
+      //
+      // La barra del satellite continua oltre l'ultima immagine: nove passi
+      // di dieci minuti in cui le nubi si spostano lungo il loro moto
+      // osservato. Il moto e' quello del nowcast "Nubi tra un'ora" (stessa
+      // correlazione fra l'ultima immagine e quella di mezz'ora prima, con
+      // il vento del modello dove la nube non si riconosce), qui applicato a
+      // frazioni d'ora invece che all'ora intera.
+      //
+      // E' estrapolazione, non un modello: le nubi traslano senza nascere ne'
+      // dissolversi. Per questo la barra la segna con un colore diverso e
+      // l'etichetta dice "previsione".
+      //
+      // Le due immagini di partenza vengono dalla cache dei fotogrammi, gia'
+      // scaricate dal precaricamento: generare la previsione non costa
+      // nessuna richiesta in piu'.
+      const cloudForecastFrames = new Map();
+      let cloudForecastBase = "";
+      let cloudForecastBusy = false;
+      let cloudForecastToken = 0;
+
+      function previsioneNubiMs() {
+        const product = CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour;
+        const slotMs = product.slotMs || CLOUD_SLOT_MS;
+        return cloudSlot(product).newest + cloudForecastStep * slotMs;
+      }
+
+      function basePrevisioneNubi() {
+        const product = CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour;
+        const newestValue = cloudSlot(product).newest;
+        const newest = {
+          value: newestValue, newest: newestValue, live: true,
+          date: new Date(newestValue),
+          iso: new Date(newestValue).toISOString().replace(/\.\d{3}Z$/, ".000Z")
+        };
+        const prima = slotArretrato(product, newest, 3);
+        const box = cloudRequestBox(1.15);
+        const size = misuraSatellite(box, product);
+        return {
+          product: product, dopo: newest, prima: prima, box: box, size: size,
+          chiaveDopo: cloudFrameKey(product, newest, box, size),
+          chiavePrima: cloudFrameKey(product, prima, box, size)
+        };
+      }
+
+      function svuotaPrevisioneNubi() {
+        const vecchie = Array.from(cloudForecastFrames.values());
+        cloudForecastFrames.clear();
+        cloudForecastBase = "";
+        cloudForecastBusy = false;
+        cloudForecastToken += 1;
+        // Lasciate vivere qualche secondo: una potrebbe essere ancora in
+        // mostra finche' non arriva la sua sostituta.
+        setTimeout(function () {
+          vecchie.forEach(function (f) { URL.revokeObjectURL(f.url); });
+        }, 4000);
+      }
+
+      function caricaImmagineLocale(url) {
+        return new Promise(function (risolvi, rifiuta) {
+          const immagine = new Image();
+          immagine.onload = function () { risolvi(immagine); };
+          immagine.onerror = rifiuta;
+          immagine.src = url;
+        });
+      }
+
+      function preparaPrevisioneNubi() {
+        if (!showSatelliteClouds || weatherView !== "satellite") return;
+        const base = basePrevisioneNubi();
+        if (cloudForecastBase === base.chiaveDopo
+            && (cloudForecastBusy || cloudForecastFrames.size >= CLOUD_FORECAST_STEPS)) return;
+        const dopo = cloudFrames.get(base.chiaveDopo);
+        const prima = cloudFrames.get(base.chiavePrima);
+        if (!dopo || !prima) {
+          // Le due immagini si chiedono subito, senza aspettare il turno del
+          // precaricamento: chi e' sul futuro sta aspettando proprio queste.
+          [[dopo, base.dopo, base.chiaveDopo], [prima, base.prima, base.chiavePrima]]
+            .forEach(function (voce) {
+              if (voce[0] || cloudPrefetchInFlight.has(voce[2])) return;
+              cloudPrefetchInFlight.add(voce[2]);
+              scaricaFotogramma(base.product, voce[1], base.box, base.size, function (f) {
+                cloudPrefetchInFlight.delete(voce[2]);
+                aggiornaBufferSatellite();
+                if (f) preparaPrevisioneNubi();
+              });
+            });
+          return;
+        }
+        if (cloudForecastBase !== base.chiaveDopo) {
+          svuotaPrevisioneNubi();
+          cloudForecastBase = base.chiaveDopo;
+        }
+        cloudForecastBusy = true;
+        const token = ++cloudForecastToken;
+        Promise.all([caricaImmagineLocale(dopo.url), caricaImmagineLocale(prima.url)])
+          .then(function (immagini) {
+            if (token !== cloudForecastToken) return;
+            const ultima = immagini[0];
+            const precedente = immagini[1];
+            const w = ultima.naturalWidth || base.size.width;
+            const h = ultima.naturalHeight || base.size.height;
+            // Il moto si stima su una copia piccola, come nel nowcast.
+            const fw = 180;
+            const fh = Math.max(40, Math.round(h * fw / w));
+            const piccola = function (img) {
+              const c = document.createElement("canvas");
+              c.width = fw; c.height = fh;
+              const g = c.getContext("2d");
+              g.drawImage(img, 0, 0, fw, fh);
+              return g.getImageData(0, 0, fw, fh).data;
+            };
+            const flusso = cloudMotionField(
+              piccola(precedente), piccola(ultima), fw, fh, base.box
+            );
+            const tela = document.createElement("canvas");
+            tela.width = w; tela.height = h;
+            const g = tela.getContext("2d");
+            g.drawImage(ultima, 0, 0, w, h);
+            const sorgente = g.getImageData(0, 0, w, h);
+            const slotMs = base.product.slotMs || CLOUD_SLOT_MS;
+            const formato = base.product.mode === "scene" ? "image/jpeg" : "image/png";
+            const passo = function (k) {
+              if (token !== cloudForecastToken) return;
+              if (k > CLOUD_FORECAST_STEPS) { cloudForecastBusy = false; return; }
+              const ore = k * slotMs / 3600000;
+              g.putImageData(deformaNubi(sorgente, w, h, flusso, fw, fh, ore), 0, 0);
+              tela.toBlob(function (blob) {
+                if (token !== cloudForecastToken) return;
+                if (blob) {
+                  cloudForecastFrames.set(k, {
+                    url: URL.createObjectURL(blob), box: base.box
+                  });
+                  aggiornaBufferSatellite();
+                  if (cloudForecastStep === k) pubblicaPrevisioneNubi();
+                }
+                setTimeout(function () { passo(k + 1); }, 0);
+              }, formato, 0.86);
+            };
+            passo(1);
+          })
+          .catch(function () {
+            if (token === cloudForecastToken) cloudForecastBusy = false;
+          });
+      }
+
+      // Ogni pixel prende il colore da dove la nube era "ore" prima, lungo il
+      // moto stimato: interpolazione bilineare sia del moto (stimato su una
+      // griglia di 180 colonne) sia dell'immagine, cosi' lo spostamento e'
+      // continuo invece che a scalini.
+      function deformaNubi(sorgente, w, h, flusso, fw, fh, ore) {
+        const uscita = new ImageData(w, h);
+        const dst = uscita.data;
+        const src = sorgente.data;
+        const sx = w / fw;
+        const sy = h / fh;
+        for (let y = 0; y < h; y += 1) {
+          const gy = Math.min(fh - 1.001, Math.max(0, y / sy - 0.5));
+          const y0 = Math.floor(gy);
+          const ty = gy - y0;
+          for (let x = 0; x < w; x += 1) {
+            const gx = Math.min(fw - 1.001, Math.max(0, x / sx - 0.5));
+            const x0 = Math.floor(gx);
+            const tx = gx - x0;
+            const a = (y0 * fw + x0) * 2;
+            const b = a + 2;
+            const c = a + fw * 2;
+            const d = c + 2;
+            const u = (flusso[a] * (1 - tx) + flusso[b] * tx) * (1 - ty)
+              + (flusso[c] * (1 - tx) + flusso[d] * tx) * ty;
+            const v = (flusso[a + 1] * (1 - tx) + flusso[b + 1] * tx) * (1 - ty)
+              + (flusso[c + 1] * (1 - tx) + flusso[d + 1] * tx) * ty;
+            const px = Math.min(w - 1.001, Math.max(0, x - u * sx * ore));
+            const py = Math.min(h - 1.001, Math.max(0, y - v * sy * ore));
+            const px0 = Math.floor(px);
+            const py0 = Math.floor(py);
+            const qx = px - px0;
+            const qy = py - py0;
+            const i00 = (py0 * w + px0) * 4;
+            const i10 = i00 + 4;
+            const i01 = i00 + w * 4;
+            const i11 = i01 + 4;
+            const o = (y * w + x) * 4;
+            for (let canale = 0; canale < 4; canale += 1) {
+              dst[o + canale] = (src[i00 + canale] * (1 - qx) + src[i10 + canale] * qx) * (1 - qy)
+                + (src[i01 + canale] * (1 - qx) + src[i11 + canale] * qx) * qy;
+            }
+          }
+        }
+        return uscita;
+      }
+
+      // I passi previsti valgono solo per il prodotto, il riquadro e l'ultima
+      // immagine da cui sono nati: cambiato uno dei tre si rifanno.
+      function previsioneValida() {
+        return cloudForecastFrames.size > 0
+          && cloudForecastBase === basePrevisioneNubi().chiaveDopo;
+      }
+
+      function pubblicaPrevisioneNubi() {
+        if (!previsioneValida()) return false;
+        const fotogramma = cloudForecastFrames.get(cloudForecastStep);
+        const source = map && map.getSource ? map.getSource("satellite-clouds") : null;
+        if (!fotogramma || !source) return false;
+        try {
+          source.updateImage({
+            url: fotogramma.url,
+            coordinates: [
+              [fotogramma.box.west, fotogramma.box.north],
+              [fotogramma.box.east, fotogramma.box.north],
+              [fotogramma.box.east, fotogramma.box.south],
+              [fotogramma.box.west, fotogramma.box.south]
+            ]
+          });
+        } catch (error) {
+          return false;
+        }
+        map.setPaintProperty("satellite-clouds-layer", "raster-opacity", 1);
+        cloudPublishedKey = "previsione|" + cloudForecastStep;
+        visibilitaTasselli();
+        const etichetta = document.getElementById("satellite-time");
+        if (etichetta) {
+          etichetta.textContent = "Previsione " + formatClockTime(new Date(previsioneNubiMs()));
+        }
+        return true;
+      }
+
       function scheduleCloudReload() {
         if (!showSatelliteClouds) return;
         if (cloudReloadTimer) clearTimeout(cloudReloadTimer);
@@ -9142,31 +9444,51 @@
       // attraversano decine di slot, quindi l'etichetta segue il dito subito
       // ma la richiesta parte solo quando ci si ferma. Senza questo, un solo
       // trascinamento brucerebbe l'intera finestra.
-      const CLOUD_SCRUB_DEBOUNCE_MS = 450;
+      const CLOUD_SCRUB_DEBOUNCE_MS = 200;
       let cloudScrubTimer = 0;
 
       // ---- FOTOGRAMMI OSSERVATI GIA' PRONTI ----------------------------
       //
-      // "Scorrere senza caricamenti" non si ottiene chiedendo piu' in fretta:
-      // EUMETView limita a venti richieste per finestra, e una barra che
-      // attraversa 36 slot ne brucerebbe l'intero budget in un gesto. Si
-      // ottiene non chiedendo affatto -- cioe' tenendo i fotogrammi gia'
-      // scaricati e ripubblicandoli dalla memoria.
+      // "Scorrere senza caricamenti" si ottiene non chiedendo affatto mentre
+      // si scorre: i fotogrammi gia' scaricati si ripubblicano dalla memoria.
       //
       // Due meta'. Una cache per (prodotto, slot, riquadro, risoluzione), che
       // rende istantaneo qualunque istante gia' visto; e un precaricamento in
-      // sottofondo che riempie gli slot vicini al cursore UNO ALLA VOLTA e a
-      // distanza, cosi' il budget del servizio si consuma piano invece che in
-      // una raffica. Il precaricamento tace mentre l'utente sta trascinando:
-      // li' la priorita' e' il fotogramma che sta chiedendo lui.
+      // sottofondo che riempie gli slot vicini al cursore, qualche richiesta
+      // alla volta. Mentre l'utente trascina il precaricamento lascia sempre
+      // un posto libero: li' la priorita' e' il fotogramma che sta chiedendo.
       // Cache condivisa da satellite e AFA. Sul desktop si tengono piu'
       // istanti; sul telefono il limite piu' basso evita che le immagini
       // compresse restino in memoria per tutta la sessione.
-      const CLOUD_FRAME_LIMIT = isMobile() ? 36 : 72;
-      const CLOUD_PREFETCH_GAP_MS = 1100;
+      //
+      // Il limite tiene l'intera barra di nubi (37 istanti) piu' quella del
+      // Lightning Imager (73) quando sono accese insieme: con 72 posti le due
+      // sequenze si sfrattavano a vicenda e il precaricamento ricominciava
+      // all'infinito. I fotogrammi sono JPEG da 720 px, una sessantina di kB.
+      const CLOUD_FRAME_LIMIT = isMobile() ? 96 : 160;
+      // In parallelo, non in fila. Misurato il 04/11/2026: una richiesta
+      // impiega da 2 a 8 s, trenta insieme rispondono tutte (HTTP 200) in
+      // 5,3 s al massimo. In fila, un istante ogni tre secondi, le sei ore di
+      // barra erano pronte dopo due minuti, e intanto scorrendo 29 istanti su
+      // 37 andavano ancora scaricati: erano gli scatti. Quattro alla volta
+      // lasciano due connessioni HTTP/1.1 ai tasselli nitidi.
+      //
+      // Se il servizio risponde male il ritmo scende da solo: un errore
+      // dimezza i posti e ferma tutto per qualche secondo, ogni successo ne
+      // riapre uno (crescita lenta, discesa rapida). Sotto carico EUMETView
+      // risponde 500 dopo sei secondi a qualche richiesta su venti: l'istante
+      // che ha fallito si riprova dopo un minuto, non al giro successivo.
+      const CLOUD_PREFETCH_GAP_MS = 120;
+      const CLOUD_PREFETCH_PARALLEL = isMobile() ? 3 : 4;
+      const CLOUD_PREFETCH_BACKOFF_MS = 6000;
+      const CLOUD_PREFETCH_RETRY_MS = 60000;
       const cloudFrames = new Map();
+      const cloudPrefetchInFlight = new Set();
+      const cloudPrefetchFailedAt = new Map();
       let cloudPrefetchTimer = 0;
-      let cloudPrefetchBusy = false;
+      let cloudPrefetchActive = 0;
+      let cloudPrefetchLimit = CLOUD_PREFETCH_PARALLEL;
+      let cloudPrefetchPauseUntil = 0;
       let cloudPublishedKey = "";
       let lightningPublishedKey = "";
       let cloudPrefetchTurn = 0;
@@ -9226,8 +9548,11 @@
               date: new Date(valore),
               iso: new Date(valore).toISOString().replace(/\.\d{3}Z$/, ".000Z")
             };
-            if (!cloudFrames.has(cloudFrameKey(product, slot, box, size))) {
-              return { slot: slot, box: box, size: size };
+            const key = cloudFrameKey(product, slot, box, size);
+            const fallito = cloudPrefetchFailedAt.get(key);
+            if (fallito && Date.now() - fallito < CLOUD_PREFETCH_RETRY_MS) continue;
+            if (!cloudFrames.has(key) && !cloudPrefetchInFlight.has(key)) {
+              return { slot: slot, box: box, size: size, key: key };
             }
           }
         }
@@ -9235,16 +9560,23 @@
       }
 
       function scheduleCloudPrefetch() {
-        if (cloudPrefetchTimer || cloudPrefetchBusy) return;
+        if (cloudPrefetchTimer || cloudPrefetchActive >= cloudPrefetchLimit) return;
         if (weatherView !== "satellite"
             || (!showSatelliteClouds && !showLightning)) return;
+        const attesa = Math.max(
+          CLOUD_PREFETCH_GAP_MS, cloudPrefetchPauseUntil - Date.now()
+        );
         cloudPrefetchTimer = setTimeout(function () {
           cloudPrefetchTimer = 0;
           if (weatherView !== "satellite"
               || (!showSatelliteClouds && !showLightning)) return;
           if (typeof document.hidden === "boolean" && document.hidden) return;
-          // Mentre si trascina non si ruba banda al fotogramma richiesto.
-          if (cloudScrubTimer) { scheduleCloudPrefetch(); return; }
+          // Mentre si trascina si lascia sempre un posto libero al
+          // fotogramma che l'utente sta chiedendo.
+          if (cloudScrubTimer && cloudPrefetchActive >= cloudPrefetchLimit - 1) {
+            scheduleCloudPrefetch();
+            return;
+          }
           const prodotti = [];
           if (showSatelliteClouds) {
             prodotti.push(CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour);
@@ -9266,13 +9598,31 @@
             }
           }
           if (!prossimo) return;
-          cloudPrefetchBusy = true;
+          cloudPrefetchActive += 1;
+          cloudPrefetchInFlight.add(prossimo.key);
           scaricaFotogramma(product, prossimo.slot, prossimo.box, prossimo.size,
-            function () {
-              cloudPrefetchBusy = false;
+            function (fotogramma) {
+              cloudPrefetchActive -= 1;
+              cloudPrefetchInFlight.delete(prossimo.key);
+              if (fotogramma) {
+                cloudPrefetchFailedAt.delete(prossimo.key);
+                cloudPrefetchLimit = Math.min(
+                  CLOUD_PREFETCH_PARALLEL, cloudPrefetchLimit + 1
+                );
+              } else {
+                cloudPrefetchFailedAt.set(prossimo.key, Date.now());
+                cloudPrefetchLimit = Math.max(1, Math.floor(cloudPrefetchLimit / 2));
+                cloudPrefetchPauseUntil = Date.now() + CLOUD_PREFETCH_BACKOFF_MS;
+              }
+              aggiornaBufferSatellite();
+              // La previsione si prepara appena ci sono le due immagini su
+              // cui stimare il moto: chi arriva sul futuro la trova pronta.
+              if (fotogramma) preparaPrevisioneNubi();
               scheduleCloudPrefetch();
             });
-        }, CLOUD_PREFETCH_GAP_MS);
+          // Il posto successivo parte subito, senza aspettare questo.
+          scheduleCloudPrefetch();
+        }, attesa);
       }
 
       // Scarica un fotogramma e lo mette in cache, senza pubblicarlo. Il file
@@ -9311,32 +9661,161 @@
         return Math.round(CLOUD_HISTORY_HOURS * 3600 * 1000 / CLOUD_SLOT_MS);
       }
 
+      // ---- LA BARRA DEL TEMPO DEL SATELLITE ---------------------------
+      //
+      // In basso, larga quanto lo schermo, come la barra della previsione:
+      // il cursore dentro il pannello era lungo due dita e non diceva cosa
+      // fosse gia' pronto. Sotto il cursore una fila di tacche, una per
+      // istante, si accende quando il fotogramma e' in memoria: si vede
+      // dove si puo' scorrere senza attese. A destra del segno "ora" la
+      // barra prosegue con i passi di previsione delle nubi, in un altro
+      // colore.
+      //
+      // Il play avanza solo su istanti gia' pronti: quelli ancora in arrivo
+      // si saltano, invece di fermare l'animazione ad aspettarli. In fondo
+      // al giro si sosta un paio di battiti, poi si ricomincia.
+      const SAT_PLAY_MS = 420;
+      const SAT_PLAY_SOSTA = 2;
+      let satPlayTimer = 0;
+      let satPlayAttese = 0;
+      let satBufferFrame = 0;
+
+      function satScrubSlots() {
+        return cloudHistorySlots();
+      }
+
+      function istantePronto(indice) {
+        const slots = satScrubSlots();
+        if (indice > slots) return previsioneValida() && cloudForecastFrames.has(indice - slots);
+        const product = CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour;
+        const slotMs = product.slotMs || CLOUD_SLOT_MS;
+        const newest = cloudSlot(product).newest;
+        const valore = newest - (slots - indice) * slotMs;
+        const box = cloudRequestBox(1.15);
+        const size = misuraSatellite(box, product);
+        return cloudFrames.has(cloudFrameKey(product, { value: valore }, box, size));
+      }
+
+      function aggiornaBufferSatellite() {
+        if (satBufferFrame) return;
+        satBufferFrame = requestAnimationFrame(function () {
+          satBufferFrame = 0;
+          const fila = document.getElementById("sat-buffer");
+          if (!fila || weatherView !== "satellite") return;
+          const slots = satScrubSlots();
+          const totale = slots + CLOUD_FORECAST_STEPS;
+          if (fila.children.length !== totale + 1) {
+            fila.replaceChildren();
+            for (let i = 0; i <= totale; i += 1) {
+              const tacca = document.createElement("i");
+              if (i > slots) tacca.className = "futuro";
+              fila.appendChild(tacca);
+            }
+          }
+          for (let i = 0; i <= totale; i += 1) {
+            fila.children[i].classList.toggle(
+              "pronto", showSatelliteClouds ? istantePronto(i) : true
+            );
+          }
+        });
+      }
+
+      function setSatPlay(acceso) {
+        const bottone = document.getElementById("sat-play");
+        if (satPlayTimer) { clearInterval(satPlayTimer); satPlayTimer = 0; }
+        if (bottone) {
+          bottone.setAttribute("aria-pressed", acceso ? "true" : "false");
+          bottone.setAttribute("aria-label", acceso ? "Ferma animazione" : "Avvia animazione");
+          bottone.classList.toggle("in-corso", Boolean(acceso));
+        }
+        if (!acceso) return;
+        satPlayAttese = 0;
+        satPlayTimer = setInterval(function () {
+          const scrub = document.getElementById("satellite-scrub");
+          if (!scrub || weatherView !== "satellite") { setSatPlay(false); return; }
+          const massimo = Number(scrub.max);
+          const attuale = Number(scrub.value);
+          let prossimo = -1;
+          for (let passo = 1; passo <= massimo + 1; passo += 1) {
+            const indice = (attuale + passo) % (massimo + 1);
+            if (!showSatelliteClouds || istantePronto(indice)) { prossimo = indice; break; }
+          }
+          if (prossimo < 0 || prossimo === attuale) return;
+          if (prossimo < attuale && satPlayAttese < SAT_PLAY_SOSTA) {
+            satPlayAttese += 1;
+            return;
+          }
+          satPlayAttese = 0;
+          scrub.value = String(prossimo);
+          scrub.dispatchEvent(new Event("input"));
+        }, SAT_PLAY_MS);
+      }
+
       function buildSatelliteControls() {
         const host = document.getElementById("satellite-controls");
         if (!host || host.dataset.ready === "1") return;
         host.dataset.ready = "1";
-        const slots = cloudHistorySlots();
-        // Si AGGIUNGE, non si sostituisce. Questo contenitore non e' vuoto:
-        // modern-ui.js ci sposta dentro il selettore del prodotto satellitare
-        // (infrarosso, fase delle nubi, polvere...). Scrivendo innerHTML lo si
-        // cancellava, e con esso l'unico modo di cambiare canale.
-        const blocco = document.createElement("div");
-        blocco.className = "sat-time";
-        blocco.innerHTML =
-          '<label class="sat-scrub">'
-          + '<input id="satellite-scrub" type="range" min="0" max="' + slots
+        const slots = satScrubSlots();
+        const massimo = slots + CLOUD_FORECAST_STEPS;
+        // La barra vive in fondo alla pagina, fuori dal pannello: il pannello
+        // si chiude, la barra resta. Il selettore del prodotto satellitare
+        // (che modern-ui.js sposta nel pannello) non viene toccato.
+        const barra = document.createElement("section");
+        barra.id = "sat-bar";
+        barra.className = "sat-bar";
+        barra.setAttribute("aria-label", "Ora dell'osservazione satellitare");
+        barra.innerHTML =
+          '<button id="sat-play" class="sat-play" type="button" aria-pressed="false" aria-label="Avvia animazione">'
+          + '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path class="sat-play-on" d="M8 5v14l11-7Z"></path>'
+          + '<path class="sat-play-off" d="M7 5h4v14H7zM13 5h4v14h-4z"></path></svg></button>'
+          + '<div class="sat-time">'
+          + '<label class="sat-scrub">'
+          + '<span id="sat-buffer" class="sat-buffer" aria-hidden="true"></span>'
+          + '<span class="sat-ora" aria-hidden="true" style="left:calc(9px + (100% - 18px) * ' + (slots / massimo).toFixed(4) + ')"></span>'
+          + '<input id="satellite-scrub" type="range" min="0" max="' + massimo
           + '" step="1" value="' + slots + '" aria-label="Ora dell\'osservazione">'
           + '</label>'
           + '<div class="sat-scrub-row">'
-          + '<button id="satellite-live" type="button" class="sat-live">In diretta</button>'
           + '<span id="satellite-scrub-label"></span>'
+          + '<span class="sat-legenda"><i class="oss"></i>osservato <i class="prev"></i>previsione</span>'
+          + '<button id="satellite-live" type="button" class="sat-live">In diretta</button>'
+          + '</div>'
           + '</div>';
-        host.appendChild(blocco);
+        document.body.appendChild(barra);
 
         const scrub = document.getElementById("satellite-scrub");
         const live = document.getElementById("satellite-live");
+        document.getElementById("sat-play").addEventListener("click", function () {
+          setSatPlay(!satPlayTimer);
+        });
+        // Toccare il cursore ferma l'animazione: chi trascina vuole un
+        // istante preciso.
+        scrub.addEventListener("pointerdown", function () { setSatPlay(false); });
         scrub.addEventListener("input", function () {
           const back = slots - Number(scrub.value);
+          const eraPrevisione = Boolean(cloudForecastStep);
+          cloudForecastStep = back < 0 ? -back : 0;
+          if (cloudForecastStep) {
+            // Il futuro parte dall'ultima immagine osservata, che resta
+            // ferma: niente fulmini in diretta ne' Lightning Imager su
+            // un'ora che non e' ancora successa.
+            cloudTimeSelected = cloudSlot().newest;
+            updateSatelliteScrubLabel();
+            if (map.getLayer("satellite-lightning-layer")) {
+              map.setLayoutProperty("satellite-lightning-layer", "visibility", "none");
+            }
+            if (showRadar) syncRadarToSatellite({ value: previsioneNubiMs() });
+            if (showSatelliteClouds && !pubblicaPrevisioneNubi()) preparaPrevisioneNubi();
+            aggiornaBufferSatellite();
+            requestVectorRender();
+            return;
+          }
+          if (eraPrevisione) {
+            visibilitaTasselli();
+            if (showLightning && map.getLayer("satellite-lightning-layer")) {
+              map.setLayoutProperty("satellite-lightning-layer", "visibility", "visible");
+            }
+          }
           // Zero passi indietro vuol dire "l'ultimo disponibile", non un
           // istante fisso: cosi' restando in fondo alla barra il satellite
           // continua ad aggiornarsi da solo quando arriva un passaggio nuovo.
@@ -9351,18 +9830,21 @@
           const nubiPronte = !showSatelliteClouds || pubblicaFotogrammaInCache();
           const fulminiPronti = !showLightning || pubblicaLightningInCache();
           if (showRadar) syncRadarToSatellite(cloudSlot());
+          aggiornaBufferSatellite();
           if (nubiPronte && fulminiPronti) {
             if (cloudScrubTimer) { clearTimeout(cloudScrubTimer); cloudScrubTimer = 0; }
             scheduleCloudPrefetch();
             return;
           }
+          // Istante non ancora in memoria: intanto si mostra il piu' vicino
+          // che c'e', invece di lasciare ferma l'immagine di dove si era
+          // partiti. Trascinando, la mappa segue il dito.
+          if (!nubiPronte) pubblicaFotogrammaVicino();
           if (cloudScrubTimer) clearTimeout(cloudScrubTimer);
           cloudScrubTimer = setTimeout(function () {
             cloudScrubTimer = 0;
             // Non forzate: cambiando istante cambia lo slot, e le due
             // cloudNeedsReload/lightningNeedsReload se ne accorgono da sole.
-            // Forzandole si ripetevano richieste identiche allo stesso slot,
-            // e la finestra da venti richieste si esaurisce in fretta.
             if (showSatelliteClouds && !nubiPronte) loadSatelliteClouds(false);
             if (showLightning && !fulminiPronti) loadLightning(false);
             syncRadarToSatellite(cloudSlot());
@@ -9370,10 +9852,53 @@
           }, CLOUD_SCRUB_DEBOUNCE_MS);
         });
         live.addEventListener("click", function () {
+          setSatPlay(false);
           scrub.value = String(slots);
           scrub.dispatchEvent(new Event("input"));
         });
         updateSatelliteScrubLabel();
+        aggiornaBufferSatellite();
+      }
+
+      // Il fotogramma in memoria piu' vicino all'istante scelto, dello stesso
+      // prodotto e dello stesso riquadro. Serve solo mentre arriva quello
+      // giusto: la richiesta vera parte comunque.
+      function pubblicaFotogrammaVicino() {
+        const source = map && map.getSource ? map.getSource("satellite-clouds") : null;
+        if (!source) return false;
+        const product = CLOUD_PRODUCTS[cloudProduct] || CLOUD_PRODUCTS.geocolour;
+        const slot = cloudSlot(product);
+        const box = cloudRequestBox(1.15);
+        const size = misuraSatellite(box, product);
+        const prefisso = product.layer + "|";
+        const coda = cloudFrameKey(product, { value: 0 }, box, size).split("|").slice(2).join("|");
+        let migliore = null;
+        let distanza = Infinity;
+        cloudFrames.forEach(function (frame, chiave) {
+          if (chiave.indexOf(prefisso) !== 0) return;
+          const parti = chiave.split("|");
+          if (parti.slice(2).join("|") !== coda) return;
+          const scarto = Math.abs(Number(parti[1]) - slot.value);
+          if (scarto < distanza) { distanza = scarto; migliore = chiave; }
+        });
+        if (!migliore || migliore === cloudPublishedKey) return false;
+        const frame = cloudFrames.get(migliore);
+        try {
+          source.updateImage({
+            url: frame.url,
+            coordinates: [
+              [frame.box.west, frame.box.north], [frame.box.east, frame.box.north],
+              [frame.box.east, frame.box.south], [frame.box.west, frame.box.south]
+            ]
+          });
+        } catch (error) {
+          return false;
+        }
+        // Non si segna come caricato l'istante scelto: cloudNeedsReload deve
+        // continuare a chiedere quello vero.
+        cloudPublishedKey = migliore;
+        mascheraNube = frame.maschera || null;
+        return true;
       }
 
       // Pubblica dalla cache l'istante scelto, se c'e'. Restituisce false
@@ -9416,8 +9941,17 @@
       function updateSatelliteScrubLabel() {
         const label = document.getElementById("satellite-scrub-label");
         const live = document.getElementById("satellite-live");
-        if (live) live.classList.toggle("active", !cloudTimeSelected);
+        if (live) live.classList.toggle("active", !cloudTimeSelected && !cloudForecastStep);
+        const barra = document.getElementById("sat-bar");
+        if (barra) barra.classList.toggle("previsione", Boolean(cloudForecastStep));
         if (!label) return;
+        if (cloudForecastStep) {
+          const quando = previsioneNubiMs();
+          const scarto = Math.round((quando - Date.now()) / 60000);
+          label.textContent = "previsione " + formatClockTime(new Date(quando))
+            + (scarto > 0 ? " · tra " + scarto + " min" : " · " + (-scarto) + " min fa");
+          return;
+        }
         const slot = cloudSlot();
         if (!cloudTimeSelected) {
           label.textContent = "in diretta · ultima immagine disponibile";
