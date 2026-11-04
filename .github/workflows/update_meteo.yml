@@ -94,9 +94,14 @@ on:
       - '.github/workflows/update_meteo.yml'
       - '.github/workflows/import_icon2i_history.yml'
 
+# Un push nuovo rende inutile quello vecchio: si cancella. Un run
+# programmato invece no: GitHub li fa partire con ore di ritardo e due
+# finiscono vicini, e il 03/11 il run delle 20:14 e' stato cancellato
+# a meta' del deploy, dopo mezz'ora di calcolo, da quello delle 21:05.
+# Per i programmati il nuovo aspetta in coda che il vecchio finisca.
 concurrency:
   group: meteo-update-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
   # Che cosa ha toccato questo push? Una modifica a un CSS non ha bisogno di
@@ -506,7 +511,8 @@ jobs:
 
       # La pubblicazione e' un commit orfano: le ore passate dell'ambiente
       - name: Deploy dati su branch gh-pages
-        timeout-minutes: 25
+        # Tre tentativi da 9 minuti al massimo, piu' le pause.
+        timeout-minutes: 32
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -533,14 +539,22 @@ jobs:
           git init -q -b gh-pages
           git config user.name "MeteoBot"
           git config user.email "bot@meteo.local"
-          git config http.lowSpeedLimit 1000
-          git config http.lowSpeedTime 60
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
           git add -A
           git commit -q -m "Pubblica dati meteo $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+          # Il commit e' orfano, quindi ogni deploy carica tutto: circa
+          # 465 MB. Di solito ci vogliono 45 secondi. Il 03/11 il primo
+          # tentativo e' andato avanti a rilento per 19 minuti -- sopra
+          # i 1000 byte/s del limite anti-stallo, quindi mai interrotto --
+          # e il passo e' scaduto senza un secondo tentativo. Ora ogni
+          # tentativo ha un tetto di 9 minuti, e uno che resta sotto i
+          # 100 kB/s per un minuto (cosi' non finirebbe in tempo comunque)
+          # si interrompe subito per lasciare spazio al successivo.
+          git config http.lowSpeedLimit 100000
+          git config http.lowSpeedTime 60
           for attempt in 1 2 3; do
-            if git push --force origin gh-pages; then
+            if timeout 540 git push --force origin gh-pages; then
               echo "Deploy gh-pages completato (tentativo $attempt)."
               exit 0
             fi
