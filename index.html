@@ -15530,15 +15530,18 @@
       }
 
       function setDrawer(open) {
-        const focusInside = ui.drawer.contains(document.activeElement);
+        const opener = document.activeElement;
+        const focusInside = ui.drawer.contains(opener);
         ui.drawer.classList.toggle("open", open);
         document.body.classList.toggle("drawer-open", open);
         ui.drawerButton.setAttribute("aria-expanded", open ? "true" : "false");
         if (open) {
           setMoreMenu(false);
-          requestAnimationFrame(function () {
-            if (ui.drawer.classList.contains("open")) ui.drawerClose.focus({preventScroll:true});
-          });
+          setTimeout(function () {
+            if (ui.drawer.classList.contains("open") && document.activeElement === opener) {
+              ui.drawerClose.focus({preventScroll:true});
+            }
+          }, 180);
         } else if (focusInside) {
           ui.drawerButton.focus({preventScroll:true});
         }

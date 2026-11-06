@@ -506,7 +506,7 @@ body.satellite-view .sat-bar { display: flex; }
   background: rgba(240, 112, 79, 0.2);
   border-color: rgba(240, 112, 79, 0.55);
 }
-.sat-layer.active .icon { opacity: 1; color: #ffb199; }
+.sat-layer.active .icon { opacity: 1; color: var(--accent); }
 .sat-layer.active small { opacity: 0.85; }
 
 /* Legenda minima del renderer scientifico: resta nel pannello dei dati,
