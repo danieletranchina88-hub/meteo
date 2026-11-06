@@ -158,6 +158,82 @@ function setWeatherView(view) {
     if(e.key === 'ArrowDown') {e.preventDefault();results.querySelector('button')?.focus();}
     if(e.key === 'Enter') results.querySelector('button')?.click();
   });
+  // The native buttons remain reachable with Tab; arrows also navigate results.
+  results.addEventListener('keydown', function(e) {
+    const buttons = Array.from(results.querySelectorAll('button'));
+    const index = buttons.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = index + (e.key === 'ArrowDown' ? 1 : -1);
+      if (next < 0) query.focus();
+      else buttons[Math.min(next, buttons.length - 1)]?.focus();
+    }
+    if (e.key === 'Escape') { results.hidden = true; query.focus(); }
+  });
+  query.setAttribute('aria-controls', 'place-results');
   document.addEventListener('click',e=>{if(!document.getElementById('place-search').contains(e.target))results.hidden=true;});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden){prefetchWholeRun(currentIndex);scheduleFrameWarmup();}});
+})();
+
+/* Responsive layout moves the existing controls; it never duplicates layers. */
+(function consoleControls() {
+  const rail = document.getElementById('quick-layers');
+  const section = document.createElement('section');
+  section.className = 'drawer-section mobile-fields';
+  section.innerHTML = '<div class="section-title"><h3>Campi principali</h3></div><div class="mobile-field-grid"></div>';
+  document.querySelector('.drawer-content').prepend(section);
+  const grid = section.querySelector('.mobile-field-grid');
+  const fields = Array.from(rail.querySelectorAll('.layer-card'));
+  const mobile = window.matchMedia('(max-width: 959px)');
+  function arrange() {
+    fields.forEach(button => {
+      if (mobile.matches) grid.append(button);
+      else rail.insertBefore(button, rail.querySelector('.all-fields'));
+    });
+  }
+  arrange();
+  mobile.addEventListener('change', arrange);
+
+  const previous = document.getElementById('time-prev');
+  const next = document.getElementById('time-next');
+  const now = document.getElementById('time-now');
+  function go(index) {
+    if (!catalog.length || weatherView !== 'forecast') return;
+    setPlaying(false);
+    const target = Math.max(0, Math.min(catalog.length - 1, index));
+    ui.slider.value = target;
+    requestSliderStep(target);
+  }
+  // Read the requested slider position so rapid clicks can queue the latest step.
+  previous.addEventListener('click', () => go(Number(ui.slider.value) - 1));
+  next.addEventListener('click', () => go(Number(ui.slider.value) + 1));
+  now.addEventListener('click', () => {
+    let best = -1, distance = Infinity;
+    catalog.forEach((item, index) => {
+      const date = parseCatalogDate(item);
+      const delta = date ? Math.abs(date.getTime() - Date.now()) : Infinity;
+      if (delta < distance) { best = index; distance = delta; }
+    });
+    if (best >= 0) go(best);
+  });
+  function syncTimeNavigation() {
+    previous.disabled = !catalog.length || currentIndex <= 0;
+    next.disabled = !catalog.length || currentIndex >= catalog.length - 1;
+    now.disabled = !catalog.some(item => parseCatalogDate(item));
+    const current = parseCatalogDate(catalog[currentIndex]);
+    const day = date => date?.toLocaleDateString('it-IT', {timeZone: 'Europe/Rome'});
+    const activeDay = day(current);
+    document.querySelectorAll('#timeline-days button').forEach(button => {
+      const index = Math.round(parseFloat(button.style.left) / 100 * Math.max(1, catalog.length - 1));
+      button.setAttribute('aria-current', String(Boolean(activeDay) && day(parseCatalogDate(catalog[index])) === activeDay));
+    });
+  }
+  new MutationObserver(syncTimeNavigation).observe(document.getElementById('time-label'), {childList: true});
+  syncTimeNavigation();
+  document.querySelectorAll('.speed-controls button').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.classList.contains('active')));
+    button.addEventListener('click', () => document.querySelectorAll('.speed-controls button').forEach(item => {
+      item.setAttribute('aria-pressed', String(item === button));
+    }));
+  });
 })();

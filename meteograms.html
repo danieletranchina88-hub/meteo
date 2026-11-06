@@ -398,7 +398,7 @@
           <h1>Meteogrammi</h1>
         </div>
       </div>
-      <a class="map-button map-link" href="index.html">
+      <a class="map-button map-link" href="index.html" aria-label="Torna alla mappa">
         <svg class="button-icon" viewBox="0 0 24 24"><path d="M19 12H5"></path><path d="M11 18l-6-6 6-6"></path></svg>
         <span>Torna alla mappa</span>
       </a>
@@ -407,9 +407,9 @@
     <main>
       <section class="hero">
         <div class="hero-copy">
-          <span class="hero-kicker">Serie oraria completa · 0–72 h</span>
-          <h2>Il tempo, ora per ora.</h2>
-          <p>Scegli una località e confronta temperatura, pioggia e vento lungo tutta la previsione.</p>
+          <span class="hero-kicker">Diagnostica puntuale · ICON-2I</span>
+          <h2>Analisi della previsione.</h2>
+          <p>Serie orarie sincronizzate di temperatura, precipitazioni e vento. Seleziona il punto e consulta le diagnostiche del run.</p>
           <div class="run-line">
             <span id="run-time">Run in caricamento</span>
             <span id="forecast-range">73 scadenze previste</span>
@@ -767,7 +767,9 @@
           container.innerHTML = '<div class="chart-empty">Parametro non disponibile in questo run</div>';
           return;
         }
-        const width = 1000, height = 290, left = 66, right = 18, top = 20, bottom = 45;
+        // Keep SVG text at its intended pixel size on narrow screens.
+        const width = Math.max(280, container.clientWidth || 600);
+        const height = 290, left = 48, right = 18, top = 20, bottom = 40;
         const plotWidth = width - left - right, plotHeight = height - top - bottom;
         const xScale = index => left + (count <= 1 ? 0 : index / (count - 1) * plotWidth);
         const yScale = value => top + (extent[1] - value) / (extent[1] - extent[0]) * plotHeight;
@@ -1126,9 +1128,9 @@
             `Richiesta ${lat.toFixed(3)}°N, ${lon.toFixed(3)}°E · interpolazione bilineare su quattro punti dell’archivio 0,20°`;
           const query = `?lat=${encodeURIComponent(lat.toFixed(4))}&lon=${encodeURIComponent(lon.toFixed(4))}`;
           document.querySelectorAll(".map-link").forEach(link => link.href = "index.html" + query);
+          contentNode.hidden = false;
           renderAll();
           statusNode.hidden = true;
-          contentNode.hidden = false;
         } catch (error) {
           setStatus("Impossibile caricare il meteogramma: " + error.message, true);
         }
@@ -1168,10 +1170,20 @@
           document.querySelectorAll("[data-chart-group]").forEach(card => {
             card.hidden = group !== "all" && card.dataset.chartGroup !== group;
           });
+          if (state.series) renderAll();
         });
       });
 
       document.querySelectorAll("[data-chart-group]").forEach(card => { card.hidden = card.dataset.chartGroup !== "surface"; });
+
+      // Only a width change redraws the charts; scrolling and pointer moves do not.
+      let chartLayoutWidth = 0;
+      new ResizeObserver(entries => {
+        const width = Math.round(entries[0].contentRect.width);
+        if (width === chartLayoutWidth) return;
+        chartLayoutWidth = width;
+        if (state.series && !contentNode.hidden) renderAll();
+      }).observe(document.querySelector('.charts-grid'));
 
       async function initialize() {
         initializeCities();
