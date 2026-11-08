@@ -335,12 +335,20 @@ assert.match(elevation[0], /queryTerrainElevation/,
 assert.match(elevation[0], /raw \/ exaggeration/,
   "la quota non viene divisa per l'esagerazione verticale");
 
-// Le particelle sono bianche: il colore per velocita' competeva con la scala
-// cromatica del campo sotto. La velocita' resta leggibile da spessore e alfa.
+// Sopra un campo colorato le particelle sono bianche: il colore per velocita'
+// competerebbe con la scala del campo sotto. Fa eccezione il solo vento a scie
+// colorate, dove il campo si spegne e il colore lo portano le scie.
 const style = html.match(/function particleStyle\([\s\S]*?\n {6}\}/);
 assert.ok(style, "particleStyle assente");
 assert.doesNotMatch(style[0], /rgba\((?!255,\s*255,\s*255)/,
   "le particelle sono tornate colorate");
+assert.match(style[0], /if \(scieColorate\(\)\) return stileScia\(speed\);/,
+  "il vento non usa le scie colorate");
+const scie = html.match(/function scieColorate\([\s\S]*?\n {6}\}/);
+assert.ok(scie && /activeLayer === "wind"/.test(scie[0]),
+  "le scie colorate valgono anche fuori dal campo del vento");
+assert.match(html, /scieColorate\(\)\s*\?\s*0\s*:/,
+  "sotto le scie colorate il campo del vento resta acceso");
 // Nessun contorno scuro: su tratti sottili un alone piu' largo copre piu'
 // superficie del bianco e le particelle si leggono scure.
 assert.doesNotMatch(animate[0], /strokeStyle\s*=\s*"rgba\((?!255,\s*255,\s*255)/,
@@ -378,8 +386,9 @@ assert.match(html, /id="detail-wetbulb"/, "lettura puntuale del bulbo umido asse
 // --- Il fondo cartografico e' nostro ---------------------------------------
 // Un fondo raster sta SOTTO il campo colorato: quando il campo si accende la
 // costa sparisce proprio dove serve. Queste sono linee, e si disegnano SOPRA.
-assert.match(html, /const MAP_LAND = "#e7e5d9";/, "colore della terra assente");
-assert.match(html, /const MAP_SEA = "#9dc0de";/, "colore del mare assente");
+// Carta scura ma non nera (scelta del proprietario, 08/11/2026).
+assert.match(html, /const MAP_LAND = "#1a2531";/, "colore della terra assente");
+assert.match(html, /const MAP_SEA = "#0d1824";/, "colore del mare assente");
 ["land", "sea", "coast", "borders", "lakes", "rivers"].forEach((tema) => {
   assert.ok(html.includes('data: "data_base/' + tema + '.json"'),
     "il fondo non carica il tema: " + tema);
@@ -556,7 +565,7 @@ assert.match(html, /id: "terrain-base"[\s\S]*?layout: \{ visibility: "none" \}/,
   "il rilievo raster non e' spento nello stile iniziale");
 assert.match(html, /id: "terrain-detail"[\s\S]*?layout: \{ visibility: "none" \}/,
   "il rilievo DEM non e' spento nello stile iniziale");
-assert.match(html, /#map\s*\{[\s\S]*?background: #9dc0de;/,
+assert.match(html, /#map\s*\{[\s\S]*?background: #0d1824;/,
   "prima del caricamento il fondo non e' gia' quello della carta");
 
 // Interfaccia: i pannelli galleggiano sulla mappa, quindi il campo di vento
@@ -1041,8 +1050,14 @@ const windLayer = html.match(/if \(layerShowsFlow\(nextLayer\) && !synopticChart
 assert.ok(windLayer, "scelta del campo vento assente");
 assert.match(windLayer[0], /showVectors = true/,
   "il campo vento non attiva le linee di corrente");
-assert.doesNotMatch(windLayer[0], /showParticles = true/,
-  "il campo vento accende ancora automaticamente le particelle");
+// Scelta del proprietario (laboratorio mappe, 08/11/2026): sul vento il
+// disegno sono le scie colorate, quindi le particelle si accendono da sole --
+// ma solo sul vento e mai con le animazioni ridotte; la raffica tiene le
+// linee di corrente.
+assert.match(windLayer[0], /nextLayer === "wind" && !prefersReducedMotion\) \{[\s\S]*?showParticles = true;/,
+  "il vento non accende le scie colorate");
+assert.match(html, /nextLayer !== "wind" && particelleDaRipristinare\)/,
+  "lasciando il vento le particelle accese per le scie restano accese");
 // La raffica e' uno scalare senza direzione propria: le linee di corrente
 // sopra il suo campo colorato sono quelle del vento medio a 10 m.
 const flowLayers = html.match(/function layerShowsFlow\([\s\S]*?\n {6}\}/);

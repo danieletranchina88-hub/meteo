@@ -123,7 +123,8 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
   const ctx={map:{getSource:()=>source},console,setTimeout:fn=>fn(),
    URL:{createObjectURL:b=>'blob:'+b.tag,revokeObjectURL:u=>revocati.push(u)},
    rasterCanvas:{toBlob:(fn)=>{daChiamare=fn;},toDataURL:()=>'data:,x'},
-   rasterPublishToken:0,rasterObjectUrl:'',lastRasterSignature:'firma'};
+   rasterPublishToken:0,rasterObjectUrl:'',lastRasterSignature:'firma',
+   preparaDissolvenza:()=>null,ricordaRaster:()=>{},avviaDissolvenza:()=>{}};
   vm.createContext(ctx);vm.runInContext(implementation('publishWeatherRaster'),ctx);
   ctx.publishWeatherRaster([[0,1],[1,1],[1,0],[0,0]]);
   const primaCodifica=daChiamare;
@@ -156,7 +157,7 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
     window:{devicePixelRatio:1},weatherFrameEpoch:0,lastRasterSignature:'',terrainCoverageStamp:0,rasterRenderToken:0,pendingRasterCallback:null,pendingRenderReady:null,
     weatherFrames:new FrameCache(1000000),rasterCanvas:{},rasterContext:{putImageData:()=>paints++},
     ImageData:class {constructor(p,w,h){this.data=p;}},isMobile:()=>false,
-    RASTER_CONFIG:{padding:.2,maxDensityDesktop:1,pixelLimitDesktop:100},
+    RASTER_CONFIG:{padding:.2,maxDensityDesktop:1,pixelLimitDesktop:100},SNOW_STOPS:[],SNOW_WETBULB_SNOW:.5,SNOW_WETBULB_RAIN:1.5,
     activeLayerInfo:()=>({stops:[]}),usesUpperData:()=>false,usesStormData:()=>false,usesProbData:()=>false,usesProfileData:()=>false,
     elevationDownscalingActive:()=>false,getGrid:x=>x,applyWeatherPaint:()=>{},scheduleFrameWarmup:()=>{},
     publishWeatherRaster:()=>publishes++,map:{getSource:()=>({}),getBounds:()=>({getWest:()=>9,getEast:()=>12,getSouth:()=>38,getNorth:()=>41}),getPitch:()=>0,getContainer:()=>({clientWidth:10,clientHeight:10})}};
