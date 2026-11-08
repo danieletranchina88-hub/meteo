@@ -88,7 +88,7 @@
         /* Lo stesso azzurro del mare della carta: prima del caricamento delle
            tessere si vede questo, e un lampo scuro su una carta chiara e' un
            difetto che si nota a ogni visita. */
-        background: #9dc0de;
+        background: #0d1824;
         touch-action: none;
         overscroll-behavior: none;
       }
@@ -140,6 +140,7 @@
       .station-popup b { color: #132c3e; text-align: right; }
 
       #particle-canvas,
+      #effects-canvas,
       #vector-canvas,
       #map-vignette {
         position: fixed;
@@ -149,8 +150,36 @@
         pointer-events: none;
       }
 
-      #particle-canvas {
+      #particle-canvas,
+      #effects-canvas {
         z-index: 6;
+      }
+
+      /* Il valore sotto il puntatore del mouse. */
+      #sonda {
+        position: fixed;
+        z-index: 30;
+        left: 0;
+        top: 0;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 5px 11px 5px 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.96);
+        color: #142231;
+        font: 650 12px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32);
+        pointer-events: none;
+      }
+      #sonda[hidden] { display: none; }
+      #sonda i {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
       }
 
       #vector-canvas {
@@ -2212,6 +2241,8 @@
   <body>
     <div id="map" aria-label="Mappa meteorologica interattiva"></div>
     <canvas id="particle-canvas" aria-hidden="true"></canvas>
+    <canvas id="effects-canvas" aria-hidden="true"></canvas>
+    <div id="sonda" aria-hidden="true" hidden><i></i><span></span></div>
     <canvas id="vector-canvas" aria-hidden="true"></canvas>
     <div id="sky-haze" aria-hidden="true"></div>
     <div id="paper-wash" aria-hidden="true"></div>
@@ -2530,6 +2561,9 @@
               </button>
               <button class="toggle-row" type="button" data-toggle="isobars" aria-pressed="false">
                 <span><b>Isobare e A/B</b><small>passo 2 hPa · principali ogni 8</small></span><span class="switch"></span>
+              </button>
+              <button class="toggle-row" type="button" data-toggle="cityvalues" aria-pressed="false">
+                <span><b>Valori sulle città</b><small>il campo scelto accanto al nome</small></span><span class="switch"></span>
               </button>
               <!-- Due modi di disegnare lo stesso campo u/v, separati perche'
                    servono a cose diverse: le linee di corrente descrivono la
@@ -3008,6 +3042,29 @@
         { v: 80, c: [120, 0, 60], a: 1 }
       ];
 
+      // Neve. Stesse soglie della pioggia, in millimetri d'acqua equivalente,
+      // ma dal bianco al lilla: dove la precipitazione arriva al suolo come
+      // neve la si riconosce senza leggere la scala. Scelta del proprietario
+      // dal laboratorio delle mappe (08/11/2026).
+      const SNOW_STOPS = [
+        { v: 0, c: [0, 0, 0], a: 0 },
+        { v: 0.1, c: [232, 230, 246], a: 0.7 },
+        { v: 0.5, c: [236, 230, 255], a: 0.82 },
+        { v: 1, c: [226, 214, 255], a: 0.9 },
+        { v: 2, c: [210, 192, 252], a: 0.95 },
+        { v: 4, c: [192, 168, 246], a: 0.97 },
+        { v: 10, c: [168, 136, 236], a: 1 },
+        { v: 20, c: [146, 108, 222], a: 1 },
+        { v: 40, c: [124, 84, 204], a: 1 },
+        { v: 80, c: [98, 60, 180], a: 1 }
+      ];
+      // Il confine fra pioggia e neve: bulbo umido al suolo. Sotto 0,5 °C la
+      // precipitazione e' neve, sopra 1,5 °C pioggia, in mezzo si mescola.
+      // E' la regola pratica dei previsori: il bulbo umido tiene conto del
+      // raffreddamento per evaporazione che l'aria secca fa sulla neve.
+      const SNOW_WETBULB_SNOW = 0.5;
+      const SNOW_WETBULB_RAIN = 1.5;
+
       const CLOUD_ANCHORS = [
         { v: 0, c: [96, 160, 220], a: 0.72 },
         { v: 10, c: [120, 175, 226], a: 0.76 },
@@ -3426,7 +3483,7 @@
           discrete: true,
           decimals: 1,
           ticks: [0.1, 1, 4, 10, 20, 40, 80],
-          note: "Soglie pluviometriche discrete per separare pioggia debole, moderata e intensa.",
+          note: "Soglie pluviometriche discrete per separare pioggia debole, moderata e intensa. In lilla dove cade neve (bulbo umido sotto 0,5 °C; fra 0,5 e 1,5 °C pioggia mista a neve).",
           opacity: 0.96,
           terrainOpacity: 0.25
         },
@@ -3864,6 +3921,10 @@
       const rasterContext = rasterCanvas.getContext("2d");
       const particleCanvas = document.getElementById("particle-canvas");
       const particleContext = particleCanvas.getContext("2d", { alpha: true });
+      // Pioggia, neve e lampi animati sopra il campo delle precipitazioni.
+      const effectsCanvas = document.getElementById("effects-canvas");
+      const effectsContext = effectsCanvas.getContext("2d", { alpha: true });
+      let effettiVista = 0;
       const vectorCanvas = document.getElementById("vector-canvas");
       const vectorContext = vectorCanvas.getContext("2d", { alpha: true });
 
@@ -3896,7 +3957,11 @@
       let showParticles = window.innerWidth >= 960 && !(window.matchMedia
         && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
       let showVectors = false;
-      let showIsobars = false;
+      // Isobare con A e B accese da subito: scelta del proprietario dal
+      // laboratorio delle mappe (08/11/2026).
+      let showIsobars = true;
+      // Il valore del campo accanto al nome delle citta'.
+      let showCityValues = true;
       let showIsotherms = false;
       let showIsohypses = false;
       let showRadar = false;
@@ -3938,12 +4003,19 @@
       // ma conserva depressioni, promontori e gradiente barico sinottico.
       const PRESSURE_ANALYSIS_RADIUS_KM = 60;
       const PRESSURE_ANALYSIS_PASSES = 2;
-      // I due colori della carta, campionati da una carta topografica vera:
-      // terra crema calda e mare azzurro pieno. Non sono decorazione -- una
-      // terra e un mare quasi dello stesso grigio, come nel vecchio fondo
-      // desaturato, non dicono dove finisce la costa.
-      const MAP_LAND = "#e7e5d9";
-      const MAP_SEA = "#9dc0de";
+      // I due colori della carta. Scura ma non nera, come nel laboratorio
+      // delle mappe scelto dal proprietario (08/11/2026): mare blu notte,
+      // terra ardesia un poco piu' chiara, coste chiare sopra. La differenza
+      // fra terra e mare resta netta -- e' quella che dice dove finisce la
+      // costa -- e sul fondo scuro i colori dei campi e le scie del vento
+      // si accendono invece di sbiadire.
+      const MAP_LAND = "#1a2531";
+      const MAP_SEA = "#0d1824";
+      // L'inchiostro sopra la carta scura: coste, confini, regioni, fiumi.
+      const MAP_COAST = "rgba(214,228,240,0.55)";
+      const MAP_BORDER = "rgba(214,228,240,0.3)";
+      const MAP_REGION = "rgba(214,228,240,0.16)";
+      const MAP_RIVER = "rgba(120,165,200,0.38)";
       // Il foglio, l'inchiostro e i due colori dei fronti stampati.
       const PAPER_SHEET = "#f4efe3";
       const PAPER_INK = "#1d1a16";
@@ -4358,6 +4430,8 @@
         const windUGrid = params.windUGrid, windVGrid = params.windVGrid;
         const info = params.info;
         const activeLayer = params.activeLayer;
+        const snowGrid = activeLayer === "rain" ? params.snowGrid : null;
+        const snowInfo = params.snowInfo;
         // Correzione di quota: il campo delle quote e il profilo del modello
         // arrivano insieme ai dati, quindi il disegno corretto e' lo stesso
         // disegno, non un percorso a parte sul thread principale.
@@ -4420,7 +4494,21 @@
             }
 
             const pixel = index * 4;
-            const color = colorFor(value, info);
+            let color = colorFor(value, info);
+            if (snowGrid) {
+              const bulbo = rasterSampler(snowGrid, gx, gy, fieldMeta.nx, fieldMeta.ny);
+              if (bulbo < snowInfo.rainAbove) {
+                const neve = colorFor(value, snowInfo);
+                const quota = clamp((snowInfo.rainAbove - bulbo)
+                  / (snowInfo.rainAbove - snowInfo.snowBelow), 0, 1);
+                color = [
+                  color[0] + (neve[0] - color[0]) * quota,
+                  color[1] + (neve[1] - color[1]) * quota,
+                  color[2] + (neve[2] - color[2]) * quota,
+                  color[3] + (neve[3] - color[3]) * quota
+                ];
+              }
+            }
             pixels[pixel] = Math.round(color[0]);
             pixels[pixel + 1] = Math.round(color[1]);
             pixels[pixel + 2] = Math.round(color[2]);
@@ -5612,7 +5700,7 @@
             // rimasto nascosto finche' "Nubi in volume" non ha cominciato a
             // inclinare la mappa -- e da li' bloccava la costruzione del
             // volume prima ancora che partisse.
-            synopticChart ? mapBackgroundColour() : "rgb(188,204,218)"
+            synopticChart ? mapBackgroundColour() : "rgb(20,34,48)"
           );
         }
       }
@@ -10178,6 +10266,7 @@
           flow: showParticles,
           vectors: showVectors,
           isobars: showIsobars,
+          cityvalues: showCityValues,
           isotherms: showIsotherms,
           isohypses: showIsohypses,
           radar: showRadar,
@@ -10454,8 +10543,25 @@
         // leggere da essere attive anche sul telefono. Le particelle restano
         // un livello animato facoltativo: sovrapporle in automatico renderebbe
         // il campo meno leggibile e consumerebbe di piu'.
+        // Lasciando il vento, le particelle accese solo per le scie tornano
+        // spente: sul telefono restano una scelta esplicita.
+        if (nextLayer !== "wind" && particelleDaRipristinare) {
+          particelleDaRipristinare = false;
+          showParticles = false;
+          stopParticles();
+        }
         if (layerShowsFlow(nextLayer) && !synopticChart) {
-          showVectors = true;
+          // Sul vento il disegno sono le scie colorate; dove le animazioni
+          // sono spente restano le linee di corrente sopra il campo.
+          if (nextLayer === "wind" && !prefersReducedMotion) {
+            if (!showParticles) particelleDaRipristinare = true;
+            showParticles = true;
+            showVectors = false;
+            resetParticles();
+            startParticles();
+          } else {
+            showVectors = true;
+          }
         }
 
         if (nextLayer === "press") showIsobars = true;
@@ -10517,6 +10623,7 @@
           requestVectorRender();
         } else if (name === "flow") {
           showParticles = !showParticles;
+          particelleDaRipristinare = false;
           if (showParticles) {
             startParticles();
             // Le particelle sono la meta' costosa del disegno del vento: una
@@ -10526,6 +10633,10 @@
           } else {
             stopParticles();
           }
+          aggiornaVeloVento();
+        } else if (name === "cityvalues") {
+          showCityValues = !showCityValues;
+          requestVectorRender();
         } else if (name === "isotherms") {
           showIsotherms = !showIsotherms;
           requestVectorRender();
@@ -10815,10 +10926,14 @@
         // varia poco su pochi chilometri non perde nulla a farsi trasparente.
         // Espressione legata allo zoom: MapLibre la valuta a ogni fotogramma,
         // quindi la transizione segue la pinch invece di scattare a fine gesto.
+        // Sotto le scie colorate il campo del vento si spegne: resta la carta
+        // scura, e il colore lo portano le scie.
         map.setPaintProperty(
           "weather-layer",
           "raster-opacity",
-          showSatellite
+          scieColorate()
+            ? 0
+            : showSatellite
             ? [
                 "interpolate", ["linear"], ["zoom"],
                 7, baseOpacity,
@@ -10839,6 +10954,75 @@
         }
       }
 
+      // ---- PASSAGGIO FLUIDO FRA LE ORE ---------------------------------------
+      //
+      // Scelta del proprietario dal laboratorio delle mappe (08/11/2026).
+      // Cambiando ora, la nuova immagine del campo non sostituisce di colpo la
+      // vecchia: la vecchia resta sotto, la nuova sale da trasparente a piena.
+      // E' una dissolvenza fra due ore vere del modello, non un'ora intermedia
+      // calcolata: nessun valore nuovo compare sulla carta, cambia solo come
+      // si passa dall'uno all'altro. Durante il play dura poco piu' di meta'
+      // del passo, scorrendo a mano un quarto di secondo; con le animazioni
+      // ridotte non c'e'.
+      let ultimoRaster = null;
+      let dissolvenzaTimer = 0;
+      let dissolvenzaAvvio = 0;
+
+      function chiaveRaster() {
+        return [activeLayer, selectedLevel, activeModel, synopticChart, showSatellite].join("|");
+      }
+
+      function ricordaRaster(url, coordinates) {
+        ultimoRaster = { chiave: chiaveRaster(), indice: currentIndex, url: url, coordinate: coordinates };
+      }
+
+      function preparaDissolvenza() {
+        const prima = ultimoRaster;
+        if (prefersReducedMotion || !prima || !prima.url) return null;
+        if (prima.chiave !== chiaveRaster() || prima.indice === currentIndex) return null;
+        if (!map.getLayer("weather-prev-layer") || !map.getSource("weather-prev")) return null;
+        if (map.getLayoutProperty("weather-layer", "visibility") === "none") return null;
+        const opacita = map.getPaintProperty("weather-layer", "raster-opacity");
+        if (opacita === 0 || opacita === undefined) return null;
+        try {
+          map.getSource("weather-prev").updateImage({ url: prima.url, coordinates: prima.coordinate });
+        } catch (error) {
+          return null;
+        }
+        map.setPaintProperty("weather-prev-layer", "raster-opacity", opacita);
+        ["raster-brightness-max", "raster-saturation", "raster-contrast"].forEach(function (nome) {
+          const valore = map.getPaintProperty("weather-layer", nome);
+          if (valore !== undefined) map.setPaintProperty("weather-prev-layer", nome, valore);
+        });
+        map.setPaintProperty("weather-prev-layer", "raster-resampling",
+          map.getPaintProperty("weather-layer", "raster-resampling") || "linear");
+        map.setLayoutProperty("weather-prev-layer", "visibility", "visible");
+        map.setPaintProperty("weather-layer", "raster-opacity-transition", { duration: 0, delay: 0 });
+        map.setPaintProperty("weather-layer", "raster-opacity", 0);
+        return { opacita: opacita, durata: isPlaying ? clamp(playbackDelay * 0.55, 220, 750) : 260 };
+      }
+
+      function avviaDissolvenza(dissolvenza) {
+        clearTimeout(dissolvenzaTimer);
+        cancelAnimationFrame(dissolvenzaAvvio);
+        // Due fotogrammi: il tempo che la nuova immagine, gia' in memoria come
+        // blob, arrivi sulla scheda grafica prima di cominciare a salire.
+        dissolvenzaAvvio = requestAnimationFrame(function () {
+          dissolvenzaAvvio = requestAnimationFrame(function () {
+            map.setPaintProperty("weather-layer", "raster-opacity-transition",
+              { duration: dissolvenza.durata, delay: 0 });
+            map.setPaintProperty("weather-layer", "raster-opacity", dissolvenza.opacita);
+            dissolvenzaTimer = setTimeout(chiudiDissolvenza, dissolvenza.durata + 60);
+          });
+        });
+      }
+
+      function chiudiDissolvenza() {
+        if (!map || !map.getLayer("weather-prev-layer")) return;
+        map.setLayoutProperty("weather-prev-layer", "visibility", "none");
+        map.setPaintProperty("weather-layer", "raster-opacity-transition", { duration: 0, delay: 0 });
+      }
+
       function publishWeatherRaster(coordinates) {
         const token = ++rasterPublishToken;
         const source = map.getSource("weather");
@@ -10850,7 +11034,10 @@
             return;
           }
           try {
+            const dissolvenza = preparaDissolvenza();
             source.updateImage({ url: url, coordinates: coordinates });
+            ricordaRaster(url, coordinates);
+            if (dissolvenza) avviaDissolvenza(dissolvenza);
             if (rasterObjectUrl) {
               const previousUrl = rasterObjectUrl;
               setTimeout(function () { URL.revokeObjectURL(previousUrl); }, 1600);
@@ -11797,6 +11984,12 @@
           samplerKind: rasterSamplerKind, isWindField: isWindField,
           fieldGrid: fieldGrid, windUGrid: windUGrid, windVGrid: windVGrid,
           info: { stops: info.stops, discrete: Boolean(info.discrete) },
+          snowGrid: activeLayer === "rain" && !upperActive && !probActive
+            ? getGrid(currentData.wetbulb) : null,
+          snowInfo: {
+            stops: SNOW_STOPS, discrete: Boolean(info.discrete),
+            snowBelow: SNOW_WETBULB_SNOW, rainAbove: SNOW_WETBULB_RAIN
+          },
           activeLayer: activeLayer,
           terrainKey: terrainField ? terrainField.key : "",
           elevation: terrainField ? {
@@ -11955,30 +12148,47 @@
         if (map.getLayer("base-coast-layer")) {
           map.setPaintProperty(
             "base-coast-layer", "line-color",
-            onPhoto ? "rgba(248,252,255,0.9)" : "rgba(16,32,44,0.74)"
+            onPhoto ? "rgba(248,252,255,0.9)" : (synopticChart ? "rgba(16,32,44,0.74)" : MAP_COAST)
           );
         }
         if (map.getLayer("base-borders-layer")) {
           map.setPaintProperty(
             "base-borders-layer", "line-color",
-            onPhoto ? "rgba(232,244,255,0.8)" : "rgba(28,48,62,0.5)"
+            onPhoto ? "rgba(232,244,255,0.8)" : (synopticChart ? "rgba(28,48,62,0.5)" : MAP_BORDER)
           );
         }
         if (map.getLayer("base-rivers-layer")) {
           map.setPaintProperty(
             "base-rivers-layer", "line-opacity", onPhoto ? 0 : 1
           );
+          map.setPaintProperty(
+            "base-rivers-layer", "line-color",
+            synopticChart ? "rgba(60,96,116,0.42)" : MAP_RIVER
+          );
+        }
+        if (map.getLayer("base-coast-casing")) {
+          map.setLayoutProperty("base-coast-casing", "visibility", synopticChart ? "none" : "visible");
+        }
+        if (map.getLayer("base-lakes-line")) {
+          map.setPaintProperty(
+            "base-lakes-line", "line-color",
+            synopticChart ? "rgba(16,32,44,0.7)" : MAP_COAST
+          );
+        }
+        if (map.getLayer("model-mask-layer")) {
+          map.setPaintProperty("model-mask-layer", "fill-color", synopticChart ? "#d9dee3" : "#04080d");
+          map.setPaintProperty("model-mask-layer", "fill-opacity", synopticChart ? 0.62 : 0.5);
         }
         if (map.getLayer("regions-layer")) {
           map.setPaintProperty(
             "regions-layer", "line-color",
-            onPhoto ? "rgba(222,235,250,0.72)" : "rgba(38,58,72,0.3)"
+            onPhoto ? "rgba(222,235,250,0.72)" : (synopticChart ? "rgba(38,58,72,0.3)" : MAP_REGION)
           );
         }
         if (map.getLayer("graticule-layer")) {
           map.setPaintProperty(
             "graticule-layer", "line-color",
-            onPhoto ? "rgba(177,207,232,0.64)" : "rgba(18,66,93,0.68)"
+            onPhoto || !synopticChart ? "rgba(177,207,232,0.64)" : "rgba(18,66,93,0.68)"
           );
         }
         // Il velo del campo dipende dalla base scelta: lo riapplico subito.
@@ -12852,7 +13062,8 @@
       }
 
       function particleTrailFade() {
-        return PARTICLE_TRAIL_FADE[particleTrail] || PARTICLE_CONFIG.fade;
+        const scelta = PARTICLE_TRAIL_FADE[particleTrail] || PARTICLE_CONFIG.fade;
+        return scieColorate() ? Math.max(scelta, SCIA_DISSOLVENZA) : scelta;
       }
 
       function calculateParticleTarget() {
@@ -12889,6 +13100,7 @@
         const ratio = Math.min(window.devicePixelRatio || 1, tetto);
 
         [[particleCanvas, particleContext],
+         [effectsCanvas, effectsContext],
          [vectorCanvas, vectorContext]].forEach(function (entry) {
           const canvas = entry[0];
           const context = entry[1];
@@ -12901,6 +13113,7 @@
 
         calculateParticleTarget();
         resetParticles();
+        effettiVista += 1;
         requestVectorRender();
       }
 
@@ -13038,6 +13251,7 @@
       // cromatica del campo sotto (temperatura, pioggia), che è l'informazione
       // principale. La velocità resta leggibile da spessore e luminosità.
       function particleStyle(speed) {
+        if (scieColorate()) return stileScia(speed);
         if (speed < 10) return { color: "rgba(255,255,255,0.46)", width: 0.95 };
         if (speed < 20) return { color: "rgba(255,255,255,0.58)", width: 1.1 };
         if (speed < 35) return { color: "rgba(255,255,255,0.7)", width: 1.3 };
@@ -13045,6 +13259,53 @@
         if (speed < 70) return { color: "rgba(255,255,255,0.88)", width: 1.7 };
         if (speed < 90) return { color: "rgba(255,255,255,0.94)", width: 1.85 };
         return { color: "rgba(255,255,255,0.98)", width: 2 };
+      }
+
+      // ---- VENTO A SCIE COLORATE ------------------------------------------
+      //
+      // Scelta del proprietario dal laboratorio delle mappe (08/11/2026):
+      // sul campo del vento il colore non sta piu' sotto, lo portano le
+      // scie. Le particelle prendono la scala del vento -- la stessa della
+      // legenda, un po' schiarita per staccarsi dal fondo scuro -- e il
+      // campo colorato si spegne finche' le scie sono accese. Sugli altri
+      // campi le particelle restano bianche: li' il colore e' del campo.
+      //
+      // Le scie sono piu' lunghe e piu' fitte delle comete bianche: senza
+      // il campo sotto sono l'unico disegno, e devono riempire la carta.
+      const SCIA_SCHIARITA = 1.14;
+      const SCIA_DENSITA = 1.35;
+      const SCIA_DISSOLVENZA = 0.958;
+      const stiliScia = new Map();
+      let particelleDaRipristinare = false;
+
+      function scieColorate() {
+        return activeLayer === "wind" && showParticles
+          && weatherView === "forecast" && !synopticChart;
+      }
+
+      function stileScia(speed) {
+        // Fasce da 4 km/h: le scie si raggruppano per colore in pochi tratti.
+        const fascia = Math.min(40, Math.max(0, Math.round(speed / 4)));
+        let stile = stiliScia.get(fascia);
+        if (!stile) {
+          const c = colorFor(fascia * 4, { stops: WIND_SPEED_STOPS, discrete: false });
+          const r = Math.min(255, Math.round(c[0] * SCIA_SCHIARITA));
+          const g = Math.min(255, Math.round(c[1] * SCIA_SCHIARITA));
+          const b = Math.min(255, Math.round(c[2] * SCIA_SCHIARITA));
+          stile = {
+            color: "rgba(" + r + "," + g + "," + b + ",0.95)",
+            width: 1.15 + Math.min(0.85, fascia * 4 / 90)
+          };
+          stiliScia.set(fascia, stile);
+        }
+        return stile;
+      }
+
+      // Il campo colorato del vento si spegne e si riaccende con le scie.
+      function aggiornaVeloVento() {
+        if (!map || !map.getLayer || !map.getLayer("weather-layer")) return;
+        if (activeLayer !== "wind" || weatherView !== "forecast") return;
+        applyWeatherPaint(activeLayerInfo(activeLayer));
       }
 
       function startParticles() {
@@ -13111,7 +13372,7 @@
               (mobileParticles ? 420 : 800) * particleDensityFactor(),
               particleTarget * 0.72
             ))
-          : particleTarget;
+          : Math.round(particleTarget * (scieColorate() ? SCIA_DENSITA : 1));
 
         // In 3D ogni proiezione interroga il modello di elevazione, ed è il
         // costo che domina il frame. Invece di diradare le particelle, ne
@@ -13313,6 +13574,241 @@
         }
 
         particleFrame = requestAnimationFrame(animateParticles);
+      }
+
+      // ---- PIOGGIA, NEVE E TEMPORALI ANIMATI --------------------------------
+      //
+      // Scelta del proprietario dal laboratorio delle mappe (08/11/2026): sul
+      // campo delle precipitazioni la pioggia cade in trattini inclinati dal
+      // vento, la neve scende in fiocchi lenti, e i nuclei piu' intensi
+      // pulsano. E' un'animazione sopra il campo, non un dato nuovo:
+      //
+      //  - dove e quanto cade viene dal campo TOT_PREC del passo, letto su
+      //    un reticolo di schermo (piu' fitti i trattini dove piove di piu');
+      //  - neve o pioggia lo decide il bulbo umido al suolo, con la stessa
+      //    soglia che colora il raster;
+      //  - i nuclei sono i massimi locali da almeno 8 mm nel passo;
+      //  - un lampo compare in un nucleo SOLO se lo stesso punto ha l'indice
+      //    di innesco convettivo del modello almeno a 40/100. Senza quel
+      //    segnale il nucleo pulsa e basta: forte pioggia non vuol dire
+      //    temporale.
+      //
+      // Spento con le animazioni ridotte, sulla carta sinottica e mentre la
+      // mappa si muove. Sul telefono gira a 30 fotogrammi e con meno gocce.
+      const EFFETTI_PASSO_PX = 12;
+      const EFFETTI_NUCLEO_MM = 8;
+      const EFFETTI_LAMPO_INDICE = 40;
+      let effettiFrame = 0;
+      let effettiUltimo = 0;
+      let effettiDisegno = 0;
+      let effettiGriglia = null;
+      let effettiChiave = "";
+      let effettiGocce = [];
+      let effettiLampi = [];
+      let effettiProssimoLampo = 0;
+
+      function effettiAttivi() {
+        return activeLayer === "rain" && weatherView === "forecast"
+          && !synopticChart && !prefersReducedMotion && Boolean(currentData)
+          && Boolean(map) && !document.hidden;
+      }
+
+      function avviaEffettiPioggia() {
+        if (effettiFrame || !effettiAttivi()) return;
+        effettiUltimo = 0;
+        effettiFrame = requestAnimationFrame(cicloEffetti);
+      }
+
+      function svuotaEffetti() {
+        effettiGocce = [];
+        effettiLampi = [];
+        effectsContext.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      }
+
+      function grigliaEffetti() {
+        const w = window.innerWidth, h = window.innerHeight;
+        const chiave = [currentIndex, activeModel, w, h, effettiVista].join("|");
+        if (effettiGriglia && effettiChiave === chiave && effettiGriglia.data === currentData) {
+          return effettiGriglia;
+        }
+        const data = currentData, meta = data.meta;
+        const pioggia = getGrid(data.rain);
+        if (!pioggia) return null;
+        const bulbo = getGrid(data.wetbulb);
+        const indice = getGrid(data.convection_prob);
+        const passo = EFFETTI_PASSO_PX;
+        const nx = Math.ceil(w / passo), ny = Math.ceil(h / passo), n = nx * ny;
+        const mm = new Float32Array(n), neve = new Uint8Array(n);
+        const conv = new Float32Array(n), u = new Float32Array(n), v = new Float32Array(n);
+        const cumulata = new Float32Array(n);
+        const sogliaNeve = (SNOW_WETBULB_SNOW + SNOW_WETBULB_RAIN) / 2;
+        let totale = 0;
+        for (let j = 0; j < ny; j += 1) {
+          for (let i = 0; i < nx; i += 1) {
+            const k = j * nx + i;
+            const punto = map.unproject([(i + 0.5) * passo, (j + 0.5) * passo]);
+            const gx = (punto.lng - meta.lo1) / meta.dx;
+            const gy = (meta.la1 - punto.lat) / meta.dy;
+            if (gx >= 0 && gy >= 0 && gx < meta.nx - 1 && gy < meta.ny - 1) {
+              const r = sampleBilinear(pioggia, gx, gy, meta.nx, meta.ny);
+              if (r >= 0.1) {
+                mm[k] = r;
+                neve[k] = bulbo && sampleBilinear(bulbo, gx, gy, meta.nx, meta.ny) < sogliaNeve ? 1 : 0;
+                conv[k] = indice ? sampleBilinear(indice, gx, gy, meta.nx, meta.ny) : NaN;
+                const vento = windUV(gx, gy);
+                u[k] = Number.isFinite(vento.u) ? vento.u : 0;
+                v[k] = Number.isFinite(vento.v) ? vento.v : 0;
+                totale += Math.min(r, 12);
+              }
+            }
+            cumulata[k] = totale;
+          }
+        }
+        // Nuclei: massimi locali su 5x5 celle, almeno 70 px l'uno dall'altro.
+        const nuclei = [];
+        for (let j = 2; j < ny - 2; j += 1) {
+          for (let i = 2; i < nx - 2; i += 1) {
+            const r = mm[j * nx + i];
+            if (r < EFFETTI_NUCLEO_MM) continue;
+            let massimo = true;
+            for (let dj = -2; dj <= 2 && massimo; dj += 1) {
+              for (let di = -2; di <= 2; di += 1) {
+                if ((di || dj) && mm[(j + dj) * nx + i + di] > r) { massimo = false; break; }
+              }
+            }
+            if (!massimo) continue;
+            const x = (i + 0.5) * passo, y = (j + 0.5) * passo;
+            if (nuclei.some(function (q) { return Math.hypot(q.x - x, q.y - y) < 70; })) continue;
+            const c = conv[j * nx + i];
+            nuclei.push({
+              x: x, y: y, mm: r, fase: Math.random() * 6.283,
+              temporale: Number.isFinite(c) && c >= EFFETTI_LAMPO_INDICE
+            });
+          }
+        }
+        effettiChiave = chiave;
+        effettiGriglia = {
+          data: data, nx: nx, ny: ny, passo: passo, mm: mm, neve: neve,
+          u: u, v: v, cumulata: cumulata, totale: totale, nuclei: nuclei
+        };
+        effettiGocce = [];
+        return effettiGriglia;
+      }
+
+      function cellaACaso(griglia) {
+        const bersaglio = Math.random() * griglia.totale;
+        let basso = 0, alto = griglia.cumulata.length - 1;
+        while (basso < alto) {
+          const meta = (basso + alto) >> 1;
+          if (griglia.cumulata[meta] < bersaglio) basso = meta + 1; else alto = meta;
+        }
+        return basso;
+      }
+
+      function cicloEffetti(ora) {
+        effettiFrame = 0;
+        if (!effettiAttivi()) { svuotaEffetti(); return; }
+        effettiFrame = requestAnimationFrame(cicloEffetti);
+        const mobile = isMobile();
+        if (mobile && ora - effettiDisegno < 32) return;
+        effettiDisegno = ora;
+        const dt = effettiUltimo ? Math.min(60, ora - effettiUltimo) : 16.7;
+        effettiUltimo = ora;
+        const g = effectsContext, w = window.innerWidth, h = window.innerHeight;
+        g.clearRect(0, 0, w, h);
+        if (isMapMoving) { effettiGocce = []; return; }
+        const griglia = grigliaEffetti();
+        if (!griglia) return;
+        const passi = dt / 16.7;
+
+        // Nuove gocce e fiocchi, in proporzione a quanto cade sullo schermo.
+        const tetto = mobile ? 520 : 1300;
+        if (griglia.totale > 0) {
+          const nuove = Math.min(tetto - effettiGocce.length,
+            Math.round(Math.min(40, griglia.totale * 0.004) * passi));
+          for (let q = 0; q < nuove; q += 1) {
+            const k = cellaACaso(griglia);
+            const i = k % griglia.nx, j = (k / griglia.nx) | 0;
+            const neve = griglia.neve[k] === 1;
+            effettiGocce.push({
+              x: (i + Math.random()) * griglia.passo,
+              y: (j + Math.random()) * griglia.passo,
+              vx: griglia.u[k] * (neve ? 0.05 : 0.09) + (neve ? 0 : 0.6),
+              vy: (neve ? 0.45 : 2.6) - griglia.v[k] * 0.05,
+              vita: neve ? 1700 : 520, eta: 0, neve: neve,
+              fase: Math.random() * 6.283
+            });
+          }
+        }
+
+        // I nuclei sotto le gocce: un alone caldo che respira piano.
+        g.save();
+        g.globalCompositeOperation = "lighter";
+        for (const nucleo of griglia.nuclei) {
+          const raggio = 16 + Math.min(nucleo.mm, 40) * 0.9;
+          const respiro = 0.5 + 0.5 * Math.sin(ora / 700 + nucleo.fase);
+          const alone = g.createRadialGradient(nucleo.x, nucleo.y, 0, nucleo.x, nucleo.y, raggio);
+          alone.addColorStop(0, "rgba(255,190,120," + (0.18 + 0.22 * respiro).toFixed(3) + ")");
+          alone.addColorStop(1, "rgba(255,120,80,0)");
+          g.fillStyle = alone;
+          g.beginPath(); g.arc(nucleo.x, nucleo.y, raggio, 0, Math.PI * 2); g.fill();
+        }
+
+        // Lampi solo nei nuclei con il segnale convettivo del modello.
+        const temporali = griglia.nuclei.filter(function (nucleo) { return nucleo.temporale; });
+        if (temporali.length && ora > effettiProssimoLampo) {
+          effettiProssimoLampo = ora + 300 + Math.random() * 900;
+          const nucleo = temporali[Math.floor(Math.random() * temporali.length)];
+          const punti = [[nucleo.x + (Math.random() - 0.5) * 16, nucleo.y - 15]];
+          for (let q = 0; q < 5; q += 1) {
+            const ultimo = punti[punti.length - 1];
+            punti.push([ultimo[0] + (Math.random() - 0.5) * 12, ultimo[1] + 6]);
+          }
+          effettiLampi.push({ punti: punti, t: ora, x: nucleo.x, y: nucleo.y });
+        }
+        effettiLampi = effettiLampi.filter(function (lampo) { return ora - lampo.t < 180; });
+        for (const lampo of effettiLampi) {
+          const forza = 1 - (ora - lampo.t) / 180;
+          const luce = g.createRadialGradient(lampo.x, lampo.y, 0, lampo.x, lampo.y, 44);
+          luce.addColorStop(0, "rgba(220,230,255," + (0.5 * forza).toFixed(3) + ")");
+          luce.addColorStop(1, "rgba(200,210,255,0)");
+          g.fillStyle = luce;
+          g.beginPath(); g.arc(lampo.x, lampo.y, 44, 0, Math.PI * 2); g.fill();
+          g.strokeStyle = "rgba(255,255,255," + forza.toFixed(3) + ")";
+          g.lineWidth = 1.6;
+          g.beginPath();
+          lampo.punti.forEach(function (p, n) { if (n) g.lineTo(p[0], p[1]); else g.moveTo(p[0], p[1]); });
+          g.stroke();
+        }
+        g.restore();
+
+        // Gocce e fiocchi.
+        const restano = [];
+        g.lineCap = "round";
+        for (const goccia of effettiGocce) {
+          goccia.eta += dt;
+          if (goccia.eta > goccia.vita) continue;
+          const alfa = Math.sin(Math.PI * goccia.eta / goccia.vita);
+          if (goccia.neve) {
+            goccia.x += (goccia.vx + Math.sin(goccia.eta / 260 + goccia.fase) * 0.35) * passi;
+            goccia.y += goccia.vy * passi;
+            g.fillStyle = "rgba(255,255,255," + (0.95 * alfa).toFixed(3) + ")";
+            g.beginPath();
+            g.arc(goccia.x, goccia.y, 1.4 + 0.6 * Math.sin(goccia.fase), 0, Math.PI * 2);
+            g.fill();
+          } else {
+            goccia.x += goccia.vx * passi;
+            goccia.y += goccia.vy * passi;
+            g.strokeStyle = "rgba(225,242,255," + (0.9 * alfa).toFixed(3) + ")";
+            g.lineWidth = 1.3;
+            g.beginPath();
+            g.moveTo(goccia.x, goccia.y);
+            g.lineTo(goccia.x - goccia.vx * 3.2, goccia.y - goccia.vy * 3.2);
+            g.stroke();
+          }
+          restano.push(goccia);
+        }
+        effettiGocce = restano;
       }
 
       function clearVectors() {
@@ -13523,7 +14019,7 @@
         // rossa su una tinta chiara. Serve un alone che faccia da bordo, non
         // da schiarita.
         const halo = paper ? "rgba(244,239,227,0.96)"
-          : (showSatellite ? "rgba(6,14,20,0.82)" : "rgba(255,255,255,0.96)");
+          : "rgba(6,14,20,0.82)";
         const family = paper
           ? '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
           : "system-ui, -apple-system, Segoe UI, sans-serif";
@@ -14508,6 +15004,79 @@
           .finally(function () { placeNamesPending = false; });
       }
 
+      // Il valore del campo attivo in un punto, gia' scritto per un bollino:
+      // corto, con l'unita' solo dove serve a capire. Null dove il bollino
+      // non dice niente (fuori griglia, pioggia assente, classi).
+      function valoreBollino(lon, lat) {
+        if (!showCityValues || weatherView !== "forecast" || synopticChart
+            || activeLayer === "none" || !currentData) return null;
+        const info = activeLayerInfo(activeLayer);
+        if (!info || info.categorical) return null;
+        const punto = pointFromCoordinates(lon, lat);
+        if (!punto) return null;
+        const valore = fieldValue(activeLayer, punto.gx, punto.gy);
+        if (!Number.isFinite(valore)) return null;
+        if (activeLayer === "rain" && valore < 0.1) return null;
+        const unita = info.unit || "";
+        const decimali = unita === "°C" || Math.abs(valore) >= 10 ? 0 : Math.min(1, info.decimals || 0);
+        let testo = valore.toFixed(decimali).replace(".", ",");
+        if (testo === "-0") testo = "0";
+        if (unita === "°C") testo += "°";
+        else if (unita === "%") testo += "%";
+        else if (unita === "mm" || unita === "hPa") testo += " " + unita;
+        const colore = colorFor(valore, info);
+        return {
+          testo: testo,
+          bordo: "rgb(" + Math.round(colore[0]) + "," + Math.round(colore[1]) + "," + Math.round(colore[2]) + ")"
+        };
+      }
+
+      // ---- LA SONDA SOTTO IL PUNTATORE --------------------------------------
+      // Passando con il mouse sulla mappa compare il valore del campo in quel
+      // punto, letto come la scheda del punto (stessa funzione, stessa
+      // griglia). Solo col mouse: sul telefono il dito trascina la mappa, e
+      // il valore lo da' gia' il tocco con la scheda del punto.
+      let sondaEvento = null;
+      let sondaFrame = 0;
+
+      function nascondiSonda() {
+        const sonda = document.getElementById("sonda");
+        if (sonda) sonda.hidden = true;
+      }
+
+      function aggiornaSonda() {
+        sondaFrame = 0;
+        const e = sondaEvento, sonda = document.getElementById("sonda");
+        if (!e || !sonda || !map || isMapMoving || weatherView !== "forecast"
+            || activeLayer === "none" || !currentData) { nascondiSonda(); return; }
+        const info = activeLayerInfo(activeLayer);
+        const rect = map.getContainer().getBoundingClientRect();
+        const posizione = map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
+        const punto = pointFromCoordinates(posizione.lng, posizione.lat);
+        const valore = punto ? fieldValue(activeLayer, punto.gx, punto.gy) : NaN;
+        if (!info || info.categorical || !Number.isFinite(valore)) { nascondiSonda(); return; }
+        const colore = colorFor(valore, info);
+        sonda.querySelector("i").style.background = "rgb(" + Math.round(colore[0]) + ","
+          + Math.round(colore[1]) + "," + Math.round(colore[2]) + ")";
+        sonda.querySelector("span").textContent =
+          formatValue(valore, info.decimals, info.unit).replace(".", ",");
+        const x = Math.min(window.innerWidth - 150, e.clientX + 16);
+        const y = Math.max(8, e.clientY - 38);
+        sonda.style.transform = "translate(" + Math.round(x) + "px," + Math.round(y) + "px)";
+        sonda.hidden = false;
+      }
+
+      function collegaSonda() {
+        const area = map.getCanvasContainer();
+        area.addEventListener("pointermove", function (e) {
+          if (e.pointerType !== "mouse" || e.buttons) { nascondiSonda(); return; }
+          sondaEvento = e;
+          if (!sondaFrame) sondaFrame = requestAnimationFrame(aggiornaSonda);
+        });
+        area.addEventListener("pointerleave", nascondiSonda);
+        area.addEventListener("pointerdown", nascondiSonda);
+      }
+
       function drawPlaceNames() {
         if (!map || !placeNames || !placeNames.length) return;
         const width = window.innerWidth;
@@ -14517,7 +15086,9 @@
         // capoluoghi maggiori: una carta al suolo non e' un elenco di comuni.
         const limit = zoom < 5 ? 1 : zoom < 6 ? 2 : zoom < 7 ? 4
           : zoom < 8.5 ? 6 : 7;
-        const onPhoto = showSatellite && !synopticChart;
+        // Sulla carta scura (e sull'ortofoto) i nomi sono bianchi con un
+        // alone scuro; sul foglio della carta sinottica restano d'inchiostro.
+        const onPhoto = !synopticChart;
         const ink = synopticChart ? PAPER_INK : (onPhoto ? "#ffffff" : "#16242e");
         const halo = synopticChart ? "rgba(244,239,227,0.9)"
           : (onPhoto ? "rgba(6,14,20,0.78)" : "rgba(255,255,255,0.88)");
@@ -14538,8 +15109,17 @@
           vectorContext.font = "700 " + size +
             "px system-ui, -apple-system, Segoe UI, sans-serif";
           const textWidth = vectorContext.measureText(place.name).width;
-          const box = { x: point.x + 7, y: point.y - size / 2 - 2,
-                        w: textWidth + 4, h: size + 4 };
+          const bollino = valoreBollino(place.lon, place.lat);
+          let larghezzaBollino = 0;
+          if (bollino) {
+            vectorContext.font = "700 11px system-ui, -apple-system, Segoe UI, sans-serif";
+            larghezzaBollino = vectorContext.measureText(bollino.testo).width + 12;
+            vectorContext.font = "700 " + size +
+              "px system-ui, -apple-system, Segoe UI, sans-serif";
+          }
+          const box = { x: point.x + 7, y: point.y - size / 2 - 3,
+                        w: textWidth + 4 + (bollino ? larghezzaBollino + 5 : 0),
+                        h: size + 6 };
           // Niente etichette accavallate: se il posto e' occupato, si salta.
           let clash = false;
           for (let other = 0; other < taken.length; other += 1) {
@@ -14565,6 +15145,22 @@
           vectorContext.strokeText(place.name, point.x + 7, point.y);
           vectorContext.fillStyle = ink;
           vectorContext.fillText(place.name, point.x + 7, point.y);
+          if (bollino) {
+            const bx = point.x + 7 + textWidth + 5, by = point.y - 9;
+            vectorContext.beginPath();
+            if (vectorContext.roundRect) vectorContext.roundRect(bx, by, larghezzaBollino, 18, 9);
+            else vectorContext.rect(bx, by, larghezzaBollino, 18);
+            vectorContext.fillStyle = "rgba(12,20,30,0.86)";
+            vectorContext.fill();
+            vectorContext.lineWidth = 1.6;
+            vectorContext.strokeStyle = bollino.bordo;
+            vectorContext.stroke();
+            vectorContext.font = "700 11px system-ui, -apple-system, Segoe UI, sans-serif";
+            vectorContext.fillStyle = "#ffffff";
+            vectorContext.textAlign = "center";
+            vectorContext.fillText(bollino.testo, bx + larghezzaBollino / 2, point.y + 0.5);
+            vectorContext.textAlign = "left";
+          }
         }
         vectorContext.restore();
       }
@@ -14964,6 +15560,7 @@
 
       function drawVectors() {
         clearVectors();
+        avviaEffettiPioggia();
         if (!currentData || !map || isMapMoving) return;
         syncProjectionViewport();
 
@@ -16434,6 +17031,20 @@
           // suoi colori giusti.  Attaccare il canvas al documento e ricreare
           // la sorgente non bastano.  La codifica in blob costa qualche
           // millisecondo per fotogramma ed e' il percorso che funziona.
+          // L'ora precedente, sotto: serve solo durante la dissolvenza.
+          map.addSource("weather-prev", {
+            type: "image",
+            url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+            coordinates: [[6, 48], [20, 48], [20, 35], [6, 35]]
+          });
+          map.addLayer({
+            id: "weather-prev-layer",
+            type: "raster",
+            source: "weather-prev",
+            layout: { visibility: "none" },
+            paint: { "raster-opacity": 0.95, "raster-fade-duration": 0 }
+          });
+
           map.addSource("weather", {
             type: "image",
             url: "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
@@ -16564,7 +17175,7 @@
             type: "line",
             source: "base-rivers",
             paint: {
-              "line-color": "rgba(60,96,116,0.42)",
+              "line-color": MAP_RIVER,
               "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.35, 10, 1.1]
             }
           });
@@ -16579,7 +17190,7 @@
             type: "line",
             source: "regions",
             paint: {
-              "line-color": "rgba(38,58,72,0.3)",
+              "line-color": MAP_REGION,
               "line-dasharray": [3, 2.4],
               "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.4, 10, 0.9]
             }
@@ -16592,8 +17203,21 @@
             paint: {
               // Confini continui e leggeri, come sulle carte delle app meteo:
               // il tratteggio scuro competeva con le isobare e i fronti.
-              "line-color": "rgba(28,48,62,0.5)",
+              "line-color": MAP_BORDER,
               "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 10, 1.3]
+            }
+          });
+
+          // Sotto la costa chiara un filo scuro piu' largo: sulla carta scura
+          // non si vede, sopra i colori accesi dei campi (il giallo della
+          // temperatura) e' quello che fa leggere la costa.
+          map.addLayer({
+            id: "base-coast-casing",
+            type: "line",
+            source: "base-coast",
+            paint: {
+              "line-color": "rgba(6,12,18,0.5)",
+              "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.8, 7, 2.6, 10, 3.6]
             }
           });
 
@@ -16604,7 +17228,7 @@
             type: "line",
             source: "base-coast",
             paint: {
-              "line-color": "rgba(16,32,44,0.74)",
+              "line-color": MAP_COAST,
               "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.6, 7, 1.0, 10, 1.8]
             }
           });
@@ -16613,7 +17237,7 @@
             id: "base-lakes-line",
             type: "line",
             source: "base-lakes",
-            paint: { "line-color": "rgba(16,32,44,0.7)", "line-width": 0.7 }
+            paint: { "line-color": MAP_COAST, "line-width": 0.7 }
           });
 
           map.addSource("model-mask", { type: "geojson", data: generateModelMask() });
@@ -16621,10 +17245,10 @@
             id: "model-mask-layer",
             type: "fill",
             source: "model-mask",
-            // Fuori dal dominio un velo grigio chiaro e neutro: il beige
-            // sembrava un'altra campitura della legenda, questo dice
-            // semplicemente "qui il modello non arriva".
-            paint: { "fill-color": "#d9dee3", "fill-opacity": 0.62 }
+            // Fuori dal dominio un velo piu' scuro della carta: non sembra
+            // un'altra campitura della legenda, dice solo "qui il modello
+            // non arriva".
+            paint: { "fill-color": "#04080d", "fill-opacity": 0.5 }
           });
 
           map.addSource("model-edge", { type: "geojson", data: generateModelEdge() });
@@ -16633,7 +17257,7 @@
             type: "line",
             source: "model-edge",
             paint: {
-              "line-color": "rgba(20,34,46,0.34)",
+              "line-color": "rgba(214,228,240,0.3)",
               "line-dasharray": [5, 3],
               "line-width": 1
             }
@@ -16930,9 +17554,13 @@
             });
           }
 
+          collegaSonda();
+
           map.on("movestart", function () {
+            nascondiSonda();
             isMapMoving = true; weatherFrameEpoch++; lastRasterSignature = "";
             resetParticles();
+            svuotaEffetti();
             clearVectors();
           });
 
@@ -16945,6 +17573,7 @@
             isMapMoving = false; scheduleFrameWarmup();
             syncTerrainExaggeration();
             resetParticles();
+            effettiVista += 1;
             updateHazeStrength();
             renderWeather();
             requestVectorRender();

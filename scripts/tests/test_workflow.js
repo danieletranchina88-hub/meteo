@@ -344,6 +344,30 @@ prova('un aggiornamento dati precedente non lascia in linea la vecchia interfacc
   assert.doesNotMatch(sync, /force:\s*true|git push --force/);
 });
 
+prova('un run programmato non cancella quello in corso', () => {
+  // GitHub fa partire i programmati con ore di ritardo e due possono
+  // sovrapporsi: cancellare il primo a meta' deploy butta mezz'ora di
+  // calcolo e lascia il sito senza aggiornamento.
+  assert.match(testo, /cancel-in-progress: \$\{\{ github\.event_name != 'schedule' \}\}/,
+    'un run programmato puo cancellare quello in corso');
+});
+
+prova('il push dei dati ha un tetto per tentativo', () => {
+  const inizio = testo.indexOf('      - name: Deploy dati su branch gh-pages');
+  assert.ok(inizio > 0, 'manca il deploy dei dati');
+  const deploy = testo.slice(inizio);
+  // Un push lentissimo ma sopra il limite anti-stallo ha consumato da solo
+  // l'intero passo: ogni tentativo deve finire in tempo per il successivo.
+  const tetto = deploy.match(/timeout (\d+) git push --force origin gh-pages/);
+  assert.ok(tetto, 'il push non ha un tetto per tentativo');
+  const passo = Number(deploy.match(/timeout-minutes: (\d+)/)[1]);
+  assert.ok(3 * Number(tetto[1]) + 2 * 20 <= passo * 60,
+    'tre tentativi non stanno nel tempo del passo');
+  const limite = deploy.match(/git config http\.lowSpeedLimit (\d+)/);
+  assert.ok(limite && Number(limite[1]) >= 50000,
+    'un push che non finirebbe in tempo non viene interrotto');
+});
+
 Promise.all(inCorso).then(() => {
   console.log(ok ? 'ESITO: SUPERATO' : 'ESITO: DA RIVEDERE');
   process.exitCode = ok ? 0 : 1;
