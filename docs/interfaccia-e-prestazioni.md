@@ -1,5 +1,15 @@
 # Interfaccia e navigazione temporale
 
+## Console professionale · novembre 2026
+
+L'intestazione riporta identità, modello e run. I pannelli blu scuro sono opachi: i colori del campo non alterano il contrasto dei comandi e non servono filtri di sfocatura sui pannelli della mappa. La legenda mantiene nome, unità e valori posizionati sulle soglie reali, anche su telefono.
+
+La timeline dichiara l'ora italiana (`Europe/Rome`), evidenzia il giorno selezionato e aggiunge scadenza precedente, successiva e ritorno alla scadenza più vicina all'ora attuale. Usa la stessa coda delle richieste del cursore: non introduce un secondo motore di riproduzione. I giorni sono calcolati nello stesso fuso dell'orario mostrato.
+
+Sotto 960 px i sei comandi principali vengono spostati nel pannello dei livelli, senza duplicarli. Ricerca da tastiera, stato dei controlli, focus del pannello e schede inizialmente chiuse restano accessibili. Radar e meteogrammi condividono tipografia, accento e superfici della console; nei meteogrammi i grafici hanno più spazio rispetto all'introduzione. Il viewBox dei grafici segue la larghezza effettiva della scheda: le scritte degli assi mantengono dimensioni leggibili anche su telefono. Un cambio di larghezza o di scheda ridisegna i grafici senza scaricare nuovamente la serie.
+
+Sono stati rimossi i due rivestimenti inline precedenti e gli stili duplicati di componenti dimostrativi non caricati. Non sono state aggiunte dipendenze di produzione né modifiche ai calcoli, ai file meteorologici o ai budget delle cache. Il minor costo grafico deriva dalle superfici senza blur; non rappresenta una misura FPS o una garanzia di latenza su ogni dispositivo.
+
 Il rinnovamento conserva i calcoli e i prodotti meteorologici esistenti e separa la previsione dalle osservazioni satellitari.
 
 ## Interfaccia

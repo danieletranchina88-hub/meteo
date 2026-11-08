@@ -8,15 +8,15 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
-const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
-const modernUi = fs.readFileSync(path.join(root, "modern-ui.js"), "utf8");
+const html = fs.readFileSync(path.join(root, "index.html"), "utf8").replace(/\r\n/g, "\n");
+const modernUi = fs.readFileSync(path.join(root, "modern-ui.js"), "utf8").replace(/\r\n/g, "\n");
 function implementazione(nome) {
   const i = html.search(new RegExp("      function " + nome + "\\("));
   assert.ok(i >= 0, "manca " + nome);
   return html.slice(i, html.indexOf("\n      }", i) + 8);
 }
-const radarHtml = fs.readFileSync(path.join(root, "radar.html"), "utf8");
-const meteogramHtml = fs.readFileSync(path.join(root, "meteograms.html"), "utf8");
+const radarHtml = fs.readFileSync(path.join(root, "radar.html"), "utf8").replace(/\r\n/g, "\n");
+const meteogramHtml = fs.readFileSync(path.join(root, "meteograms.html"), "utf8").replace(/\r\n/g, "\n");
 
 const inlineScripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
   .map((match) => match[1])
@@ -1604,7 +1604,7 @@ assert.match(html, /const CAPE_STOPS = \[\s*\{ v: 0, c: \[238, 244, 240\], a: 0 
 // pubblica. Le raffiche arrivano da vmax_10m, in m/s, e vanno in km/h.
 {
   const pipeline = fs.readFileSync(
-    path.join(__dirname, "..", "process_data.py"), "utf8");
+    path.join(__dirname, "..", "process_data.py"), "utf8").replace(/\r\n/g, "\n");
   assert.match(pipeline, /"gust": \(\s*\n\s*np\.asarray\(wind_gust_10m\) \* 3\.6/,
     "la pipeline non pubblica le raffiche in km/h");
 }
@@ -1907,7 +1907,7 @@ assert.match(html, /const CAPE_STOPS = \[\s*\{ v: 0, c: \[238, 244, 240\], a: 0 
   assert.match(costruisci[0], /(host|document\.body)\.appendChild\(/,
     "la barra del tempo non si aggiunge al contenitore");
 
-  const interfaccia = fs.readFileSync(path.join(root, "modern-ui.js"), "utf8");
+  const interfaccia = fs.readFileSync(path.join(root, "modern-ui.js"), "utf8").replace(/\r\n/g, "\n");
   assert.match(interfaccia, /getElementById\('satellite-controls'\)\.append\(satellitePicker\)/,
     "il selettore del prodotto non viene piu' spostato nel pannello");
   assert.match(html, /id="satclouds-select"/, "manca il selettore del prodotto");
@@ -2083,38 +2083,12 @@ assert.match(html, /function attivaNubiVolumetriche\(\) \{\}/,
   "manca lo stub che impedisce al cambio vista di chiamare il volume");
 console.log("volumetric clouds removed: OK");
 
-// ASPETTO "MAPPA PRIMA": stili e comandi in due blocchi staccabili. Il resto
-// della pagina non deve dipenderne, salvo la posizione dei valori della
-// legenda (--pos), che senza il blocco resta un attributo inerte.
+// Console controls preserve one real button per scientific field.
 {
-  const stili = html.match(/<style id="aspetto-mappa">[\s\S]*?<\/style>/);
-  const comandi = html.match(/<script id="aspetto-mappa-comandi">[\s\S]*?<\/script>/);
-  assert.ok(stili && comandi, "mancano i blocchi dell'aspetto mappa prima");
-  new Function(comandi[0].replace(/^<script[^>]*>|<\/script>$/g, ""));
-  const resto = html.replace(stili[0], "").replace(comandi[0], "");
-  assert.ok(!/am-cerca|am-menu|am-riquadri|am-cerca-aperta/.test(resto),
-    "il resto della pagina dipende dall'aspetto mappa prima");
-  assert.match(stili[0], /body \.brand-panel \{ display: none !important; \}/,
-    "il marchio deve restare nascosto");
-  assert.match(html, /<title>Meteo · Mappa e previsioni<\/title>/);
-  // I campi principali si spostano, non si copiano: un solo bottone per campo.
-  ["wind", "temp", "rain", "cloud", "press", "rh"].forEach((k) => {
-    assert.equal(html.split('data-layer="' + k + '"').length - 1, 1, "il campo " + k + " e' duplicato");
+  ["wind", "temp", "rain", "cloud", "press", "rh"].forEach(key => {
+    assert.equal(html.split('data-layer="' + key + '"').length - 1, 1,
+      'duplicate scientific field: ' + key);
   });
-  console.log("Aspetto mappa prima: blocchi staccabili, marchio tolto, campi spostati non copiati");
-}
-
-// ASPETTO RAFFINATO: solo aspetto, in un blocco staccabile. Fuori dal blocco
-// ogni colore che ne deriva ha un valore di riserva, e il blocco non tocca i
-// nomi interni dell'aspetto mappa prima.
-{
-  const raffinato = html.match(/<style id="aspetto-raffinato">[\s\S]*?<\/style>/);
-  assert.ok(raffinato, "manca il blocco dell'aspetto raffinato");
-  assert.ok(!/am-cerca|am-menu|am-riquadri/.test(raffinato[0]),
-    "l'aspetto raffinato dipende dai nomi interni dell'aspetto mappa prima");
-  const resto = html.replace(raffinato[0], "");
-  const senzaRiserva = resto.match(/var\(--ar-[a-z-]+\)/g) || [];
-  assert.deepEqual(senzaRiserva, [],
-    "fuori dal blocco un colore dell'aspetto raffinato non ha valore di riserva");
-  console.log("Aspetto raffinato: blocco staccabile, colori con riserva");
+  assert.doesNotThrow(() => new Function(modernUi));
+  console.log("Console: unique scientific controls and valid JavaScript");
 }
