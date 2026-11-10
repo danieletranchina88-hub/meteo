@@ -2743,8 +2743,9 @@
         <span id="legend-unit">°C</span>
       </div>
       <div id="legend-range">--</div>
-      <div id="legend-bar"></div>
+      <div id="legend-bar"><i id="legend-vista-fascia" hidden></i><i id="legend-sonda" hidden></i></div>
       <div id="legend-ticks"></div>
+      <div id="legend-vista" hidden></div>
       <p id="legend-note">Fasce discrete per distinguere con precisione le isoterme.</p>
     </section>
 
@@ -2777,6 +2778,7 @@
       <div class="point-grid">
         <div class="point-detail"><b>Temperatura 2 m</b><span id="detail-temp">--</span></div>
         <div class="point-detail"><b>Percepita</b><span id="detail-feels">--</span></div>
+        <div class="point-detail"><b>Punto di rugiada</b><span id="detail-dewpoint">--</span></div>
         <div class="point-detail"><b>Bulbo umido</b><span id="detail-wetbulb">--</span></div>
         <div class="point-detail"><b>Precipitazioni</b><span id="detail-rain">--</span></div>
         <div class="point-detail"><b>Vento 10 m</b><span id="detail-wind">--</span></div>
@@ -2837,12 +2839,12 @@
         </svg>
       </button>
       <div class="timeline-main">
-        <div class="timeline-heading"><span>VALIDITÀ · ORA ITALIANA</span><span>Europe/Rome</span></div>
+        <div class="timeline-heading"><span>VALIDITÀ</span><span id="fuso-etichetta">Europe/Rome</span></div>
         <div id="timeline-days" aria-label="Giorni di previsione"></div>
         <div id="timeline-buffer" aria-hidden="true"></div>
         <input id="time-slider" type="range" min="0" max="0" value="0" aria-label="Orario della previsione" />
         <div class="timeline-meta">
-          <span id="time-label">In attesa dei dati</span>
+          <span id="time-label">In attesa dei dati</span><span id="time-alt" title="La stessa ora nell'altro fuso"></span><span class="ora-switch" role="group" aria-label="Fuso orario delle ore mostrate"><button type="button" data-ora="local" aria-pressed="true" class="active" title="Ore in ora italiana (Europe/Rome)">Ora it.</button><button type="button" data-ora="utc" aria-pressed="false" title="Ore in UTC, come sulle carte dei servizi meteorologici">UTC</button><button type="button" id="guida-tasti-apri" aria-haspopup="dialog" title="Scorciatoie da tastiera e link alla carta (?)">?</button></span>
           <span id="satellite-lock" hidden>ancorato al satellite</span>
           <span id="buffer-status" role="status">Preparazione sequenza</span><span id="lead-label">--</span>
         </div>
@@ -2852,6 +2854,34 @@
         <button class="active" type="button" data-speed="1200">1×</button>
         <button type="button" data-speed="700">2×</button>
         <button type="button" data-speed="380">4×</button>
+      </div>
+    </section>
+
+    <nav id="carte-pronte" class="surface" aria-label="Carte pronte"></nav>
+
+    <section id="guida-tasti" class="surface" role="dialog" aria-modal="false" aria-labelledby="guida-tasti-titolo" hidden>
+      <header>
+        <h2 id="guida-tasti-titolo">Scorciatoie da tastiera</h2>
+        <button id="guida-tasti-chiudi" type="button" aria-label="Chiudi la guida">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>
+        </button>
+      </header>
+      <dl>
+        <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>ora precedente / successiva</dd></div>
+        <div><dt><kbd>Maiusc</kbd> + <kbd>←</kbd> <kbd>→</kbd></dt><dd>salta di 6 ore</dd></div>
+        <div><dt><kbd>Spazio</kbd></dt><dd>avvia o ferma l'animazione</dd></div>
+        <div><dt><kbd>A</kbd></dt><dd>torna all'ora attuale</dd></div>
+        <div><dt><kbd>1</kbd> … <kbd>6</kbd></dt><dd>carte pronte (suolo, 850, 500, pioggia, vento, temporali)</dd></div>
+        <div><dt><kbd>T</kbd> <kbd>V</kbd> <kbd>P</kbd> <kbd>N</kbd> <kbd>B</kbd> <kbd>U</kbd></dt><dd>temperatura, vento, precipitazioni, nubi, pressione (barica), umidità</dd></div>
+        <div><dt><kbd>I</kbd> <kbd>F</kbd> <kbd>C</kbd></dt><dd>isobare, fronti, valori sulle città</dd></div>
+        <div><dt><kbd>Z</kbd></dt><dd>ora italiana ↔ UTC</dd></div>
+        <div><dt><kbd>L</kbd></dt><dd>apre o chiude i livelli</dd></div>
+        <div><dt><kbd>Alt</kbd> + frecce</dt><dd>sposta la mappa</dd></div>
+        <div><dt><kbd>?</kbd></dt><dd>questa guida</dd></div>
+      </dl>
+      <div class="guida-link">
+        <button id="copia-link" type="button">Copia il link a questa carta</button>
+        <span id="copia-link-esito" role="status" aria-live="polite"></span>
       </div>
     </section>
 
@@ -4762,7 +4792,19 @@
       function formatValue(value, decimals, unit) {
         if (!Number.isFinite(value)) return "--";
         const separator = String(unit || "").startsWith("/") ? "" : " ";
-        return value.toFixed(decimals) + separator + unit;
+        // Decimali con la virgola, come si scrivono in italiano.
+        return value.toFixed(decimals).replace(".", ",") + separator + unit;
+      }
+
+      // Punto di rugiada da temperatura e umidita' relativa, formula di Magnus
+      // con i coefficienti di Alduchov e Eskridge (1996): errore sotto 0,4 °C
+      // fra -40 e +50 °C. E' una grandezza derivata, non un campo del modello.
+      function dewPointCelsius(temperature, relativeHumidity) {
+        if (!Number.isFinite(temperature) || !Number.isFinite(relativeHumidity)) return NaN;
+        const rh = Math.min(100, Math.max(1, relativeHumidity));
+        const a = 17.625, b = 243.04;
+        const gamma = Math.log(rh / 100) + a * temperature / (b + temperature);
+        return b * gamma / (a - gamma);
       }
 
       function formatFreezingRisk(value) {
@@ -4853,38 +4895,96 @@
         return new Date(now.getFullYear(), Number(match[2]) - 1, Number(match[1]), Number(match[3]), Number(match[4]));
       }
 
+      // ---- ORA LOCALE O UTC -------------------------------------------------
+      //
+      // Chi fa previsioni ragiona in UTC: i run si chiamano 00Z e 12Z, le
+      // carte di ogni servizio portano l'ora Z. Chi guarda il tempo di casa
+      // sua ragiona in ora italiana. Il sito mostra tutte e due: l'ora scelta
+      // in grande, l'altra accanto. Il run e' sempre in Z, perche' quello e'
+      // il suo nome. La scelta si ricorda fra una visita e l'altra.
+      const ORA_KEY = "meteo-ora";
+      let oraUtc = false;
+      try { oraUtc = localStorage.getItem(ORA_KEY) === "utc"; } catch (error) { oraUtc = false; }
+
+      function fusoAttivo() {
+        return oraUtc ? "UTC" : "Europe/Rome";
+      }
+
       function formatClockTime(date) {
         if (!date) return "--";
         return new Intl.DateTimeFormat("it-IT", {
-          timeZone: "Europe/Rome", hour: "2-digit", minute: "2-digit"
-        }).format(date);
+          timeZone: fusoAttivo(), hour: "2-digit", minute: "2-digit"
+        }).format(date) + (oraUtc ? " UTC" : "");
       }
 
       function formatDateTime(date) {
         if (!date) return "--";
         return new Intl.DateTimeFormat("it-IT", {
-          timeZone: "Europe/Rome",
+          timeZone: fusoAttivo(),
           weekday: "short",
           day: "2-digit",
           month: "short",
           hour: "2-digit",
           minute: "2-digit"
-        }).format(date).replace(",", " ·");
+        }).format(date).replace(",", " ·") + (oraUtc ? " UTC" : "");
       }
 
+      // L'ora nell'altro fuso, corta, da mettere accanto a quella scelta:
+      // "08Z" quando si legge in ora italiana, "09:00 ora it." quando in UTC.
+      function formatAltTime(date) {
+        if (!date) return "";
+        if (oraUtc) {
+          return new Intl.DateTimeFormat("it-IT", {
+            timeZone: "Europe/Rome", hour: "2-digit", minute: "2-digit"
+          }).format(date) + " ora it.";
+        }
+        const minuti = date.getUTCMinutes();
+        return String(date.getUTCHours()).padStart(2, "0")
+          + (minuti ? ":" + String(minuti).padStart(2, "0") : "") + "Z";
+      }
+
+      // Il run col suo nome: giorno e ciclo in Z ("Run 09 nov · 12Z").
       function formatRun(item) {
         const run = item && (item.runTime || item.run || item.model_run || item.init || item.init_time);
         const date = run ? new Date(run) : null;
         if (date && !Number.isNaN(date.getTime())) {
+          const minuti = date.getUTCMinutes();
           return "Run " + new Intl.DateTimeFormat("it-IT", {
-            timeZone: "Europe/Rome",
-            day: "2-digit",
-            month: "short",
-            hour: "2-digit",
-            minute: "2-digit"
-          }).format(date).replace(",", " ·");
+            timeZone: "UTC", day: "2-digit", month: "short"
+          }).format(date) + " · " + String(date.getUTCHours()).padStart(2, "0")
+            + (minuti ? ":" + String(minuti).padStart(2, "0") : "") + "Z";
         }
         return run ? "Run " + run : "Run " + MODEL_INFO[activeModel].label;
+      }
+
+      // Gli istanti ISO che il motore sinottico scrive nel testo
+      // ("2026-11-10T08:00:00Z") diventano un'ora leggibile nel fuso scelto.
+      function oreLeggibili(testo) {
+        // Anche i decimali: il motore scrive "1009.5 hPa", qui si legge
+        // "1009,5 hPa" come nel resto del sito.
+        return String(testo).replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z/g, function (iso) {
+          const data = new Date(iso);
+          if (Number.isNaN(data.getTime())) return iso;
+          return formatDateTime(data).replace(" ·", "") + " (" + formatAltTime(data) + ")";
+        }).replace(/(\d)\.(\d)/g, "$1,$2");
+      }
+
+      function setOraUtc(utc) {
+        oraUtc = Boolean(utc);
+        try { localStorage.setItem(ORA_KEY, oraUtc ? "utc" : "local"); } catch (error) { /* privato */ }
+        const etichetta = document.getElementById("fuso-etichetta");
+        if (etichetta) etichetta.textContent = oraUtc ? "UTC" : "Europe/Rome";
+        document.querySelectorAll("[data-ora]").forEach(function (button) {
+          const attivo = (button.dataset.ora === "utc") === oraUtc;
+          button.classList.toggle("active", attivo);
+          button.setAttribute("aria-pressed", attivo ? "true" : "false");
+        });
+        if (catalog.length) {
+          buildTimelineDays();
+          updateTimeUi();
+          updateBulletinUi();
+        }
+        if (typeof updateSatelliteScrubLabel === "function") updateSatelliteScrubLabel();
       }
 
       function leadHours(index) {
@@ -5436,9 +5536,9 @@
         let previous = "";
         catalog.forEach(function(item,i) {
           const date = parseCatalogDate(item); if (!date) return;
-          const key = date.toLocaleDateString("it-IT", {timeZone:"Europe/Rome"}); if(key === previous) return; previous = key;
+          const key = date.toLocaleDateString("it-IT", {timeZone:fusoAttivo()}); if(key === previous) return; previous = key;
           const button = document.createElement("button"); button.type="button";
-          button.textContent = date.toLocaleDateString("it-IT",{timeZone:"Europe/Rome",weekday:"short",day:"numeric"});
+          button.textContent = date.toLocaleDateString("it-IT",{timeZone:fusoAttivo(),weekday:"short",day:"numeric"});
           button.style.left = (i / Math.max(1,catalog.length-1)*100) + "%";
           button.addEventListener("click",function(){setPlaying(false);requestSliderStep(i);});
           el.append(button);
@@ -5622,13 +5722,18 @@
         markStaleRun(item);
         ui.validValue.textContent = formatDateTime(date);
         ui.timeLabel.textContent = formatDateTime(date);
+        const altro = document.getElementById("time-alt");
+        if (altro) altro.textContent = formatAltTime(date);
         ui.leadLabel.textContent = lead === null ? "--" : "+" + lead + " h";
+        ui.leadLabel.title = "Scadenza: ore dall'inizializzazione del run";
         // La stessa cosa, in una riga sola, per l'intestazione del telefono.
         ui.brandMeta.textContent = formatRun(item);
         ui.brandMeta.classList.toggle(
           "stale", ui.runValue.classList.contains("stale")
         );
         ui.slider.setAttribute("aria-valuetext", formatDateTime(date));
+        programmaLink();
+        programmaStatisticheVista();
       }
 
       // Il rilievo e' illuminato da nord-ovest (315 gradi), la convenzione
@@ -9957,7 +10062,7 @@
       function appendBulletinParagraph(parent, text, className) {
         const paragraph = document.createElement("p");
         if (className) paragraph.className = className;
-        paragraph.textContent = text;
+        paragraph.textContent = oreLeggibili(text);
         parent.appendChild(paragraph);
       }
 
@@ -10023,8 +10128,9 @@
           const validDate = new Date(analysis.validTime);
           const runDate = new Date(bulletin.runTime);
           ui.bulletinValidity.textContent =
-            "Run " + formatDateTime(runDate) + " · validità " +
-            formatDateTime(validDate) + " · +" + analysis.leadHours + " h";
+            formatRun({ runTime: runDate.toISOString() }) + " · validità " +
+            formatDateTime(validDate) + " (" + formatAltTime(validDate) + ") · +" +
+            analysis.leadHours + " h";
           ui.bulletinKicker.textContent = "Motore sinottico multi-livello ICON-2I";
           ui.bulletinStatus.textContent =
             bulletin.model + " · " + bulletin.spatialResolutionKm + " km · passo " +
@@ -10226,8 +10332,14 @@
         ui.legendTicks.innerHTML = info.ticks.map(function (tick) {
           const pos = Math.max(0, Math.min(100, (tick - minimum) / (maximum - minimum || 1) * 100));
           const sposta = pos < 4 ? "0%" : (pos > 96 ? "-100%" : "-50%");
-          const vicino = pos - ultimaPos < 7;
-          if (!vicino) ultimaPos = pos;
+          // Ingombro del numero in percentuale della striscia (circa 2,2 %
+          // a cifra): due numeri si accavallano quando il bordo sinistro
+          // dell'uno entra nel destro dell'altro, e dipende da come sono
+          // allineati agli estremi, non solo dalla distanza fra le tacche.
+          const ingombro = 2.2 * String(tick).length + 1;
+          const sinistra = pos < 4 ? pos : (pos > 96 ? pos - ingombro : pos - ingombro / 2);
+          const vicino = sinistra < ultimaPos + 1.5;
+          if (!vicino) ultimaPos = sinistra + ingombro;
           return "<span" + (vicino ? " class=\"am-vicino\"" : "") + " style=\"--pos:"
             + pos.toFixed(2) + "%;--sposta:" + sposta + "\">" + tick + "</span>";
         }).join("");
@@ -10244,6 +10356,7 @@
         ui.sampleValue.textContent = useNearestCell
           ? "Cella modello più vicina · " + MODEL_INFO[activeModel].gridLabel
           : "Interpolazione bilineare · " + MODEL_INFO[activeModel].gridLabel;
+        programmaStatisticheVista();
       }
 
       function updateLayerUi() {
@@ -10300,6 +10413,8 @@
           button.disabled = frontUnavailable;
           button.setAttribute("aria-pressed", active ? "true" : "false");
         });
+        aggiornaCartePronte();
+        programmaLink();
 
         // Il tick e' una proprieta' della diretta, non un livello: senza
         // scariche in arrivo non ha niente da suonare, e un comando che non
@@ -15042,6 +15157,8 @@
       function nascondiSonda() {
         const sonda = document.getElementById("sonda");
         if (sonda) sonda.hidden = true;
+        const segno = document.getElementById("legend-sonda");
+        if (segno) segno.hidden = true;
       }
 
       function aggiornaSonda() {
@@ -15064,6 +15181,12 @@
         const y = Math.max(8, e.clientY - 38);
         sonda.style.transform = "translate(" + Math.round(x) + "px," + Math.round(y) + "px)";
         sonda.hidden = false;
+        // Lo stesso valore, segnato sulla scala dei colori.
+        const segno = document.getElementById("legend-sonda");
+        if (segno) {
+          segno.style.left = posizioneLegenda(valore, info).toFixed(2) + "%";
+          segno.hidden = false;
+        }
       }
 
       function collegaSonda() {
@@ -15641,6 +15764,7 @@
 
         updateSelectedPointMarker();
         refreshSelectedPoint();
+        programmaLink();
         updateBulletinUi();
       }
 
@@ -15996,9 +16120,11 @@
         const windDirection = windDirectionFrom(wind.u, wind.v);
 
         ui.pointTitle.textContent = selectedPoint.title + " · " + info.label;
-        ui.pointValue.textContent = Number.isFinite(selectedValue) ? selectedValue.toFixed(info.decimals) : "--";
+        ui.pointValue.textContent = Number.isFinite(selectedValue)
+          ? selectedValue.toFixed(info.decimals).replace(".", ",") : "--";
         ui.pointUnit.textContent = info.unit;
-        ui.pointLocation.textContent = selectedPoint.lat.toFixed(3) + "°N · " + selectedPoint.lng.toFixed(3) + "°E";
+        ui.pointLocation.textContent = selectedPoint.lat.toFixed(3).replace(".", ",") + "°N · "
+          + selectedPoint.lng.toFixed(3).replace(".", ",") + "°E";
         const bandRange = bandRangeFor(selectedValue, info);
         const samplingMethod = useNearestCell
           ? "cella più vicina"
@@ -16026,6 +16152,11 @@
           fieldValue("foehn", point.gx, point.gy)
         );
         ui.detailWetbulb.textContent = formatValue(fieldValue("wetbulb", point.gx, point.gy), 1, "°C");
+        const rugiada = dewPointCelsius(
+          fieldValue("temp", point.gx, point.gy), fieldValue("rh", point.gx, point.gy)
+        );
+        const rugiadaEl = document.getElementById("detail-dewpoint");
+        if (rugiadaEl) rugiadaEl.textContent = formatValue(rugiada, 1, "°C");
         ui.detailElevation.textContent = terrainElevationText(selectedPoint);
         updateLocalDownscaling();
         updateStormChain(point.gx, point.gy);
@@ -16037,6 +16168,11 @@
           ui.detailTemp.textContent,
           ui.detailWind.textContent + " " + ui.detailDirection.textContent,
         ];
+        // La coppia T/Td e' la prima cosa che un previsore legge in un punto:
+        // la rugiada segue la temperatura, solo al suolo dove vale.
+        if (Number.isFinite(rugiada) && selectedLevel === "surface") {
+          summary.splice(1, 0, "Td " + formatValue(rugiada, 1, "°C"));
+        }
         // La raffica entra solo quando dice qualcosa in piu' del vento medio:
         // sotto i 40 km/h e' la stessa notizia scritta due volte.
         const gust = fieldValue("gust", point.gx, point.gy);
@@ -16088,6 +16224,7 @@
         document.body.classList.remove("readout-open");
         updateSelectedPointMarker();
         updateBulletinUi();
+        programmaLink();
       }
 
       function locateUser() {
@@ -17556,7 +17693,9 @@
 
           collegaSonda();
 
-          map.on("movestart", function () {
+          map.on("movestart", function (evento) {
+            // Solo un gesto dell'utente mette l'inquadratura nel link.
+            if (evento && evento.originalEvent) vistaMossa = true;
             nascondiSonda();
             isMapMoving = true; weatherFrameEpoch++; lastRasterSignature = "";
             resetParticles();
@@ -17571,6 +17710,7 @@
 
           map.on("moveend", function () {
             isMapMoving = false; scheduleFrameWarmup();
+            programmaLink(); programmaStatisticheVista();
             syncTerrainExaggeration();
             resetParticles();
             effettiVista += 1;
@@ -17609,8 +17749,9 @@
               duration: 0,
               essential: true
             });
-            showPoint(queryLongitude, queryLatitude, "Punto del meteogramma");
+            showPoint(queryLongitude, queryLatitude, query.get("nome") || "Punto del meteogramma");
           }
+          ripristinaDaLink(query);
         });
       }
 
@@ -17884,6 +18025,396 @@
           setBulletin(false);
         }
       });
+
+      // =====================================================================
+      // STRUMENTI DA PREVISORE
+      //
+      // Il sito aveva gia' i contenuti di una console meteorologica; mancava
+      // il modo di lavorarci. Qui stanno le quattro cose che un previsore
+      // usa di continuo: le carte standard a un clic, la tastiera per
+      // scorrere le scadenze, un link che riapre esattamente la carta che si
+      // sta guardando, e gli estremi del campo nella porzione inquadrata.
+      // Nessuna di queste aggiunge o altera un dato: cambiano solo come ci si
+      // arriva e come lo si legge.
+      // =====================================================================
+
+      // ---- Carte pronte -----------------------------------------------------
+      // Le combinazioni che si aprono ogni giorno. Ogni carta e' un campo
+      // piu' le analisi che lo accompagnano sulle carte dei servizi meteo.
+      const CARTE_PRONTE = [
+        { id: "suolo", nome: "Suolo", nota: "T 2 m · isobare · fronti",
+          campo: "temp", isobare: true, fronti: true, isoipse: false, flusso: null },
+        { id: "850", nome: "850 hPa", nota: "θw 850 hPa · fronti · masse d'aria",
+          campo: "theta850", isobare: false, fronti: true, isoipse: false, flusso: false },
+        { id: "500", nome: "500 hPa", nota: "geopotenziale e isoipse · isobare al suolo",
+          campo: "geopot500", isobare: true, fronti: false, isoipse: true, flusso: false },
+        { id: "pioggia", nome: "Pioggia", nota: "precipitazioni · isobare",
+          campo: "rain", isobare: true, fronti: false, isoipse: false, flusso: false },
+        { id: "vento", nome: "Vento", nota: "vento a 10 m · isobare",
+          campo: "wind", isobare: true, fronti: false, isoipse: false, flusso: null },
+        { id: "temporali", nome: "Temporali", nota: "indice dei temporali · fronti",
+          campo: "storm_prob", isobare: false, fronti: true, isoipse: false, flusso: false }
+      ];
+
+      function frontiDisponibili() {
+        return Boolean(currentData && currentData.meta && currentData.meta.frontMethod
+          && currentData.meta.frontAnalysisStatus !== "unavailable");
+      }
+
+      // La carta attiva e' quella che coincide con lo stato: se si cambia
+      // campo o si spegne un'analisi a mano, nessuna carta resta segnata.
+      function cartaAttiva() {
+        if (weatherView !== "forecast" || synopticChart) return "";
+        for (const carta of CARTE_PRONTE) {
+          if (carta.campo !== activeLayer) continue;
+          if (showIsobars !== carta.isobare && carta.campo !== "press") continue;
+          if (showIsohypses !== carta.isoipse) continue;
+          if (showFronts !== (carta.fronti && frontiDisponibili())) continue;
+          return carta.id;
+        }
+        return "";
+      }
+
+      function applicaCarta(id) {
+        const carta = CARTE_PRONTE.find(function (voce) { return voce.id === id; });
+        if (!carta || !currentData) return;
+        if (weatherView === "satellite") setWeatherView("forecast");
+        if (!hasLayerData(carta.campo)) {
+          toast(unavailableLayerMessage(carta.campo));
+          return;
+        }
+        if (selectedLevel !== "surface") setLevel("surface");
+        showIsobars = carta.isobare;
+        showFronts = carta.fronti && frontiDisponibili();
+        showIsohypses = carta.isoipse && Boolean(getGrid(currentData.geopot500));
+        // Le particelle seguono il vento a 10 m: sopra una carta in quota o
+        // sopra la pioggia animata direbbero una cosa diversa dal campo.
+        if (carta.flusso === false && showParticles) {
+          showParticles = false;
+          particelleDaRipristinare = false;
+          stopParticles();
+        }
+        setLayer(carta.campo);
+        toast("Carta " + carta.nome + " · " + carta.nota);
+      }
+
+      function aggiornaCartePronte() {
+        const barra = document.getElementById("carte-pronte");
+        if (!barra) return;
+        if (!barra.children.length) {
+          const titolo = document.createElement("span");
+          titolo.className = "carte-titolo";
+          titolo.textContent = "Carte";
+          barra.appendChild(titolo);
+          CARTE_PRONTE.forEach(function (carta, indice) {
+            const bottone = document.createElement("button");
+            bottone.type = "button";
+            bottone.dataset.carta = carta.id;
+            bottone.title = carta.nota + " (tasto " + (indice + 1) + ")";
+            bottone.textContent = carta.nome;
+            bottone.addEventListener("click", function () { applicaCarta(carta.id); });
+            barra.appendChild(bottone);
+          });
+        }
+        const attiva = cartaAttiva();
+        barra.querySelectorAll("[data-carta]").forEach(function (bottone) {
+          const accesa = bottone.dataset.carta === attiva;
+          bottone.classList.toggle("active", accesa);
+          bottone.setAttribute("aria-pressed", accesa ? "true" : "false");
+        });
+      }
+
+      // ---- Scadenze da tastiera ---------------------------------------------
+      function vaiAllaScadenza(indice) {
+        if (!catalog.length || weatherView !== "forecast") return;
+        setPlaying(false);
+        const destinazione = clamp(Math.round(indice), 0, catalog.length - 1);
+        if (destinazione === Number(ui.slider.value)) return;
+        ui.slider.value = String(destinazione);
+        requestSliderStep(destinazione);
+      }
+
+      // L'indice piu' vicino a un istante: serve per "adesso" e per i salti
+      // di sei ore, che contano ore vere e non posizioni nell'elenco.
+      function indicePerIstante(millisecondi) {
+        let migliore = -1, distanza = Infinity;
+        catalog.forEach(function (voce, indice) {
+          const data = parseCatalogDate(voce);
+          const scarto = data ? Math.abs(data.getTime() - millisecondi) : Infinity;
+          if (scarto < distanza) { migliore = indice; distanza = scarto; }
+        });
+        return migliore;
+      }
+
+      function saltaOre(ore) {
+        const attuale = parseCatalogDate(catalog[Number(ui.slider.value)]);
+        if (!attuale) return;
+        const indice = indicePerIstante(attuale.getTime() + ore * 3600000);
+        if (indice >= 0) vaiAllaScadenza(indice);
+      }
+
+      function setGuidaTasti(aperta) {
+        const guida = document.getElementById("guida-tasti");
+        if (!guida) return;
+        guida.hidden = !aperta;
+        document.getElementById("guida-tasti-apri").setAttribute("aria-expanded", aperta ? "true" : "false");
+        if (aperta) document.getElementById("guida-tasti-chiudi").focus({ preventScroll: true });
+      }
+
+      const TASTI_CAMPO = { t: "temp", v: "wind", p: "rain", n: "cloud", b: "press", u: "rh" };
+
+      function tastoPrevisore(event) {
+        if (event.defaultPrevented || event.ctrlKey || event.metaKey) return;
+        const bersaglio = event.target;
+        const tag = bersaglio && bersaglio.tagName;
+        const campoTesto = (tag === "INPUT" && bersaglio.type !== "range")
+          || tag === "TEXTAREA" || tag === "SELECT"
+          || (bersaglio && bersaglio.isContentEditable);
+        if (campoTesto) return;
+        const guida = document.getElementById("guida-tasti");
+        if (event.key === "Escape" && guida && !guida.hidden) { setGuidaTasti(false); return; }
+        if (event.key === "?") { event.preventDefault(); setGuidaTasti(guida.hidden); return; }
+        // Con un pannello aperto sopra la mappa i tasti restano al pannello.
+        if (ui.bulletinCard.classList.contains("open")) return;
+
+        const freccia = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+        if (event.altKey) {
+          // Le frecce da sole scorrono il tempo: la mappa si sposta con Alt.
+          const spostamenti = { ArrowLeft: [-120, 0], ArrowRight: [120, 0], ArrowUp: [0, -120], ArrowDown: [0, 120] };
+          if (map && spostamenti[event.key]) {
+            event.preventDefault(); event.stopPropagation();
+            map.panBy(spostamenti[event.key], { duration: prefersReducedMotion ? 0 : 180 });
+          }
+          return;
+        }
+        if (freccia) {
+          // Sul cursore del tempo le frecce fanno gia' il loro lavoro.
+          if (tag === "INPUT" && !event.shiftKey) return;
+          event.preventDefault(); event.stopPropagation();
+          if (weatherView === "satellite") {
+            const barra = document.getElementById("satellite-scrub");
+            if (!barra) return;
+            const passo = event.shiftKey ? 6 : 1;
+            barra.value = String(clamp(Number(barra.value) + freccia * passo, Number(barra.min), Number(barra.max)));
+            barra.dispatchEvent(new Event("input"));
+            return;
+          }
+          if (event.shiftKey) saltaOre(freccia * 6);
+          else vaiAllaScadenza(Number(ui.slider.value) + freccia);
+          return;
+        }
+        if (event.shiftKey && event.key.length === 1 && event.key !== "?") return;
+        if (event.key === " ") {
+          if (tag === "BUTTON" || tag === "A" || tag === "SUMMARY") return;
+          event.preventDefault();
+          if (weatherView === "satellite") setSatPlay(!satPlayTimer);
+          else setPlaying(!isPlaying);
+          return;
+        }
+        if (weatherView !== "forecast") return;
+        const tasto = event.key.toLowerCase();
+        if (tasto >= "1" && tasto <= "6") {
+          const carta = CARTE_PRONTE[Number(tasto) - 1];
+          if (carta) applicaCarta(carta.id);
+        } else if (TASTI_CAMPO[tasto]) {
+          setLayer(TASTI_CAMPO[tasto]);
+        } else if (tasto === "a") {
+          const adesso = indicePerIstante(Date.now());
+          if (adesso >= 0) vaiAllaScadenza(adesso);
+        } else if (tasto === "i") {
+          setToggle("isobars");
+        } else if (tasto === "f") {
+          setToggle("fronts");
+        } else if (tasto === "c") {
+          setToggle("cityvalues");
+        } else if (tasto === "z") {
+          setOraUtc(!oraUtc);
+          toast(oraUtc ? "Ore in UTC" : "Ore in ora italiana");
+        } else if (tasto === "l") {
+          setDrawer(!ui.drawer.classList.contains("open"));
+        }
+      }
+
+      // ---- Il link alla carta -----------------------------------------------
+      // L'indirizzo ricorda campo, quota, ora, inquadratura e punto: aprirlo
+      // riporta alla stessa carta. L'ora entra nel link solo se ci si e'
+      // spostati da "adesso" -- chi ricarica la pagina il giorno dopo vuole
+      // l'ora corrente, non quella di ieri -- e l'inquadratura solo dopo che
+      // la mappa e' stata mossa a mano.
+      let linkTimer = 0;
+      let vistaMossa = false;
+      let linkRipristinato = false;
+
+      function parametriLink() {
+        const parametri = new URLSearchParams();
+        if (weatherView !== "forecast") return parametri;
+        if (activeLayer !== "temp") parametri.set("campo", activeLayer);
+        if (selectedLevel !== "surface") parametri.set("quota", selectedLevel);
+        const voce = catalog[currentIndex];
+        if (voce && voce.validTime && currentIndex !== indicePerIstante(Date.now())) {
+          parametri.set("ora", String(voce.validTime).replace(":00:00Z", "Z").replace(/:00Z$/, "Z"));
+        }
+        if (vistaMossa && map) {
+          const centro = map.getCenter();
+          parametri.set("vista", centro.lat.toFixed(2) + "," + centro.lng.toFixed(2) + "," + map.getZoom().toFixed(1));
+        }
+        if (selectedPoint) {
+          parametri.set("lat", selectedPoint.lat.toFixed(4));
+          parametri.set("lon", selectedPoint.lng.toFixed(4));
+          if (selectedPoint.title && selectedPoint.title !== "Punto selezionato"
+              && selectedPoint.title !== "Punto del meteogramma") {
+            parametri.set("nome", selectedPoint.title);
+          }
+        }
+        return parametri;
+      }
+
+      function indirizzoCarta() {
+        const testo = parametriLink().toString();
+        return window.location.origin + window.location.pathname + (testo ? "?" + testo : "");
+      }
+
+      function programmaLink() {
+        // Prima del ripristino l'indirizzo e' ancora quello ricevuto: non va
+        // riscritto con lo stato di partenza.
+        if (!linkRipristinato || linkTimer) return;
+        linkTimer = setTimeout(function () {
+          linkTimer = 0;
+          try {
+            const testo = parametriLink().toString();
+            window.history.replaceState(null, "", window.location.pathname + (testo ? "?" + testo : ""));
+          } catch (error) { /* file:// o cornice senza cronologia */ }
+        }, 400);
+      }
+
+      function ripristinaDaLink(query) {
+        try {
+          const quota = query.get("quota");
+          const campo = query.get("campo");
+          if (quota === "925" || quota === "850") setLevel(quota);
+          if (campo && LAYER_INFO[campo] && campo !== activeLayer && hasLayerData(campo)) setLayer(campo);
+          const vista = (query.get("vista") || "").split(",").map(Number);
+          if (vista.length === 3 && vista.every(Number.isFinite)
+              && vista[0] >= 30 && vista[0] <= 52 && vista[1] >= -5 && vista[1] <= 30
+              && vista[2] >= 3 && vista[2] <= 13) {
+            map.jumpTo({ center: [vista[1], vista[0]], zoom: vista[2] });
+            vistaMossa = true;
+          }
+          const ora = query.get("ora");
+          if (ora) {
+            const istante = new Date(ora.replace(/T(\d{2})Z$/, "T$1:00:00Z").replace(/T(\d{2}):(\d{2})Z$/, "T$1:$2:00Z"));
+            if (!Number.isNaN(istante.getTime())) {
+              const indice = indicePerIstante(istante.getTime());
+              const trovata = indice >= 0 ? parseCatalogDate(catalog[indice]) : null;
+              // Un'ora fuori dal run corrente (link vecchio) non si forza
+              // sulla scadenza piu' vicina: resta "adesso", e lo si dice.
+              if (trovata && Math.abs(trovata.getTime() - istante.getTime()) < 30 * 60000) {
+                vaiAllaScadenza(indice);
+              } else {
+                toast("L'ora del link non è più nel run disponibile: mostro l'ora attuale");
+              }
+            }
+          }
+        } finally {
+          linkRipristinato = true;
+        }
+      }
+
+      function copiaLinkCarta() {
+        const esito = document.getElementById("copia-link-esito");
+        const indirizzo = indirizzoCarta();
+        const fatto = function () { esito.textContent = "Link copiato"; };
+        const fallito = function () { esito.textContent = indirizzo; };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(indirizzo).then(fatto, fallito);
+        } else {
+          fallito();
+        }
+      }
+
+      // ---- Gli estremi del campo nella vista --------------------------------
+      // Minimo e massimo del campo attivo nella porzione di carta inquadrata,
+      // letti su un reticolo di schermo con la stessa funzione della scheda
+      // del punto. Sono estremi del campionamento (un punto ogni ~30 px),
+      // non dell'intera griglia: un picco piu' stretto puo' sfuggire, ed e'
+      // scritto nel suggerimento.
+      let statisticheTimer = 0;
+
+      function posizioneLegenda(valore, info) {
+        const minimo = info.stops[0].v;
+        const massimo = info.stops[info.stops.length - 1].v;
+        return clamp((valore - minimo) / (massimo - minimo || 1) * 100, 0, 100);
+      }
+
+      function estremiInVista() {
+        if (!map || !currentData || activeLayer === "none" || weatherView !== "forecast") return null;
+        const info = activeLayerInfo(activeLayer);
+        if (!info || info.categorical) return null;
+        const larghezza = window.innerWidth, altezza = window.innerHeight;
+        const colonne = Math.max(8, Math.min(56, Math.round(larghezza / 30)));
+        const righe = Math.max(8, Math.min(36, Math.round(altezza / 30)));
+        let minimo = Infinity, massimo = -Infinity, validi = 0;
+        for (let j = 0; j < righe; j += 1) {
+          for (let i = 0; i < colonne; i += 1) {
+            const posizione = map.unproject([(i + 0.5) / colonne * larghezza, (j + 0.5) / righe * altezza]);
+            const punto = pointFromCoordinates(posizione.lng, posizione.lat);
+            if (!punto) continue;
+            const valore = fieldValue(activeLayer, punto.gx, punto.gy);
+            if (!Number.isFinite(valore)) continue;
+            validi += 1;
+            if (valore < minimo) minimo = valore;
+            if (valore > massimo) massimo = valore;
+          }
+        }
+        return validi >= 12 ? { minimo: minimo, massimo: massimo, info: info } : null;
+      }
+
+      function aggiornaStatisticheVista() {
+        const riga = document.getElementById("legend-vista");
+        const fascia = document.getElementById("legend-vista-fascia");
+        if (!riga || !fascia) return;
+        const estremi = isMapMoving ? null : estremiInVista();
+        if (!estremi) { riga.hidden = true; fascia.hidden = true; return; }
+        const info = estremi.info;
+        const decimali = Math.min(1, info.decimals || 0);
+        const scrivi = function (valore) { return valore.toFixed(decimali).replace(".", ","); };
+        const separatore = String(info.unit || "").startsWith("/") ? "" : " ";
+        riga.textContent = "In vista · min " + scrivi(estremi.minimo) + " · max "
+          + scrivi(estremi.massimo) + separatore + (info.unit || "");
+        riga.title = "Estremi del campo nella porzione inquadrata, campionati su un reticolo di schermo";
+        riga.hidden = false;
+        const da = posizioneLegenda(estremi.minimo, info), a = posizioneLegenda(estremi.massimo, info);
+        fascia.style.left = da.toFixed(2) + "%";
+        fascia.style.width = Math.max(0.8, a - da).toFixed(2) + "%";
+        fascia.hidden = false;
+      }
+
+      function programmaStatisticheVista() {
+        clearTimeout(statisticheTimer);
+        statisticheTimer = setTimeout(aggiornaStatisticheVista, 260);
+      }
+
+      function collegaStrumentiPrevisore() {
+        document.addEventListener("keydown", tastoPrevisore, true);
+        document.querySelectorAll("[data-ora]").forEach(function (bottone) {
+          bottone.addEventListener("click", function () {
+            // Sul telefono c'e' il solo bottone UTC: premuto di nuovo, torna
+            // all'ora italiana.
+            const locale = document.querySelector('[data-ora="local"]');
+            const soloUtc = locale && getComputedStyle(locale).display === "none";
+            setOraUtc(bottone.dataset.ora === "utc" && !(soloUtc && oraUtc));
+          });
+        });
+        setOraUtc(oraUtc);
+        document.getElementById("guida-tasti-apri").addEventListener("click", function () {
+          setGuidaTasti(document.getElementById("guida-tasti").hidden);
+        });
+        document.getElementById("guida-tasti-chiudi").addEventListener("click", function () { setGuidaTasti(false); });
+        document.getElementById("copia-link").addEventListener("click", copiaLinkCarta);
+        aggiornaCartePronte();
+      }
+
+      collegaStrumentiPrevisore();
 
       resizeCanvases();
       updateModelUi();

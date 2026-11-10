@@ -251,7 +251,12 @@
         color: #173c51; text-align: center;
       }
       .weather-cell .when { color: #668194; font-size: 7.5px; font-weight: 850; text-transform: uppercase; }
-      .weather-cell .symbol { font-size: 25px; line-height: 1; }
+      .weather-cell .symbol { display: block; line-height: 0; color: #3d5d73; }
+      .weather-cell .symbol svg { width: 26px; height: 26px; }
+      .weather-cell.clear .symbol { color: #d18a12; }
+      .weather-cell.night .symbol { color: #5a6fa8; }
+      .weather-cell.rain .symbol { color: #1f6fb5; }
+      .weather-cell.storm .symbol { color: #a2452f; }
       .weather-cell b { font-family: var(--mono); font-size: 12px; }
       .weather-cell small { color: #648093; font-size: 7.5px; white-space: nowrap; }
       .weather-cell.storm { border-color: #e9a8b0; background: #fff3f4; }
@@ -577,7 +582,8 @@
       function valueOrNull(value) { return finite(value) ? Number(value) : null; }
       function clamp(value, minimum, maximum) { return Math.max(minimum, Math.min(maximum, value)); }
       function format(value, decimals, suffix) {
-        return finite(value) ? Number(value).toFixed(decimals) + (suffix || "") : "—";
+        // Decimali con la virgola, come sulla mappa.
+        return finite(value) ? Number(value).toFixed(decimals).replace(".", ",") + (suffix || "") : "—";
       }
       function escapeHtml(value) {
         return String(value).replace(/[&<>"']/g, character => ({
@@ -932,16 +938,58 @@
         }).join("");
       }
 
+      // Icone disegnate, non emoji: le emoji cambiano forma e colore da un
+      // sistema all'altro e su una pagina di dati sembrano un giocattolo.
+      // Tratto unico, stesso spessore delle icone della mappa.
+      const WEATHER_ICONS = {
+        sole: '<circle cx="12" cy="12" r="4.2"></circle><path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"></path>',
+        luna: '<path d="M19.5 14.2A8 8 0 0 1 9.8 4.5a8 8 0 1 0 9.7 9.7Z"></path>',
+        variabile: '<circle cx="8.2" cy="8.4" r="3"></circle><path d="M8.2 2.6v1.5M2.4 8.4h1.5M4.1 4.3l1.1 1.1M12.3 4.3l-1.1 1.1"></path><path d="M9 19.5h8.2a3.6 3.6 0 0 0 .5-7.2 5 5 0 0 0-9.4 1.3A3 3 0 0 0 9 19.5Z"></path>',
+        variabileNotte: '<path d="M10.8 7.6A4.6 4.6 0 0 1 5.6 2.9a4.6 4.6 0 1 0 5.2 4.7Z"></path><path d="M9 19.5h8.2a3.6 3.6 0 0 0 .5-7.2 5 5 0 0 0-9.4 1.3A3 3 0 0 0 9 19.5Z"></path>',
+        coperto: '<path d="M7 18.5h10.4a4.2 4.2 0 0 0 .6-8.4 6 6 0 0 0-11.4 1.6A3.5 3.5 0 0 0 7 18.5Z"></path>',
+        rovesci: '<path d="M7 15.5h10.4a4.2 4.2 0 0 0 .6-8.4A6 6 0 0 0 6.6 8.7 3.5 3.5 0 0 0 7 15.5Z"></path><path d="M9.5 18.2l-.8 2.3M14.5 18.2l-.8 2.3"></path>',
+        pioggia: '<path d="M7 14.5h10.4a4.2 4.2 0 0 0 .6-8.4A6 6 0 0 0 6.6 7.7 3.5 3.5 0 0 0 7 14.5Z"></path><path d="M8 17.2l-1.1 3.3M12.2 17.2l-1.1 3.3M16.4 17.2l-1.1 3.3"></path>',
+        temporale: '<path d="M7 14.5h10.4a4.2 4.2 0 0 0 .6-8.4A6 6 0 0 0 6.6 7.7 3.5 3.5 0 0 0 7 14.5Z"></path><path d="M12.6 15.6l-2.4 3.4h3l-1.8 3" stroke-linejoin="round"></path>'
+      };
+
+      function weatherIcon(name) {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+          + (WEATHER_ICONS[name] || WEATHER_ICONS.coperto) + '</svg>';
+      }
+
+      // Altezza del sole sull'orizzonte, in gradi. Formula approssimata
+      // (declinazione ed equazione del tempo al primo ordine): sbaglia meno
+      // di un grado, piu' che abbastanza per distinguere il giorno dalla notte.
+      function solarElevation(date, latitude, longitude) {
+        const giorno = (Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+          - Date.UTC(date.getUTCFullYear(), 0, 0)) / 86400000;
+        const ore = date.getUTCHours() + date.getUTCMinutes() / 60;
+        const gamma = 2 * Math.PI / 365 * (giorno - 1 + (ore - 12) / 24);
+        const declinazione = 0.006918 - 0.399912 * Math.cos(gamma) + 0.070257 * Math.sin(gamma)
+          - 0.006758 * Math.cos(2 * gamma) + 0.000907 * Math.sin(2 * gamma);
+        const equazione = 229.18 * (0.000075 + 0.001868 * Math.cos(gamma) - 0.032077 * Math.sin(gamma)
+          - 0.014615 * Math.cos(2 * gamma) - 0.040849 * Math.sin(2 * gamma));
+        const oraSolare = ore + longitude / 15 + equazione / 60;
+        const angoloOrario = (oraSolare - 12) * 15 * Math.PI / 180;
+        const lat = latitude * Math.PI / 180;
+        return Math.asin(Math.sin(lat) * Math.sin(declinazione)
+          + Math.cos(lat) * Math.cos(declinazione) * Math.cos(angoloOrario)) * 180 / Math.PI;
+      }
+
       function weatherSymbol(series, index) {
         const storm = series.convectionProbability && series.convectionProbability[index];
         const rain = series.rainStep && series.rainStep[index];
         const cloud = series.cloudCover && series.cloudCover[index];
-        if (finite(storm) && Number(storm) >= 70) return { symbol:"⚡", label:"temporali", className:"storm" };
-        if (finite(rain) && Number(rain) >= 2) return { symbol:"🌧", label:"pioggia", className:"rain" };
-        if (finite(rain) && Number(rain) >= .1) return { symbol:"🌦", label:"rovesci", className:"rain" };
-        if (finite(cloud) && Number(cloud) >= 80) return { symbol:"☁", label:"coperto", className:"" };
-        if (finite(cloud) && Number(cloud) >= 45) return { symbol:"⛅", label:"variabile", className:"" };
-        return { symbol:"☀", label:"sereno", className:"" };
+        const quando = new Date(series.times[index].validTime);
+        const notte = Number.isFinite(state.latitude) && Number.isFinite(state.longitude)
+          && !Number.isNaN(quando.getTime())
+          && solarElevation(quando, state.latitude, state.longitude) < -0.8;
+        if (finite(storm) && Number(storm) >= 70) return { symbol:weatherIcon("temporale"), label:"temporali", className:"storm" };
+        if (finite(rain) && Number(rain) >= 2) return { symbol:weatherIcon("pioggia"), label:"pioggia", className:"rain" };
+        if (finite(rain) && Number(rain) >= .1) return { symbol:weatherIcon("rovesci"), label:"rovesci", className:"rain" };
+        if (finite(cloud) && Number(cloud) >= 80) return { symbol:weatherIcon("coperto"), label:"coperto", className:"" };
+        if (finite(cloud) && Number(cloud) >= 45) return { symbol:weatherIcon(notte ? "variabileNotte" : "variabile"), label:"variabile", className:"" };
+        return { symbol:weatherIcon(notte ? "luna" : "sole"), label:"sereno", className: notte ? "night" : "clear" };
       }
 
       function renderWeatherStrip(series) {

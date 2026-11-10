@@ -630,3 +630,56 @@ body.satellite-view .sat-bar { display: flex; }
 #sat-bar { background: var(--surface-strong); border-color: var(--stroke); border-radius: 9px; }
 #satellite-status select { color-scheme: dark; background: #1e344a; }
 .sat-observed-grid .toggle-row { border-color: var(--stroke); background: #1b3044; }
+
+/* ---- Strumenti da previsore -------------------------------------------
+   Fuso orario, carte pronte, guida della tastiera, estremi in vista. */
+.ora-switch { display: inline-flex; flex-shrink: 0; gap: 1px; padding: 1px; border: 1px solid var(--stroke); border-radius: 5px; background: #172a3e; }
+.ora-switch button { min-height: 16px; padding: 1px 7px; line-height: 1.2; border-radius: 3px; background: none; color: var(--muted); font-size: 9px; font-weight: 550; letter-spacing: .02em; }
+.ora-switch button.active { background: #2d4b62; color: var(--text); }
+.ora-switch button:hover { color: var(--text); }
+.ora-switch #guida-tasti-apri { margin-left: 3px; min-width: 18px; padding: 1px 6px; font-weight: 700; color: var(--accent); }
+#time-alt { font-size: 10px; font-weight: 500; color: var(--muted); padding: 2px 5px; border: 1px solid var(--stroke); border-radius: 4px; }
+#time-alt:empty { display: none; }
+
+#carte-pronte { position: fixed; z-index: 33; top: calc(88px + var(--safe-top)); left: 584px; display: flex; align-items: center; gap: 3px; padding: 4px; border-radius: 9px; }
+#carte-pronte .carte-titolo { padding: 0 8px 0 6px; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+#carte-pronte button { min-height: 36px; padding: 0 11px; border-radius: 5px; background: none; color: var(--muted); font-size: 12px; font-weight: 550; white-space: nowrap; }
+#carte-pronte button:hover { color: var(--text); background: #1f3448; }
+#carte-pronte button[aria-pressed=true] { background: #28465c; color: #ebfaff; box-shadow: inset 0 0 0 1px #406278; }
+body.clean-mode #carte-pronte, .satellite-view #carte-pronte, body.synoptic-chart #carte-pronte { display: none !important; }
+@media (max-width: 1359px) { #carte-pronte .carte-titolo { display: none; } #carte-pronte button { padding: 0 8px; } }
+/* Sotto i 1180 px la fila non sta accanto alla ricerca: va nel menu dei
+   livelli, dove modern-ui.js la sposta. */
+.drawer-content #carte-pronte { position: static; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0 0 14px; border: 0; background: none; box-shadow: none; }
+.drawer-content #carte-pronte .carte-titolo { display: block; flex: 1 0 100%; padding: 0 0 2px; font-size: 10px; }
+.drawer-content #carte-pronte button { flex: 1 0 30%; min-height: 44px; border: 1px solid var(--stroke); background: var(--surface-soft); color: var(--text); }
+
+#legend-bar { position: relative; }
+#legend-vista-fascia { position: absolute; top: -4px; height: 2px; border-radius: 1px; background: #f1f6fc; pointer-events: none; }
+#legend-sonda { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1px #06111fcc; pointer-events: none; }
+#legend-vista { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--stroke); font-size: 10px; color: #d6e4f0; }
+
+#guida-tasti { position: fixed; z-index: 60; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: 18px 20px; border-radius: 12px; box-shadow: 0 18px 60px #020812b3; }
+#guida-tasti header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+#guida-tasti h2 { margin: 0; font-size: 15px; font-weight: 650; }
+#guida-tasti header button { width: 36px; height: 36px; border-radius: 6px; background: var(--surface-soft); color: var(--text); display: grid; place-items: center; }
+#guida-tasti dl { margin: 0; display: grid; gap: 7px; }
+#guida-tasti dl div { display: grid; grid-template-columns: 172px 1fr; gap: 12px; align-items: baseline; }
+#guida-tasti dt { white-space: nowrap; color: var(--muted); font-size: 11px; }
+#guida-tasti dd { margin: 0; font-size: 12px; color: var(--text); }
+#guida-tasti kbd { display: inline-block; min-width: 20px; padding: 2px 6px; border: 1px solid var(--stroke-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-soft); color: var(--text); font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
+#guida-tasti .guida-link { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--stroke); }
+#guida-tasti #copia-link { min-height: 36px; padding: 0 14px; border-radius: 6px; background: var(--accent); color: #102b39; font-size: 12px; font-weight: 650; }
+#guida-tasti #copia-link-esito { font-size: 11px; color: var(--muted); word-break: break-all; min-width: 0; }
+@media (max-width: 959px) {
+  /* Sul telefono la riga e' stretta: resta un solo bottone "UTC" che si
+     accende e si spegne, e l'ora nell'altro fuso non si mostra. */
+  .ora-switch #guida-tasti-apri, .ora-switch [data-ora="local"], #time-alt { display: none; }
+  .ora-switch { margin-left: 2px; }
+  .ora-switch button { min-height: 16px; padding: 1px 6px; }
+  .ora-switch button.active { background: var(--accent); color: #102b39; }
+  /* La legenda ha una riga in piu' (gli estremi in vista): si alza quanto
+     basta a non toccare la barra del tempo. */
+  #legend-card, #legend-card.expanded, #legend-card:not(.expanded) { bottom: calc(142px + var(--safe-bottom)); }
+  #guida-tasti dl div { grid-template-columns: 1fr; gap: 2px; }
+}

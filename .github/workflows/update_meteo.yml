@@ -376,6 +376,7 @@ jobs:
           node scripts/tests/test_blitzortung.js
           node scripts/tests/test_lampo.js
           node scripts/tests/test_mappe_laboratorio.js
+          node scripts/tests/test_strumenti_previsore.js
           node scripts/tests/test_workflow.js
 
   build:
@@ -468,6 +469,7 @@ jobs:
           node scripts/tests/test_blitzortung.js
           node scripts/tests/test_lampo.js
           node scripts/tests/test_mappe_laboratorio.js
+          node scripts/tests/test_strumenti_previsore.js
           node scripts/tests/test_workflow.js
 
       - name: Run ICON-2I processor

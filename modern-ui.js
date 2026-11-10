@@ -194,6 +194,19 @@ function setWeatherView(view) {
   arrange();
   mobile.addEventListener('change', arrange);
 
+  // Le carte pronte stanno accanto alla ricerca finche' c'e' posto; sotto i
+  // 1180 px entrano in cima al menu dei livelli. E' lo stesso elemento,
+  // spostato: i bottoni non si duplicano.
+  const carte = document.getElementById('carte-pronte');
+  const stretto = window.matchMedia('(max-width: 1179px)');
+  function collocaCarte() {
+    if (!carte) return;
+    if (stretto.matches) document.querySelector('.drawer-content').prepend(carte);
+    else document.body.insertBefore(carte, document.getElementById('guida-tasti'));
+  }
+  collocaCarte();
+  stretto.addEventListener('change', collocaCarte);
+
   const previous = document.getElementById('time-prev');
   const next = document.getElementById('time-next');
   const now = document.getElementById('time-now');
@@ -221,7 +234,7 @@ function setWeatherView(view) {
     next.disabled = !catalog.length || currentIndex >= catalog.length - 1;
     now.disabled = !catalog.some(item => parseCatalogDate(item));
     const current = parseCatalogDate(catalog[currentIndex]);
-    const day = date => date?.toLocaleDateString('it-IT', {timeZone: 'Europe/Rome'});
+    const day = date => date?.toLocaleDateString('it-IT', {timeZone: fusoAttivo()});
     const activeDay = day(current);
     document.querySelectorAll('#timeline-days button').forEach(button => {
       const index = Math.round(parseFloat(button.style.left) / 100 * Math.max(1, catalog.length - 1));
