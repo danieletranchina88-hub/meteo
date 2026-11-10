@@ -232,5 +232,54 @@ prova('i nuovi comandi hanno il loro stile e non si duplicano', () => {
   assert.match(html, /collegaStrumentiPrevisore\(\);\s*\n\s*resizeCanvases\(\);/, 'gli strumenti non vengono collegati');
 });
 
+prova('il numero che scorre finisce sempre sul valore letto', () => {
+  const scritti = [];
+  let coda = [];
+  let adesso = 0;
+  const ctx = { Number, Math, prefersReducedMotion: false,
+    performance: { now: () => adesso },
+    requestAnimationFrame: (fn) => { coda.push(fn); return coda.length; },
+    cancelAnimationFrame: () => { coda = []; } };
+  vm.createContext(ctx);
+  vm.runInContext('const numeroAnimato = { chiave: "", valore: NaN, frame: 0 };' + implementazione('animaNumero'), ctx);
+  const el = { set textContent(v) { scritti.push(v); } };
+  // Primo valore: scritto subito, senza animazione.
+  ctx.animaNumero(el, 16.14, 1, 'temp|roma');
+  assert.deepEqual(scritti, ['16,1']);
+  // Stessa chiave, valore nuovo: scorre e termina esattamente sul nuovo.
+  ctx.animaNumero(el, 19.56, 1, 'temp|roma');
+  for (let giro = 0; giro < 40 && coda.length; giro += 1) { adesso += 20; const fn = coda.shift(); fn(adesso); }
+  assert.equal(scritti[scritti.length - 1], '19,6');
+  assert.ok(scritti.length > 3, 'il numero non scorre');
+  // Chiave diversa (altro punto o altro campo): subito.
+  const prima = scritti.length;
+  ctx.animaNumero(el, 5, 0, 'wind|roma');
+  assert.equal(scritti.length, prima + 1);
+  assert.equal(scritti[scritti.length - 1], '5');
+  // Animazioni ridotte: mai un valore intermedio.
+  ctx.prefersReducedMotion = true;
+  const prima2 = scritti.length;
+  ctx.animaNumero(el, 9, 0, 'wind|roma');
+  assert.equal(scritti.length, prima2 + 1);
+  ctx.animaNumero(el, NaN, 0, 'wind|roma');
+  assert.equal(scritti[scritti.length - 1], '--');
+});
+
+prova('l\'ingresso animato e\' una volta sola e rispetta le animazioni ridotte', () => {
+  assert.match(html, /<body class="ingresso">/, 'manca la classe dell\'ingresso');
+  assert.match(html, /document\.body\.classList\.remove\("ingresso"\)/, 'la classe dell\'ingresso non viene mai tolta');
+  assert.match(html, /const conIngresso = !prefersReducedMotion && !richiesta\.has\("vista"\)/,
+    'lo zoom d\'ingresso parte anche con le animazioni ridotte o su un link con inquadratura');
+  // Tutte le animazioni dello strato estetico cadono sotto la regola globale.
+  assert.match(stile, /@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{[^}]*animation: none !important;/,
+    'le animazioni non si spengono piu\' con prefers-reduced-motion');
+  // Lo strato estetico e' l'ultimo del file e ridefinisce i colori di base.
+  const strato = stile.indexOf('ASPETTO PROFESSIONALE');
+  assert.ok(strato > 0 && stile.indexOf('--accent-grad', strato) > strato, 'manca lo strato estetico');
+  const meteo = fs.readFileSync(path.join(root, 'meteograms-ui.css'), 'utf8');
+  assert.match(meteo, /TEMA SCURO, LO STESSO DELLA MAPPA/, 'i meteogrammi non hanno il tema della mappa');
+  assert.match(meteo, /prefers-reduced-motion: reduce/, 'le animazioni dei meteogrammi ignorano le animazioni ridotte');
+});
+
 console.log(ok ? 'ESITO: SUPERATO' : 'ESITO: DA RIVEDERE');
 process.exitCode = ok ? 0 : 1;

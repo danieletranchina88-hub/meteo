@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#071b2b" />
+    <meta name="theme-color" content="#0a121d" />
     <meta name="color-scheme" content="light" />
     <title>Meteogrammi · MeteoHub ICON-2I</title>
     <style>
@@ -822,7 +822,7 @@
           const value = extent[1] - (extent[1] - extent[0]) * tick / 5;
           const y = yScale(value);
           svg += `<line class="chart-grid" x1="${left}" x2="${width-right}" y1="${y}" y2="${y}"></line>`;
-          svg += `<text class="chart-axis" x="${left-10}" y="${y+6}" text-anchor="end">${Number(value).toFixed(options.axisDecimals ?? 0)}</text>`;
+          svg += `<text class="chart-axis" x="${left-10}" y="${y+6}" text-anchor="end">${Number(value).toFixed(options.axisDecimals ?? 0).replace(".", ",")}</text>`;
         }
         const axisUnit = options.unit || (seriesList[0] && seriesList[0].unit) || "";
         if (axisUnit) {
@@ -1114,43 +1114,43 @@
         renderPointBulletin(s);
         renderWeatherStrip(s);
         renderChart("chart-temperature", [
-          { label:"Temperatura", values:s.temperature2m || [], color:"#e14b5a", unit:" °C", decimals:1 },
-          { label:"Percepita", values:s.feelsLike || [], color:"#ef922f", unit:" °C", decimals:1 },
-          { label:"Punto di rugiada", values:s.dewPoint, color:"#168bd2", unit:" °C", decimals:1 }
+          { label:"Temperatura", values:s.temperature2m || [], color:"#ff6b7a", unit:" °C", decimals:1 },
+          { label:"Percepita", values:s.feelsLike || [], color:"#ffad4d", unit:" °C", decimals:1 },
+          { label:"Punto di rugiada", values:s.dewPoint, color:"#46b7ea", unit:" °C", decimals:1 }
         ], { axisDecimals:0, aria:"Temperatura nelle 72 ore" });
         renderChart("chart-rain", [
-          { label:"Precipitazione", values:s.rainStep || [], color:"#168bd2", unit:" mm", decimals:2, bars:true }
+          { label:"Precipitazione", values:s.rainStep || [], color:"#46b7ea", unit:" mm", decimals:2, bars:true }
         ], { domain:[0, Math.max(1, ...((s.rainStep || []).filter(finite).map(Number)))], axisDecimals:1 });
         renderChart("chart-pressure", [
-          { label:"Pressione", values:s.pressureMsl || [], color:"#8656ce", unit:" hPa", decimals:1 }
+          { label:"Pressione", values:s.pressureMsl || [], color:"#b08cff", unit:" hPa", decimals:1 }
         ], { axisDecimals:0 });
         renderChart("chart-wind", [
-          { label:"Vento a 10 m", values:s.wind10, color:"#168bd2", unit:" km/h", decimals:0 },
-          { label:"Raffica", values:s.gust10, color:"#ef922f", unit:" km/h", decimals:0, fill:false }
+          { label:"Vento a 10 m", values:s.wind10, color:"#46b7ea", unit:" km/h", decimals:0 },
+          { label:"Raffica", values:s.gust10, color:"#ffad4d", unit:" km/h", decimals:0, fill:false }
         ], { domain:[0, Math.max(20, ...s.wind10.filter(finite), ...s.gust10.filter(finite))], axisDecimals:0 });
         renderDirection(s.direction10);
         renderChart("chart-moisture", [
-          { label:"UR 2 m", values:s.relativeHumidity2m || [], color:"#168bd2", unit:"%", decimals:0 },
-          { label:"Nuvolosità", values:s.cloudCover || [], color:"#7b8f9d", unit:"%", decimals:0 },
-          { label:"Indice nebbia", values:s.fogProbability || [], color:"#18a66f", unit:"/100", decimals:0 }
+          { label:"UR 2 m", values:s.relativeHumidity2m || [], color:"#46b7ea", unit:"%", decimals:0 },
+          { label:"Nuvolosità", values:s.cloudCover || [], color:"#a9bccb", unit:"%", decimals:0 },
+          { label:"Indice nebbia", values:s.fogProbability || [], color:"#3fd29b", unit:"/100", decimals:0 }
         ], { domain:[0,100], axisDecimals:0 });
         renderChart("chart-visibility", [
-          { label:"Visibilità", values:s.visibilityKm, color:"#18a66f", unit:" km", decimals:1 }
+          { label:"Visibilità", values:s.visibilityKm, color:"#3fd29b", unit:" km", decimals:1 }
         ], { domain:[0, Math.max(10, ...s.visibilityKm.filter(finite))], axisDecimals:0 });
         renderChart("chart-convection", [
-          { label:"Score", values:s.convectionProbability || [], color:"#e14b5a", unit:"/100", decimals:0 },
-          { label:"Coerenza interna", values:s.stormConfidence || [], color:"#168bd2", unit:"/100", decimals:0, fill:false },
-          { label:"Contraddizioni", values:s.stormContradiction || [], color:"#7b8f9d", unit:"/100", decimals:0, fill:false, width:1.6 }
+          { label:"Score", values:s.convectionProbability || [], color:"#ff6b7a", unit:"/100", decimals:0 },
+          { label:"Coerenza interna", values:s.stormConfidence || [], color:"#46b7ea", unit:"/100", decimals:0, fill:false },
+          { label:"Contraddizioni", values:s.stormContradiction || [], color:"#a9bccb", unit:"/100", decimals:0, fill:false, width:1.6 }
         ], { domain:[0,100], axisDecimals:0 });
         renderChart("chart-cape", [
-          { label:"ML-CAPE", values:s.capeMl || [], color:"#e14b5a", unit:" J/kg", decimals:0 },
-          { label:"ML-CIN", values:s.cinMl || [], color:"#168bd2", unit:" J/kg", decimals:0 }
+          { label:"ML-CAPE", values:s.capeMl || [], color:"#ff6b7a", unit:" J/kg", decimals:0 },
+          { label:"ML-CIN", values:s.cinMl || [], color:"#46b7ea", unit:" J/kg", decimals:0 }
         ], { axisDecimals:0 });
         renderChart("chart-omega", [
-          { label:"Omega 700", values:s.omega700 || [], color:"#8656ce", unit:" Pa/s", decimals:3 }
+          { label:"Omega 700", values:s.omega700 || [], color:"#b08cff", unit:" Pa/s", decimals:3 }
         ], { axisDecimals:2 });
         renderChart("chart-front-distance", [
-          { label:"Distanza", values:s.frontDistanceKm || [], color:"#168bd2", unit:" km", decimals:0 }
+          { label:"Distanza", values:s.frontDistanceKm || [], color:"#46b7ea", unit:" km", decimals:0 }
         ], { domain:[0, Math.max(100, ...((s.frontDistanceKm || []).filter(finite).map(Number)))], axisDecimals:0 });
         renderRisks(s);
         renderTable(s);

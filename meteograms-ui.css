@@ -10,3 +10,115 @@ main{max-width:1360px;padding:28px;margin:auto}.hero{gap:32px;align-items:center
 
 /* Data first, with the same typography and accent as the map console. */
 body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}.brand-mark{background:#193c50;color:#69d3e8;border-radius:9px}.hero-copy{min-height:0!important;padding:0!important}.hero-copy h2{font-size:clamp(25px,2.8vw,36px);letter-spacing:-1px;max-width:540px}.hero-copy p{max-width:520px}.hero-kicker{letter-spacing:.1em;text-transform:uppercase;font-size:10px}.location-panel,.weather-strip-card,.chart-card,.table-card,.forecast-bulletin{border-radius:9px}.chart-head h3{font-weight:600}.primary-button{background:#18738c;color:#fff}.primary-button:hover{background:#125d72}.map-button{border-color:#355268;border-radius:7px}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:2px solid #18738c;outline-offset:3px}@media(max-width:700px){.hero{margin-bottom:16px}.hero-copy h2{font-size:27px}.hero-copy p{font-size:12px}.topbar{padding:12px}.chart-card{padding:14px}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* =========================================================================
+   TEMA SCURO, LO STESSO DELLA MAPPA
+   La mappa e' scura e i meteogrammi erano bianchi: passando da una pagina
+   all'altra sembravano due siti. Stesso fondo blu notte, stesse lastre,
+   stesso accento azzurro. I grafici restano quelli: cambiano solo fondo,
+   assi e griglia, e i colori delle serie sono schiariti quanto basta a
+   leggersi sul fondo scuro (li imposta meteograms.html).
+   ========================================================================= */
+:root {
+  --paper: #0a121d; --card: #101b29; --ink: #edf4fa; --muted: #9db2c7; --line: rgba(148, 190, 225, .16);
+  --navy: #060c14; --navy-2: #0d1826; --blue: #46b7ea; --cyan: #6fd6f2;
+  --shadow: 0 12px 34px rgba(2, 8, 16, .38), inset 0 1px 0 rgba(255, 255, 255, .05);
+  color-scheme: dark;
+}
+html, html body { background: #0a121d; color: #edf4fa; -webkit-font-smoothing: antialiased; }
+html body { background: radial-gradient(1200px 520px at 18% -8%, rgba(70, 183, 234, .1), transparent 62%), #0a121d; }
+body .topbar { background: rgba(6, 12, 20, .92); border-bottom: 1px solid rgba(148, 190, 225, .14); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+body .brand-mark { background: rgba(86, 196, 236, .16); border: 1px solid rgba(111, 214, 242, .46); color: #6fd6f2; }
+body .map-button, body .mobile-map-button { background: rgba(148, 190, 225, .08); border: 1px solid rgba(148, 190, 225, .2); color: #edf4fa; }
+body .map-button:hover { background: rgba(148, 190, 225, .16); }
+
+body .hero-copy h2, body .section-head h2, body .location-panel h2, body .forecast-bulletin h2 { color: #f4f8fc; }
+body .hero-copy p, body .section-head p, body .chart-head p, body .table-head p, body .location-meta, body .method-note { color: #9db2c7; }
+body .hero-kicker, body .panel-label, body .forecast-bulletin .panel-label { color: #6fd6f2; }
+body .run-line span { background: rgba(148, 190, 225, .1); color: #cfe0ee; border: 1px solid rgba(148, 190, 225, .14); }
+body .method-note a { color: #6fd6f2; }
+
+body .location-panel, body .summary-card, body .weather-strip-card, body .chart-card, body .table-card,
+body .risk-card, body .forecast-bulletin {
+  background: #101b29; border: 1px solid rgba(148, 190, 225, .16); box-shadow: var(--shadow); color: #edf4fa;
+}
+body .chart-card::before { opacity: .9; }
+body .chart-wrap { background: rgba(6, 12, 20, .35); border-color: rgba(148, 190, 225, .14); }
+body .summary-card span, body .summary-card small { color: #9db2c7; }
+body .summary-card strong, body .summary-card b { color: #f4f8fc; }
+body label { color: #b9cbdc; }
+body input, body select, body .form-grid input, body .form-grid select {
+  background: rgba(148, 190, 225, .08); border: 1px solid rgba(148, 190, 225, .22); color: #edf4fa; color-scheme: dark;
+}
+body input:focus, body select:focus { border-color: rgba(111, 214, 242, .6); box-shadow: 0 0 0 3px rgba(86, 196, 236, .18); outline: none; }
+body .primary-button, body .primary-button:hover { background: linear-gradient(135deg, #8be6f7, #46b7ea); color: #062230; border-color: transparent; box-shadow: 0 6px 20px rgba(70, 183, 234, .3); }
+body .primary-button:hover { filter: brightness(1.08); }
+body .secondary-button { background: rgba(148, 190, 225, .08); border: 1px solid rgba(148, 190, 225, .22); color: #edf4fa; }
+body #status { color: #9db2c7; }
+body #status.error { color: #ffb0a8; }
+
+body .forecast-bulletin .bulletin-copy, body .bulletin-copy p { color: #d6e4f0; }
+body .bulletin-copy p:first-child { color: #f4f8fc; }
+body .forecast-bulletin .bulletin-validity, body .forecast-bulletin .bulletin-note { color: #9db2c7; }
+body details > summary { color: #edf4fa; }
+
+body .weather-cell { background: rgba(148, 190, 225, .06); border-color: rgba(148, 190, 225, .14); color: #edf4fa; }
+body .weather-cell.rain { background: rgba(70, 183, 234, .12); border-color: rgba(70, 183, 234, .3); }
+body .weather-cell.storm { background: rgba(255, 150, 110, .12); border-color: rgba(255, 150, 110, .34); }
+body .weather-cell .when, body .weather-cell small { color: #9db2c7; }
+body .weather-cell .symbol { color: #c3d3e2; }
+body .weather-cell.clear .symbol { color: #ffc857; }
+body .weather-cell.night .symbol { color: #b3bfff; }
+body .weather-cell.rain .symbol { color: #7cc8ff; }
+body .weather-cell.storm .symbol { color: #ffb38a; }
+
+body .tabs { background: rgba(148, 190, 225, .07); border: 1px solid rgba(148, 190, 225, .14); }
+body .tab { color: #9db2c7; background: none; }
+body .tab:hover { color: #edf4fa; }
+body .tab.active { background: rgba(86, 196, 236, .16); color: #c9f2fd; box-shadow: inset 0 0 0 1px rgba(111, 214, 242, .46); }
+body .chart-badge { background: rgba(148, 190, 225, .1); color: #cfe0ee; }
+body .legend-item { color: #cfe0ee; }
+
+/* I grafici: assi, griglia e notte sul fondo scuro. */
+body .chart-axis { fill: #a9bccb; }
+body .chart-hour { fill: #8298b0; }
+body .chart-unit { fill: #8298b0; }
+body .chart-tick { stroke: rgba(148, 190, 225, .4); }
+body .chart-grid { stroke: rgba(148, 190, 225, .16); }
+body .chart-zero { stroke: #ff8a96; }
+body .chart-cursor { stroke: rgba(111, 214, 242, .8); }
+body .night-shade { fill: rgba(2, 7, 14, .42); }
+body .day-label { fill: #cfe0ee; }
+body .chart-extreme { stroke: #101b29; }
+body .chart-extreme-label { fill: #f4f8fc; stroke: #101b29; }
+body .chart-tooltip { background: rgba(6, 12, 20, .96); border: 1px solid rgba(148, 190, 225, .24); color: #edf4fa; box-shadow: 0 10px 30px rgba(2, 8, 16, .5); }
+body .chart-empty { color: #9db2c7; }
+body .direction-cell { background: rgba(148, 190, 225, .07); color: #9fdcf3; border-color: rgba(148, 190, 225, .12); }
+body .direction-cell small { color: #8298b0; }
+
+body .risk-row b { color: #d6e4f0; }
+body .risk-cell { background: rgba(148, 190, 225, .1); }
+body .risk-cell.low { background: #2f8f6c; }
+body .risk-cell.medium { background: #e0a23a; }
+body .risk-cell.high { background: #e2586a; }
+body .risk-cell.north { background: #5aa7ff; }
+body .risk-cell.south { background: #ff9d5c; }
+
+body table { color: #e3edf5; }
+body th { background: #0d1826; color: #9db2c7; border-color: rgba(148, 190, 225, .16); }
+body td { border-color: rgba(148, 190, 225, .1); }
+body td:first-child { background: #101b29; color: #f4f8fc; }
+body tbody tr:nth-child(even) td { background: rgba(148, 190, 225, .035); }
+body tbody tr:nth-child(even) td:first-child { background: #121e2d; }
+body tbody tr:hover td, body tbody tr:hover td:first-child { background: rgba(86, 196, 236, .12); }
+
+/* Ingresso: le lastre salgono una dopo l'altra. */
+@keyframes mg-sale { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+body .hero > *, body .summary-card, body .weather-strip-card, body .chart-card, body .risk-card { animation: mg-sale .5s cubic-bezier(.2, .8, .2, 1) both; }
+body .summary-card:nth-child(2) { animation-delay: .04s; } body .summary-card:nth-child(3) { animation-delay: .08s; }
+body .summary-card:nth-child(4) { animation-delay: .12s; } body .summary-card:nth-child(5) { animation-delay: .16s; }
+body .summary-card:nth-child(6) { animation-delay: .2s; }
+body .chart-card, body .weather-cell, body .tab, body .primary-button, body .secondary-button, body .map-button { transition: border-color .18s ease, background-color .18s ease, transform .14s ease, box-shadow .2s ease; }
+body .chart-card:hover { border-color: rgba(111, 214, 242, .34); }
+@media (prefers-reduced-motion: reduce) { body * { animation: none !important; transition: none !important; } }
+body .day-divider { stroke: rgba(148, 190, 225, .34); }

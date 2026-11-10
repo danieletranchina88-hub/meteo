@@ -138,6 +138,11 @@ prova('la dissolvenza passa fra due ore vere e rispetta le animazioni ridotte', 
     'la dissolvenza non prepara l\'ora vecchia prima di caricare la nuova');
   assert.match(implementazione('chiudiDissolvenza'), /"weather-prev-layer", "visibility", "none"/,
     'l\'ora vecchia resta accesa sotto la nuova');
+  // Chi ridipinge il campo annulla la dissolvenza in corso: senza, cambiando
+  // campo durante il play il vento restava colorato sotto le scie.
+  assert.match(implementazione('applyWeatherPaint'), /annullaDissolvenza\(\);/,
+    'ridipingere il campo non annulla la dissolvenza in corso');
+  assert.match(implementazione('annullaDissolvenza'), /clearTimeout\(dissolvenzaTimer\);[\s\S]*chiudiDissolvenza\(\);/);
 });
 
 console.log(ok ? 'ESITO: SUPERATO' : 'ESITO: DA RIVEDERE');

@@ -2238,7 +2238,7 @@
     <link rel="stylesheet" href="modern-ui.css" />
 
   </head>
-  <body>
+  <body class="ingresso">
     <div id="map" aria-label="Mappa meteorologica interattiva"></div>
     <canvas id="particle-canvas" aria-hidden="true"></canvas>
     <canvas id="effects-canvas" aria-hidden="true"></canvas>
@@ -5713,6 +5713,13 @@
         }
       }
 
+      // Il tratto gia' percorso della barra del tempo, in accento: il CSS
+      // legge la percentuale da --p.
+      function aggiornaTrattoPercorso() {
+        const massimo = Number(ui.slider.max) || 1;
+        ui.slider.style.setProperty("--p", (Number(ui.slider.value) / massimo * 100).toFixed(2) + "%");
+      }
+
       function updateTimeUi() {
         const item = catalog[currentIndex] || {};
         const date = parseCatalogDate(item);
@@ -5732,6 +5739,7 @@
           "stale", ui.runValue.classList.contains("stale")
         );
         ui.slider.setAttribute("aria-valuetext", formatDateTime(date));
+        aggiornaTrattoPercorso();
         programmaLink();
         programmaStatisticheVista();
       }
@@ -11020,6 +11028,7 @@
       // nearest; i campi sfumati, dove non c'e' alcun bordo da conservare,
       // si ingrandiscono con il filtro lineare.
       function applyWeatherPaint(info) {
+        annullaDissolvenza();
         const keepEdges = useNearestCell || info.discrete || info.categorical;
         map.setPaintProperty(
           "weather-layer", "raster-resampling", keepEdges ? "nearest" : "linear"
@@ -11056,6 +11065,8 @@
               ]
             : baseOpacity
         );
+
+        map.triggerRepaint();
 
         if (map.getLayer("terrain-detail")) {
           // Il volume vero del DEM richiede meno ombra del vecchio falso 3D:
@@ -11136,6 +11147,19 @@
         if (!map || !map.getLayer("weather-prev-layer")) return;
         map.setLayoutProperty("weather-prev-layer", "visibility", "none");
         map.setPaintProperty("weather-layer", "raster-opacity-transition", { duration: 0, delay: 0 });
+      }
+
+      // Chi ridipinge il campo (un altro campo, le scie del vento, un'altra
+      // base) non deve trovarsi una dissolvenza a meta': il suo timer
+      // riporterebbe l'opacita' al valore di prima, o la lascerebbe ferma a
+      // mezza strada -- misurato: il campo del vento restava acceso sotto le
+      // scie se si cambiava campo durante il play.
+      function annullaDissolvenza() {
+        clearTimeout(dissolvenzaTimer);
+        cancelAnimationFrame(dissolvenzaAvvio);
+        dissolvenzaTimer = 0;
+        dissolvenzaAvvio = 0;
+        chiudiDissolvenza();
       }
 
       function publishWeatherRaster(coordinates) {
@@ -16109,6 +16133,36 @@
         }
       }
 
+      // Il valore della scheda del punto scorre dal vecchio al nuovo quando
+      // cambia l'ora sullo stesso punto e sullo stesso campo: si vede se sale
+      // o scende. Cambiando punto o campo il numero si scrive subito, e cosi'
+      // con le animazioni ridotte. Il valore finale e' sempre quello letto.
+      const numeroAnimato = { chiave: "", valore: NaN, frame: 0 };
+
+      function animaNumero(elemento, valore, decimali, chiave) {
+        const scrivi = function (v) {
+          elemento.textContent = Number.isFinite(v) ? v.toFixed(decimali).replace(".", ",") : "--";
+        };
+        cancelAnimationFrame(numeroAnimato.frame);
+        const da = numeroAnimato.valore;
+        const stessa = numeroAnimato.chiave === chiave;
+        numeroAnimato.chiave = chiave;
+        numeroAnimato.valore = valore;
+        if (prefersReducedMotion || !stessa || !Number.isFinite(da) || !Number.isFinite(valore)
+            || da === valore || typeof requestAnimationFrame !== "function") {
+          scrivi(valore);
+          return;
+        }
+        const inizio = performance.now();
+        const passo = function (ora) {
+          const t = Math.min(1, (ora - inizio) / 260);
+          scrivi(da + (valore - da) * (1 - Math.pow(1 - t, 3)));
+          if (t < 1) numeroAnimato.frame = requestAnimationFrame(passo);
+          else scrivi(valore);
+        };
+        numeroAnimato.frame = requestAnimationFrame(passo);
+      }
+
       function refreshSelectedPoint() {
         if (!selectedPoint || !currentData) return;
         const point = pointFromCoordinates(selectedPoint.lng, selectedPoint.lat);
@@ -16120,8 +16174,8 @@
         const windDirection = windDirectionFrom(wind.u, wind.v);
 
         ui.pointTitle.textContent = selectedPoint.title + " · " + info.label;
-        ui.pointValue.textContent = Number.isFinite(selectedValue)
-          ? selectedValue.toFixed(info.decimals).replace(".", ",") : "--";
+        animaNumero(ui.pointValue, selectedValue, info.decimals,
+          activeLayer + "|" + selectedPoint.lng + "|" + selectedPoint.lat);
         ui.pointUnit.textContent = info.unit;
         ui.pointLocation.textContent = selectedPoint.lat.toFixed(3).replace(".", ",") + "°N · "
           + selectedPoint.lng.toFixed(3).replace(".", ",") + "°E";
@@ -17157,6 +17211,17 @@
         map.on("load", async function () {
           mapLoaded = true;
           loadPlaceNames();
+          // L'ingresso: la carta parte un poco piu' lontana e si avvicina
+          // quando i dati sono pronti. Solo all'apertura senza un link che
+          // chiede un'inquadratura, e mai con le animazioni ridotte.
+          const zoomIniziale = map.getZoom();
+          const richiesta = new URLSearchParams(window.location.search);
+          const conIngresso = !prefersReducedMotion && !richiesta.has("vista")
+            && !richiesta.has("lat") && !isMobile();
+          if (conIngresso) {
+            map.jumpTo({ zoom: Math.max(map.getMinZoom(), zoomIniziale - 0.4) });
+          }
+          setTimeout(function () { document.body.classList.remove("ingresso"); }, 1900);
 
           // Sorgente immagine, non canvas.  La sorgente canvas di MapLibre
           // sembra la scelta piu' diretta -- niente codifica PNG a ogni
@@ -17696,6 +17761,7 @@
           map.on("movestart", function (evento) {
             // Solo un gesto dell'utente mette l'inquadratura nel link.
             if (evento && evento.originalEvent) vistaMossa = true;
+            document.body.classList.add("mappa-in-moto");
             nascondiSonda();
             isMapMoving = true; weatherFrameEpoch++; lastRasterSignature = "";
             resetParticles();
@@ -17710,6 +17776,9 @@
 
           map.on("moveend", function () {
             isMapMoving = false; scheduleFrameWarmup();
+            // Tolta al fotogramma dopo: l'inchiostro viene prima ridisegnato,
+            // poi rientra in dissolvenza.
+            requestAnimationFrame(function () { document.body.classList.remove("mappa-in-moto"); });
             programmaLink(); programmaStatisticheVista();
             syncTerrainExaggeration();
             resetParticles();
@@ -17752,6 +17821,12 @@
             showPoint(queryLongitude, queryLatitude, query.get("nome") || "Punto del meteogramma");
           }
           ripristinaDaLink(query);
+          if (conIngresso && Math.abs(map.getZoom() - zoomIniziale) > 0.05) {
+            map.easeTo({
+              zoom: zoomIniziale, duration: 1400,
+              easing: function (t) { return 1 - Math.pow(1 - t, 3); }
+            });
+          }
         });
       }
 
@@ -17938,6 +18013,7 @@
             + " scorrere le scadenze");
           return;
         }
+        aggiornaTrattoPercorso();
         requestSliderStep(Number(ui.slider.value));
       });
 
