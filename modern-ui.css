@@ -15,7 +15,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 button:disabled { cursor: default; opacity: .42; }
 .surface { background: var(--surface); border: 1px solid var(--stroke); box-shadow: var(--shadow); backdrop-filter: none; -webkit-backdrop-filter: none; }
-#meta-card, #map-vignette { display: none !important; }
+#meta-card { display: none !important; }
 #app-header {
   inset: 0 0 auto; min-height: calc(72px + var(--safe-top)); padding: calc(10px + var(--safe-top)) 16px 10px;
   align-items: center; gap: 16px; background: var(--surface-strong); border-bottom: 1px solid var(--stroke); pointer-events: auto;
@@ -630,3 +630,252 @@ body.satellite-view .sat-bar { display: flex; }
 #sat-bar { background: var(--surface-strong); border-color: var(--stroke); border-radius: 9px; }
 #satellite-status select { color-scheme: dark; background: #1e344a; }
 .sat-observed-grid .toggle-row { border-color: var(--stroke); background: #1b3044; }
+
+/* ---- Strumenti da previsore -------------------------------------------
+   Fuso orario, carte pronte, guida della tastiera, estremi in vista. */
+.ora-switch { display: inline-flex; flex-shrink: 0; gap: 1px; padding: 1px; border: 1px solid var(--stroke); border-radius: 5px; background: #172a3e; }
+.ora-switch button { min-height: 16px; padding: 1px 7px; line-height: 1.2; border-radius: 3px; background: none; color: var(--muted); font-size: 9px; font-weight: 550; letter-spacing: .02em; }
+.ora-switch button.active { background: #2d4b62; color: var(--text); }
+.ora-switch button:hover { color: var(--text); }
+.ora-switch #guida-tasti-apri { margin-left: 3px; min-width: 18px; padding: 1px 6px; font-weight: 700; color: var(--accent); }
+#time-alt { font-size: 10px; font-weight: 500; color: var(--muted); padding: 2px 5px; border: 1px solid var(--stroke); border-radius: 4px; }
+#time-alt:empty { display: none; }
+
+#carte-pronte { position: fixed; z-index: 33; top: calc(88px + var(--safe-top)); left: 584px; display: flex; align-items: center; gap: 3px; padding: 4px; border-radius: 9px; }
+#carte-pronte .carte-titolo { padding: 0 8px 0 6px; font-size: 8px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+#carte-pronte button { min-height: 36px; padding: 0 11px; border-radius: 5px; background: none; color: var(--muted); font-size: 12px; font-weight: 550; white-space: nowrap; }
+#carte-pronte button:hover { color: var(--text); background: #1f3448; }
+#carte-pronte button[aria-pressed=true] { background: #28465c; color: #ebfaff; box-shadow: inset 0 0 0 1px #406278; }
+body.clean-mode #carte-pronte, .satellite-view #carte-pronte, body.synoptic-chart #carte-pronte { display: none !important; }
+@media (max-width: 1359px) { #carte-pronte .carte-titolo { display: none; } #carte-pronte button { padding: 0 8px; } }
+/* Sotto i 1180 px la fila non sta accanto alla ricerca: va nel menu dei
+   livelli, dove modern-ui.js la sposta. */
+.drawer-content #carte-pronte { position: static; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0 0 14px; border: 0; background: none; box-shadow: none; }
+.drawer-content #carte-pronte .carte-titolo { display: block; flex: 1 0 100%; padding: 0 0 2px; font-size: 10px; }
+.drawer-content #carte-pronte button { flex: 1 0 30%; min-height: 44px; border: 1px solid var(--stroke); background: var(--surface-soft); color: var(--text); }
+
+#legend-bar { position: relative; }
+#legend-vista-fascia { position: absolute; top: -4px; height: 2px; border-radius: 1px; background: #f1f6fc; pointer-events: none; }
+#legend-sonda { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: #fff; box-shadow: 0 0 0 1px #06111fcc; pointer-events: none; }
+#legend-vista { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--stroke); font-size: 10px; color: #d6e4f0; }
+
+#guida-tasti { position: fixed; z-index: 60; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow: auto; padding: 18px 20px; border-radius: 12px; box-shadow: 0 18px 60px #020812b3; }
+#guida-tasti header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+#guida-tasti h2 { margin: 0; font-size: 15px; font-weight: 650; }
+#guida-tasti header button { width: 36px; height: 36px; border-radius: 6px; background: var(--surface-soft); color: var(--text); display: grid; place-items: center; }
+#guida-tasti dl { margin: 0; display: grid; gap: 7px; }
+#guida-tasti dl div { display: grid; grid-template-columns: 172px 1fr; gap: 12px; align-items: baseline; }
+#guida-tasti dt { white-space: nowrap; color: var(--muted); font-size: 11px; }
+#guida-tasti dd { margin: 0; font-size: 12px; color: var(--text); }
+#guida-tasti kbd { display: inline-block; min-width: 20px; padding: 2px 6px; border: 1px solid var(--stroke-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-soft); color: var(--text); font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; }
+#guida-tasti .guida-link { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--stroke); }
+#guida-tasti #copia-link { min-height: 36px; padding: 0 14px; border-radius: 6px; background: var(--accent); color: #102b39; font-size: 12px; font-weight: 650; }
+#guida-tasti #copia-link-esito { font-size: 11px; color: var(--muted); word-break: break-all; min-width: 0; }
+@media (max-width: 959px) {
+  /* Sul telefono la riga e' stretta: resta un solo bottone "UTC" che si
+     accende e si spegne, e l'ora nell'altro fuso non si mostra. */
+  .ora-switch #guida-tasti-apri, .ora-switch [data-ora="local"], #time-alt { display: none; }
+  .ora-switch { margin-left: 2px; }
+  .ora-switch button { min-height: 16px; padding: 1px 6px; }
+  .ora-switch button.active { background: var(--accent); color: #102b39; }
+  /* La legenda ha una riga in piu' (gli estremi in vista): si alza quanto
+     basta a non toccare la barra del tempo. */
+  #legend-card, #legend-card.expanded, #legend-card:not(.expanded) { bottom: calc(142px + var(--safe-bottom)); }
+  #guida-tasti dl div { grid-template-columns: 1fr; gap: 2px; }
+}
+
+
+/* =========================================================================
+   ASPETTO PROFESSIONALE
+   Uno strato solo, in fondo al file: toglierlo riporta la console piatta.
+   Idea: la carta e' la protagonista e arriva fino ai bordi; i comandi sono
+   lastre di vetro scuro appoggiate sopra, tutte dello stesso materiale, con
+   un solo accento azzurro. Le animazioni dicono cosa sta succedendo (un
+   pannello che entra, l'animazione che gira, un dato che cambia) e tacciono
+   quando il sistema chiede meno movimento: la regola prefers-reduced-motion
+   piu' sopra le spegne tutte.
+   ========================================================================= */
+:root {
+  --surface: rgba(10, 18, 29, .9);
+  --surface-strong: rgba(8, 15, 25, .96);
+  --surface-soft: rgba(148, 190, 225, .08);
+  --text: #f2f7fc; --muted: #9db2c7; --deep-muted: #7d94ab;
+  --stroke: rgba(148, 190, 225, .16); --stroke-strong: rgba(148, 190, 225, .34);
+  --accent: #6fd6f2; --accent-2: #3fb0e8;
+  --accent-grad: linear-gradient(135deg, #8be6f7 0%, #46b7ea 100%);
+  --accent-veil: rgba(86, 196, 236, .16); --accent-line: rgba(111, 214, 242, .46); --accent-ink: #c9f2fd;
+  --on-accent: #062230;
+  --glass: blur(22px) saturate(115%) brightness(.78);
+  --shadow: 0 14px 40px rgba(2, 8, 16, .46), 0 2px 6px rgba(2, 8, 16, .3);
+  --light: inset 0 1px 0 rgba(255, 255, 255, .07);
+  --radius: 12px;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+}
+body { font-feature-settings: "tnum" 1, "cv11" 1, "ss01" 1; -webkit-font-smoothing: antialiased; }
+
+/* Il materiale: lo stesso vetro per ogni lastra. */
+.surface, #quick-layers, .drawer-shell, #place-results, #toast, .sat-bar {
+  background: var(--surface); border: 1px solid var(--stroke);
+  box-shadow: var(--shadow), var(--light);
+  backdrop-filter: var(--glass); -webkit-backdrop-filter: var(--glass);
+}
+.drawer-shell, #bulletin-card, #place-results, #toast, #guida-tasti { background: var(--surface-strong); }
+.drawer-head { background: rgba(9, 16, 26, .96); }
+#place-search, #view-switch, #carte-pronte, .model-context, #quick-layers, #legend-card,
+#legend-card.expanded, #legend-card:not(.expanded), #readout-card, #satellite-status, #timeline { border-radius: var(--radius); }
+
+/* La carta arriva fino in cima: l'intestazione e' un velo, non una barra. */
+#app-header {
+  background: linear-gradient(180deg, rgba(6, 12, 20, .97) 0%, rgba(6, 12, 20, .93) 66%, rgba(6, 12, 20, 0) 100%);
+  border-bottom: 0; padding-bottom: 18px;
+}
+/* Il marchio non e' una lastra: sta scritto sull'intestazione. */
+.brand-panel, .brand-panel.surface { background: none; border: 0; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+#map-vignette {
+  display: block; z-index: 8;
+  background:
+    radial-gradient(ellipse 120% 90% at 50% 46%, transparent 58%, rgba(3, 8, 15, .34) 100%),
+    linear-gradient(180deg, rgba(3, 8, 15, .3) 0%, transparent 15%, transparent 80%, rgba(3, 8, 15, .36) 100%);
+}
+body.synoptic-chart #map-vignette { display: none; }
+
+/* Marchio e stato del run. */
+.brand-mark { background: var(--accent-veil); border: 1px solid var(--accent-line); border-radius: 11px; box-shadow: 0 0 22px rgba(86, 196, 236, .22), var(--light); }
+.brand-panel h1 { font-weight: 700; letter-spacing: -.8px; }
+.brand-dot { color: var(--accent); text-shadow: 0 0 12px rgba(111, 214, 242, .7); }
+.brand-meta {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; padding: 2px 8px 2px 7px;
+  border: 1px solid var(--stroke); border-radius: 999px; background: rgba(148, 190, 225, .07);
+  font-size: 10px; font-weight: 550; color: #cfe0ee; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.brand-meta::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #5fe0a6; box-shadow: 0 0 0 0 rgba(95, 224, 166, .6); animation: battito 2.6s ease-out infinite; }
+.brand-meta.stale { color: #ffd3a3; border-color: rgba(255, 195, 135, .4); }
+.brand-meta.stale::before { background: #ffb866; animation: none; }
+@keyframes battito { 0% { box-shadow: 0 0 0 0 rgba(95, 224, 166, .55); } 70%, 100% { box-shadow: 0 0 0 7px rgba(95, 224, 166, 0); } }
+
+/* Bottoni: una sola risposta al tocco, ovunque. */
+.header-button, #view-switch button, #carte-pronte button, #quick-layers .layer-card, #quick-layers .all-fields,
+.layer-card, .toggle-row, .speed-controls button, .time-navigation button, .ora-switch button, #play-button,
+.readout-expand, .maplibregl-ctrl-group button, .sat-play, .sat-live {
+  transition: background-color .18s var(--ease), color .18s var(--ease), border-color .18s var(--ease),
+    box-shadow .22s var(--ease), transform .14s var(--ease);
+}
+.header-button:active, #view-switch button:active, #carte-pronte button:active, .layer-card:active,
+#play-button:active, .time-navigation button:active, .speed-controls button:active { transform: scale(.96); }
+.header-button, .header-button.primary, #header-extra .header-button { border-radius: 9px; color: #d6e4f0; }
+.header-button:hover, #header-extra .header-button:hover { background: rgba(148, 190, 225, .12); color: #fff; }
+#drawer-button { color: var(--on-accent); background: var(--accent-grad); border-color: transparent; font-weight: 650; box-shadow: 0 6px 20px rgba(70, 183, 234, .34), var(--light); }
+#drawer-button:hover { background: var(--accent-grad); color: var(--on-accent); filter: brightness(1.08); }
+#drawer-button[aria-expanded=true] { background: var(--accent-grad); color: var(--on-accent); }
+
+/* Voce attiva: velo d'accento, filo d'accento, testo chiaro. Sempre uguale. */
+#view-switch button[aria-pressed=true], #carte-pronte button[aria-pressed=true],
+#quick-layers .active, .layer-card.active, .speed-controls button.active, .ora-switch button.active {
+  background: var(--accent-veil); color: var(--accent-ink); border-color: var(--accent-line);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+#view-switch button:hover, #carte-pronte button:hover, #quick-layers .layer-card:hover, #quick-layers .all-fields:hover,
+.speed-controls button:hover, .time-navigation button:hover { background: rgba(148, 190, 225, .1); color: var(--text); }
+#quick-layers .active .icon { filter: drop-shadow(0 0 6px rgba(111, 214, 242, .55)); }
+#quick-layers::before, .model-context .context-label, #legend-card .micro-label, #carte-pronte .carte-titolo,
+.timeline-heading { color: var(--deep-muted); font-weight: 650; }
+.model-context strong { font-weight: 700; }
+.model-context strong span { color: var(--accent); }
+#place-search:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px rgba(86, 196, 236, .18), var(--shadow); }
+#place-results button:hover, #place-results button:focus { background: rgba(148, 190, 225, .12); }
+.layer-card, .toggle-row, .field-method-card, .front-guide, .drawer-more { background: rgba(148, 190, 225, .06); border-color: var(--stroke); border-radius: 9px; }
+.layer-card:hover, .toggle-row:hover { background: rgba(148, 190, 225, .11); }
+.toggle-row[aria-pressed=true] .switch { background: var(--accent-2); box-shadow: 0 0 12px rgba(63, 176, 232, .5); }
+.speed-controls, .time-navigation, .ora-switch { background: rgba(148, 190, 225, .06); border-color: var(--stroke); border-radius: 8px; }
+.level-picker select { background: rgba(148, 190, 225, .1); }
+.drawer-content #carte-pronte button { background: rgba(148, 190, 225, .06); }
+
+/* Scheda del punto: il numero e' il titolo. */
+#point-value { font-size: 46px; font-weight: 650; letter-spacing: -2px; line-height: 1; background: linear-gradient(180deg, #fff 30%, #bfe9f8 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+#point-unit { color: var(--accent); font-weight: 650; }
+.readout-kicker { letter-spacing: .08em; text-transform: uppercase; font-size: 10px; color: var(--deep-muted); }
+#point-summary { color: #dbe8f3; }
+.readout-expand { border: 1px solid var(--stroke); background: rgba(148, 190, 225, .08); border-radius: 7px; }
+.readout-expand:hover { background: rgba(148, 190, 225, .16); }
+#readout-card.visible { animation: sale .32s var(--ease) both; }
+
+/* Legenda. */
+#legend-bar, #legend-card:not(.expanded) #legend-bar { height: 10px; border-radius: 5px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12), 0 2px 8px rgba(2, 8, 16, .4); }
+#legend-unit { border: 1px solid var(--accent-line); background: var(--accent-veil); color: var(--accent-ink); border-radius: 6px; }
+#legend-sonda { transition: left .09s linear; box-shadow: 0 0 0 1px rgba(6, 17, 31, .8), 0 0 8px rgba(255, 255, 255, .8); }
+#legend-vista { border-top-color: var(--stroke); color: #cfe0ee; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; }
+
+/* Barra del tempo: pista sottile, tratto percorso in accento, manopola
+   bianca. --p e' la percentuale percorsa, scritta da updateTimeUi. */
+#timeline { background: var(--surface); }
+#play-button { border-radius: 50%; background: var(--accent-grad); color: var(--on-accent); box-shadow: 0 6px 22px rgba(70, 183, 234, .4), var(--light); position: relative; }
+#play-button:hover { background: var(--accent-grad); filter: brightness(1.08); }
+#play-button[aria-pressed=true]::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 2px solid rgba(111, 214, 242, .7); animation: onda 1.6s ease-out infinite; pointer-events: none; }
+@keyframes onda { 0% { transform: scale(.86); opacity: .9; } 100% { transform: scale(1.32); opacity: 0; } }
+#time-slider { -webkit-appearance: none; appearance: none; background: transparent; --p: 0%; }
+#time-slider::-webkit-slider-runnable-track { height: 5px; border-radius: 5px; background: linear-gradient(90deg, #8be6f7 0%, #46b7ea var(--p), rgba(148, 190, 225, .22) var(--p)); }
+#time-slider::-moz-range-track { height: 5px; border-radius: 5px; background: rgba(148, 190, 225, .22); }
+#time-slider::-moz-range-progress { height: 5px; border-radius: 5px; background: linear-gradient(90deg, #8be6f7, #46b7ea); }
+#time-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; margin-top: -6.5px; border-radius: 50%; border: 3px solid #46b7ea; background: #fff; box-shadow: 0 0 0 4px rgba(86, 196, 236, .2), 0 3px 8px rgba(2, 8, 16, .5); transition: box-shadow .18s var(--ease), transform .14s var(--ease); }
+#time-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; border: 3px solid #46b7ea; background: #fff; box-shadow: 0 0 0 4px rgba(86, 196, 236, .2), 0 3px 8px rgba(2, 8, 16, .5); }
+#time-slider:hover::-webkit-slider-thumb, #time-slider:active::-webkit-slider-thumb { box-shadow: 0 0 0 7px rgba(86, 196, 236, .26), 0 3px 8px rgba(2, 8, 16, .5); transform: scale(1.08); }
+#timeline-buffer i { background: rgba(148, 190, 225, .16); transition: background-color .4s var(--ease); }
+#timeline-buffer i.ready { background: rgba(111, 214, 242, .55); }
+#timeline-days button { color: #b9cbdc; transition: color .18s var(--ease); }
+#timeline-days button:hover { color: #fff; }
+#timeline-days button[aria-current=true] { color: var(--accent); text-shadow: 0 0 10px rgba(111, 214, 242, .45); }
+#time-label { font-size: 13px; letter-spacing: .01em; }
+#lead-label { background: var(--accent-veil); color: var(--accent-ink); border: 1px solid var(--accent-line); border-radius: 6px; font-weight: 650; }
+#time-alt { border-color: var(--stroke); border-radius: 6px; }
+
+/* Zoom e comandi di MapLibre: stesso vetro. */
+.maplibregl-ctrl-group { overflow: hidden; border-radius: 11px !important; background: var(--surface) !important; backdrop-filter: var(--glass); -webkit-backdrop-filter: var(--glass); box-shadow: var(--shadow), var(--light) !important; }
+.maplibregl-ctrl-group button { background: transparent !important; }
+.maplibregl-ctrl-group button:hover { background: rgba(148, 190, 225, .14) !important; }
+
+/* Bollettino e guida. */
+#bulletin-card .expert-section h3 { color: var(--accent); letter-spacing: .08em; }
+#bulletin-card.open { animation: entra-da-sinistra .34s var(--ease) both; }
+#guida-tasti:not([hidden]) { animation: sale .26s var(--ease) both; }
+#guida-tasti #copia-link { background: var(--accent-grad); color: var(--on-accent); }
+
+/* Avvisi e attesa. */
+#toast { border-radius: 999px; padding-inline: 18px; }
+#loading { border-radius: 999px; background: var(--surface-strong); border: 1px solid var(--stroke); box-shadow: var(--shadow), var(--light); backdrop-filter: var(--glass); -webkit-backdrop-filter: var(--glass); }
+#loading .spinner { border-color: rgba(148, 190, 225, .25); border-top-color: var(--accent); }
+
+/* Vista satellite: stessa lingua. */
+.sat-bar { border-width: 1px 0 0; }
+.sat-play, .sat-live.active { background: var(--accent-grad); border-color: transparent; color: var(--on-accent); }
+.sat-buffer i.pronto, .sat-legenda i { background: rgba(111, 214, 242, .62); }
+
+/* ---- Movimento ---------------------------------------------------------- */
+@keyframes sale { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes scende { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+@keyframes entra-da-destra { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+@keyframes entra-da-sinistra { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
+@keyframes appare { from { opacity: 0; } to { opacity: 1; } }
+/* L'ingresso: la carta si scopre e i comandi arrivano uno dopo l'altro, dal
+   bordo a cui appartengono. Una volta sola, all'apertura. */
+body.ingresso #app-header { animation: scende .6s var(--ease) both; }
+body.ingresso #place-search { animation: scende .55s var(--ease) .12s both; }
+body.ingresso #view-switch { animation: scende .55s var(--ease) .18s both; }
+body.ingresso #carte-pronte { animation: scende .55s var(--ease) .24s both; }
+body.ingresso .model-context { animation: entra-da-destra .55s var(--ease) .26s both; }
+body.ingresso #quick-layers { animation: entra-da-destra .55s var(--ease) .34s both; }
+body.ingresso #legend-card { animation: entra-da-sinistra .55s var(--ease) .4s both; }
+body.ingresso #timeline { animation: sale .6s var(--ease) .3s both; }
+body.ingresso .maplibregl-ctrl-bottom-right { animation: appare .6s ease .5s both; }
+body.ingresso #map { animation: scopre 1.1s ease both; }
+@keyframes scopre { from { opacity: 0; filter: saturate(.4) brightness(.6); } to { opacity: 1; filter: none; } }
+/* Isobare, fronti e nomi spariscono mentre la mappa si muove: al termine
+   rientrano in dissolvenza invece di comparire di colpo. */
+#vector-canvas, #effects-canvas { transition: opacity .32s ease; }
+body.mappa-in-moto #vector-canvas, body.mappa-in-moto #effects-canvas { opacity: 0; transition: none; }
+
+@media (max-width: 959px) {
+  :root { --glass: blur(14px) saturate(115%) brightness(.78); }
+  #point-value { font-size: 44px; }
+  #play-button { flex-basis: 40px; width: 40px; height: 40px; }
+  #time-label { font-size: 10.5px; }
+}
