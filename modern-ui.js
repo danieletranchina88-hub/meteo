@@ -194,18 +194,79 @@ function setWeatherView(view) {
   arrange();
   mobile.addEventListener('change', arrange);
 
-  // Le carte pronte stanno accanto alla ricerca finche' c'e' posto; sotto i
-  // 1180 px entrano in cima al menu dei livelli. E' lo stesso elemento,
-  // spostato: i bottoni non si duplicano.
+  // ---- Piu' mappa, meno pannelli -------------------------------------------
+  // Sul computer ricerca, Previsioni/Satellite e le carte pronte stanno
+  // DENTRO l'intestazione, nella fascia che prima era vuota: la seconda riga
+  // di comandi sopra la mappa sparisce. Le carte si aprono a comparsa da un
+  // bottone. Sotto i 1100 px non c'e' posto: ricerca e vista tornano a
+  // galleggiare e le carte entrano in cima al menu dei livelli. Sono sempre
+  // gli stessi elementi, spostati: niente si duplica.
   const carte = document.getElementById('carte-pronte');
-  const stretto = window.matchMedia('(max-width: 1179px)');
-  function collocaCarte() {
-    if (!carte) return;
-    if (stretto.matches) document.querySelector('.drawer-content').prepend(carte);
-    else document.body.insertBefore(carte, document.getElementById('guida-tasti'));
+  const ricerca = document.getElementById('place-search');
+  const vista = document.getElementById('view-switch');
+  const testa = document.getElementById('app-header');
+  const centro = document.createElement('div');
+  centro.id = 'testa-centro';
+  const carteApri = document.createElement('button');
+  carteApri.id = 'carte-apri';
+  carteApri.type = 'button';
+  carteApri.setAttribute('aria-haspopup', 'true');
+  carteApri.setAttribute('aria-expanded', 'false');
+  carteApri.setAttribute('aria-controls', 'carte-pronte');
+  carteApri.title = 'Carte pronte (tasti 1-6)';
+  carteApri.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l5-2 6 2 5-2v14l-5 2-6-2-5 2z"></path><path d="M9 4v14M15 6v14"></path></svg>'
+    + '<span>Carte</span><b id="carte-attiva"></b><svg class="icon chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"></path></svg>';
+  const segnaposto = document.createComment('posto dei comandi');
+  ricerca.parentNode.insertBefore(segnaposto, ricerca);
+  const largo = window.matchMedia('(min-width: 1100px)');
+  function setCarteAperte(aperte) {
+    document.body.classList.toggle('carte-aperte', aperte);
+    carteApri.setAttribute('aria-expanded', aperte ? 'true' : 'false');
   }
-  collocaCarte();
-  stretto.addEventListener('change', collocaCarte);
+  carteApri.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setCarteAperte(!document.body.classList.contains('carte-aperte'));
+  });
+  carte.addEventListener('click', function (e) {
+    // Scelta una carta, il menu si richiude da solo.
+    if (e.target.closest('[data-carta]') && largo.matches) setCarteAperte(false);
+  });
+  document.addEventListener('click', function (e) {
+    if (!document.body.classList.contains('carte-aperte')) return;
+    if (carte.contains(e.target) || carteApri.contains(e.target)) return;
+    setCarteAperte(false);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && document.body.classList.contains('carte-aperte')) setCarteAperte(false);
+  });
+  function collocaComandi() {
+    setCarteAperte(false);
+    if (largo.matches) {
+      testa.insertBefore(centro, document.getElementById('header-actions'));
+      centro.append(ricerca, vista, carteApri, carte);
+    } else {
+      segnaposto.parentNode.insertBefore(ricerca, segnaposto);
+      segnaposto.parentNode.insertBefore(vista, segnaposto);
+      document.querySelector('.drawer-content').prepend(carte);
+      centro.remove();
+    }
+  }
+  collocaComandi();
+  largo.addEventListener('change', collocaComandi);
+
+  // Sul telefono la ricerca e' un'icona: si apre al tocco e si richiude
+  // quando si esce dal campo vuoto.
+  const campoRicerca = document.getElementById('place-query');
+  ricerca.addEventListener('click', function () {
+    if (largo.matches) return;
+    ricerca.classList.add('aperta');
+    campoRicerca.focus();
+  });
+  campoRicerca.addEventListener('blur', function () {
+    setTimeout(function () {
+      if (!ricerca.contains(document.activeElement) && !campoRicerca.value.trim()) ricerca.classList.remove('aperta');
+    }, 150);
+  });
 
   const previous = document.getElementById('time-prev');
   const next = document.getElementById('time-next');

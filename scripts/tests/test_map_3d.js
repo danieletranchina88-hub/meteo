@@ -781,8 +781,16 @@ assert.match(html, /function clearMeteorologicalLayers\(\)[\s\S]{0,900}?"weather
   "Solo carta non spegne il raster meteorologico");
 assert.match(html, /document\.body\.classList\.toggle\("map-only-layer", nextLayer === "none"\)/,
   "lo stato Solo carta non e' persistito nell'interfaccia");
-assert.match(html, />Schermo intero<\/span>/,
-  "il vecchio pulsante che nasconde solo la UI resta chiamato Solo mappa");
+// Il comando che nasconde i pannelli si chiama "Mappa piena": non "Solo
+// mappa", che si confondeva con il campo "Solo carta". E deve avere sempre
+// un'uscita raggiungibile: prima l'intestazione spariva insieme al bottone
+// che la riportava, e si restava senza comandi fino al ricaricamento.
+assert.match(html, />Mappa piena<\/span>/,
+  "il pulsante che nasconde i pannelli ha di nuovo un nome ambiguo");
+assert.doesNotMatch(html, />Solo mappa</, "torna il nome Solo mappa, confuso con Solo carta");
+assert.match(html, /id="esci-mappa-piena"/, "in mappa piena non c'e' un bottone per uscire");
+assert.match(html, /getElementById\("esci-mappa-piena"\)\.addEventListener\("click", toggleCleanMode\)/,
+  "il bottone per uscire dalla mappa piena non fa niente");
 assert.match(html, /kind === "storm" && catalog\[index\]\.storm === false/,
   "senza il controllo sul catalogo si chiederebbe un file inesistente");
 assert.match(html, /!upperActive && !stormActive\s*\n\s*&& !probActive && !profileActive && fieldGrid/,
