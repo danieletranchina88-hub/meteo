@@ -77,6 +77,7 @@ from meteo_analysis.core.vertical_profile import (
 )
 from meteo_analysis.ml.icon2i import Icon2IStore
 from meteo_analysis.ml.model import FrontModel
+from meteo_analysis.climatology.t850 import anomalia_per_payload
 from meteo_analysis.verification.archive import (
     build_run_manifest,
     source_asset_record,
@@ -2767,6 +2768,22 @@ def process_data():
                         if upper is not None:
                             upper["runTime"] = iso_z(run_dt)
                             upper["validTime"] = iso_date
+                            # Anomalia di T850 rispetto alla media ERA5
+                            # 1990-2019 dello stesso giorno e della stessa ora.
+                            # Se il calcolo fallisce il campo manca e il sito
+                            # lo dice; T850 e il resto si pubblicano comunque.
+                            try:
+                                livello850 = (upper.get("levels") or {}).get("850") or upper
+                                anomalia = anomalia_per_payload(
+                                    livello850,
+                                    datetime.fromisoformat(str(iso_date).replace("Z", "+00:00")),
+                                )
+                                if anomalia is not None:
+                                    livello850["tAnom"] = anomalia
+                                    upper["tAnom"] = anomalia
+                                    upper["tAnomReference"] = "ERA5 1990-2019"
+                            except Exception as anomaly_error:
+                                print(f" t850anom-{step_hours}h:{anomaly_error}", end="", flush=True)
                             write_json_gzip_atomic(
                                 f"{TEMP_DIR}/upper_{step_hours}.json.gz", upper
                             )

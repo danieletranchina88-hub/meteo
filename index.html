@@ -2488,6 +2488,9 @@
               <button class="layer-card" type="button" data-layer="t850" style="--swatch: linear-gradient(90deg,#24164f,#2e5eaa,#edf2f2,#f6d365,#b5364a)">
                 <span class="layer-swatch"></span><span><b>T 850 hPa</b><small>temperatura in quota</small></span>
               </button>
+              <button class="layer-card" type="button" data-layer="t850_anom" style="--swatch: linear-gradient(90deg,#313695,#74add1,#f7f7f7,#fdae61,#a50026)">
+                <span class="layer-swatch"></span><span><b>Anomalia T 850</b><small>scarto dalla media 1990–2019</small></span>
+              </button>
               <button class="layer-card" type="button" data-layer="storm_prob" style="--swatch: linear-gradient(90deg,#c9dfe9,#f2d45c,#f09335,#d1495b,#761e59)">
                 <span class="layer-swatch"></span><span><b>Algoritmo temporali</b><small>indice diagnostico · entro 10 km</small></span>
               </button>
@@ -3230,6 +3233,24 @@
       ];
       const T850_STOPS = buildDiscreteBands(T850_ANCHORS, -30, 35, 1, 1);
 
+      // Anomalia di T850: scala divergente blu-bianco-rosso a fasce di 2 °C,
+      // simmetrica attorno allo zero. Il bianco e' la fascia -1/+1 °C, cioe'
+      // "nella media": cosi' l'occhio va dove l'aria e' davvero fuori stagione.
+      const T850_ANOM_ANCHORS = [
+        { v: -16, c: [49, 54, 149] },
+        { v: -12, c: [69, 117, 180] },
+        { v: -8, c: [116, 173, 209] },
+        { v: -4, c: [171, 217, 233] },
+        { v: -1.5, c: [224, 243, 248] },
+        { v: 0, c: [247, 247, 247] },
+        { v: 1.5, c: [254, 236, 190] },
+        { v: 4, c: [253, 174, 97] },
+        { v: 8, c: [244, 109, 67] },
+        { v: 12, c: [215, 48, 39] },
+        { v: 16, c: [165, 0, 38] }
+      ];
+      const T850_ANOM_STOPS = buildDiscreteBands(T850_ANOM_ANCHORS, -17, 17, 2, 0.9, true);
+
       const CONVECTION_STOPS = [
         { v: 0, c: [255, 255, 255], a: 0 },
         { v: 20, c: [178, 210, 223], a: 0.45 },
@@ -3589,6 +3610,18 @@
           opacity: 0.9,
           terrainOpacity: 0.3
         },
+        t850_anom: {
+          label: "Anomalia T a 850 hPa",
+          unit: "°C",
+          stops: T850_ANOM_STOPS,
+          discrete: true,
+          decimals: 1,
+          ticks: [-16, -12, -8, -4, 0, 4, 8, 12, 16],
+          note: "Scarto della temperatura a 850 hPa dalla media 1990–2019 (ERA5) dello stesso giorno e della stessa ora: blu più freddo del normale, rosso più caldo.",
+          opacity: 0.9,
+          terrainOpacity: 0.3,
+          upper: true
+        },
         t850: {
           label: "Temperatura a 850 hPa",
           unit: "°C",
@@ -3718,6 +3751,12 @@
           method: "Altezza geopotenziale Z = Φ/g al livello 500 hPa",
           scale: "Metri geopotenziali; isoipse opzionali ogni 4 dam",
           limit: "Descrive la circolazione in quota, non l'altitudine geometrica esatta di una particella."
+        },
+        t850_anom: {
+          nature: "Campo derivato: ICON-2I meno climatologia ERA5",
+          method: "T850 ICON-2I meno la media ERA5 1990–2019 dello stesso giorno dell'anno e della stessa ora (climatologia WeatherBench 2 a 0,25°, ciclo annuale compresso in 4 armoniche, scarto 0,14 K)",
+          scale: "Anomalia sinottica: la climatologia ha 0,25° di passo, più grossa della griglia del modello",
+          limit: "Dove 850 hPa è sotto il terreno (Alpi) modello e rianalisi estrapolano entrambi. Non dice da sola il tipo di massa d'aria: va letta con θw e vento."
         },
         t850: {
           nature: "Campo prognostico deterministico ICON-2I",
@@ -4302,7 +4341,7 @@
         Object.keys(data.levels).forEach(function (level) {
           const fields = data.levels[level];
           if (!fields) return;
-          ["t", "rh", "u", "v", "thetaW", "thetaE"].forEach(function (key) {
+          ["t", "rh", "u", "v", "thetaW", "thetaE", "tAnom"].forEach(function (key) {
             if (Array.isArray(fields[key])) {
               fields[key] = Float32Array.from(
                 fields[key],
@@ -5040,6 +5079,12 @@
 
       function hasLayerData(key) {
         if (key === "none") return true;
+        // L'anomalia si pubblica dai run successivi a questa versione: se il
+        // file 850 dell'ora e' gia' arrivato e non la porta, il campo manca.
+        if (key === "t850_anom" && upperData && upperIndex === currentIndex) {
+          const livello = upperLevelData(key);
+          if (livello && !livello.tAnom) return false;
+        }
         if (usesUpperData(key)) return activeModel === "icon2i";
         // I campi temporaleschi non stanno nel file del passo ma nel proprio,
         // quindi cercarli in currentData li dichiarava sempre assenti. La
@@ -5062,6 +5107,9 @@
         const meta = currentData && currentData.meta ? currentData.meta : {};
         if (key === "gust") {
           return "Raffiche non disponibili per questa scadenza";
+        }
+        if (key === "t850_anom") {
+          return "Anomalia a 850 hPa non ancora pubblicata per questo run: arriva con il prossimo aggiornamento dei dati";
         }
         if (key === "freezing_rain") {
           return meta.freezingRainMessage ||
@@ -5091,7 +5139,7 @@
       }
 
       function selectedPressureLevel(key) {
-        if (key === "theta850" || key === "t850") return "850";
+        if (key === "theta850" || key === "t850" || key === "t850_anom") return "850";
         return ["temp", "wind", "rh"].includes(key) ? selectedLevel : "surface";
       }
 
@@ -5121,6 +5169,7 @@
         if (!levelData) return null;
         if (key === "theta850") return levelData.thetaW || levelData.thetaE;
         if (key === "temp" || key === "t850") return levelData.t;
+        if (key === "t850_anom") return levelData.tAnom || null;
         return levelData[key];
       }
 
@@ -5346,7 +5395,15 @@
           if(index !== currentIndex || model !== activeModel) return;
           if(!data) throw new Error("Campo assente");
           upperData = data; upperIndex = index;
-          renderWeather(); updateLegend(); refreshSelectedPoint(); scheduleFrameWarmup();
+          // Il campo in quota e' arrivato: se il run non porta l'anomalia lo
+          // si dice e si torna alla temperatura a 850 hPa.
+          if (activeLayer === "t850_anom" && !hasLayerData("t850_anom")) {
+            toast(unavailableLayerMessage("t850_anom"));
+            setLayer("t850");
+            return;
+          }
+          // Anche i valori sulle citta' si leggono dal campo appena arrivato.
+          renderWeather(); updateLegend(); refreshSelectedPoint(); requestVectorRender(); scheduleFrameWarmup();
         }).catch(function() {
           if(index !== currentIndex || model !== activeModel) return;
           toast("Campo non disponibile per questa scadenza"); selectedLevel = "surface"; setLayer("temp");
