@@ -349,6 +349,7 @@ jobs:
           python scripts/tests/test_front_occlusion.py
           python scripts/tests/test_thermodynamics.py
           python scripts/tests/test_climatology.py
+          python scripts/tests/test_t850_anomaly.py
           python scripts/tests/test_front_analysis_status.py
           python scripts/tests/test_front_benchmark.py
           python scripts/tests/test_convection.py
@@ -442,6 +443,7 @@ jobs:
           python scripts/tests/test_front_occlusion.py
           python scripts/tests/test_thermodynamics.py
           python scripts/tests/test_climatology.py
+          python scripts/tests/test_t850_anomaly.py
           python scripts/tests/test_front_analysis_status.py
           python scripts/tests/test_front_benchmark.py
           python scripts/tests/test_convection.py

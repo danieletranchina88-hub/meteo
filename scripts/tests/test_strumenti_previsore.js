@@ -312,5 +312,21 @@ prova('le etichette dei giorni non si accavallano', () => {
   assert.deepEqual(bottoni.map((b) => b.hidden), [true, false, false, false, false]);
 });
 
+prova('l\'anomalia a 850 hPa e\' un campo in quota vero', () => {
+  assert.match(html, /data-layer="t850_anom"/, 'manca il bottone dell\'anomalia');
+  assert.match(html, /t850_anom: \{\s*label: "Anomalia T a 850 hPa"[\s\S]*?upper: true/, 'l\'anomalia non e\' un campo in quota');
+  assert.match(implementazione('selectedPressureLevel'), /key === "t850_anom"\) return "850"/, 'l\'anomalia non legge il livello 850');
+  assert.match(implementazione('upperFieldArray'), /key === "t850_anom"\) return levelData\.tAnom/, 'l\'anomalia non legge il suo campo');
+  // Senza la conversione, i punti mancanti (null) diventerebbero zeri: un'anomalia nulla inventata.
+  assert.match(implementazione('compactUpperData'), /"thetaE", "tAnom"\]/, 'i punti mancanti dell\'anomalia diventano zero');
+  // Scala simmetrica attorno allo zero.
+  const ancore = new Function(html.match(/const T850_ANOM_ANCHORS = \[[\s\S]*?\n      \];/)[0] + '\nreturn T850_ANOM_ANCHORS;')();
+  assert.equal(ancore[0].v, -ancore[ancore.length - 1].v, 'la scala dell\'anomalia non e\' simmetrica');
+  assert.ok(ancore.some((a) => a.v === 0 && a.c.every((c) => c > 240)), 'lo zero non e\' bianco');
+  // Un run che non porta ancora il campo lo dice e torna a T850.
+  assert.match(implementazione('requestUpperData'), /activeLayer === "t850_anom" && !hasLayerData\("t850_anom"\)/,
+    'senza il campo nel run la carta resta vuota senza spiegazione');
+});
+
 console.log(ok ? 'ESITO: SUPERATO' : 'ESITO: DA RIVEDERE');
 process.exitCode = ok ? 0 : 1;
