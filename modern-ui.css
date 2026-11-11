@@ -879,3 +879,223 @@ body.mappa-in-moto #vector-canvas, body.mappa-in-moto #effects-canvas { opacity:
   #play-button { flex-basis: 40px; width: 40px; height: 40px; }
   #time-label { font-size: 10.5px; }
 }
+
+/* =========================================================================
+   PIU' MAPPA, MENO PANNELLI
+   Misurato prima di questo strato: i comandi coprivano il 32 % della carta
+   su un monitor da 1440x900, il 43 % su un portatile 1280x720 e il 36 % su
+   un telefono, fino al 53 % con la scheda di un punto aperta. Qui:
+     - una sola fascia in alto: ricerca, vista e carte entrano
+       nell'intestazione (modern-ui.js li sposta), le carte si aprono a
+       comparsa;
+     - la scheda del modello sparisce: ICON-2I e' gia' scritto nel marchio;
+     - i campi principali diventano una colonna di sole icone, il nome
+       compare passandoci sopra;
+     - barra del tempo e legenda si compattano;
+     - mentre si trascina o si zooma la mappa, i pannelli laterali si
+       sfumano e tornano a mappa ferma.
+   ========================================================================= */
+:root { --testa: 60px; --piede: 76px; }
+
+/* ---- L'intestazione: una fascia sola ---------------------------------- */
+html body #app-header {
+  min-height: 0; padding: calc(8px + var(--safe-top)) 12px 8px; gap: 14px; align-items: center;
+  background: linear-gradient(180deg, rgba(6, 12, 20, .96) 0%, rgba(6, 12, 20, .9) 72%, rgba(6, 12, 20, 0) 100%);
+}
+html body .brand-panel { flex: 0 0 auto; gap: 10px; align-items: center; }
+html body .brand-mark { flex-basis: 34px; width: 34px; height: 34px; border-radius: 10px; }
+html body .brand-panel .brand-copy > .eyebrow { display: none; }
+html body .brand-copy { display: flex; flex-direction: column; gap: 3px; }
+html body .brand-panel h1 { font-size: 18px; line-height: 1.05; }
+html body .brand-meta { margin-top: 0; }
+#testa-centro { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; position: relative; }
+html body #testa-centro #place-search { position: relative; top: auto; left: auto; width: clamp(200px, 20vw, 290px); height: 40px; flex: 0 1 auto; }
+html body #testa-centro #place-query { height: 38px; }
+html body #testa-centro #place-results { top: 46px; }
+html body #testa-centro #view-switch { position: static; width: auto; flex: 0 0 auto; padding: 3px; }
+html body #testa-centro #view-switch button { min-height: 32px; padding: 0 14px; }
+#carte-apri {
+  display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 10px 0 12px; flex: 0 0 auto;
+  border: 1px solid var(--stroke); border-radius: 12px; background: var(--surface); color: #d6e4f0;
+  font-size: 12px; font-weight: 600; box-shadow: var(--shadow), var(--light);
+  backdrop-filter: var(--glass); -webkit-backdrop-filter: var(--glass);
+  transition: background-color .18s var(--ease), border-color .18s var(--ease);
+}
+#carte-apri .icon { width: 17px; height: 17px; }
+#carte-apri .chevron { width: 14px; height: 14px; opacity: .7; transition: transform .2s var(--ease); }
+#carte-apri b { font-weight: 650; color: var(--accent-ink); }
+#carte-apri b:empty { display: none; }
+#carte-apri:hover { background: rgba(148, 190, 225, .14); }
+body.carte-aperte #carte-apri { border-color: var(--accent-line); background: var(--accent-veil); }
+body.carte-aperte #carte-apri .chevron { transform: rotate(180deg); }
+html body #testa-centro #carte-pronte {
+  position: absolute; top: 48px; left: auto; right: auto; display: none;
+  flex-direction: column; align-items: stretch; gap: 2px; padding: 6px; min-width: 230px;
+  border-radius: 12px; background: var(--surface-strong);
+}
+html body #testa-centro #carte-pronte .carte-titolo { display: block; padding: 4px 8px 6px; }
+html body #testa-centro #carte-pronte button { justify-content: flex-start; text-align: left; padding: 0 12px; min-height: 36px; }
+html body #testa-centro #carte-pronte button::after { content: attr(title); display: block; margin-left: auto; padding-left: 16px; font-size: 10px; font-weight: 450; color: var(--deep-muted); max-width: 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.carte-aperte #testa-centro #carte-pronte { display: flex; animation: sale .2s var(--ease) both; }
+html body #testa-centro #carte-pronte { min-width: 420px; }
+#carte-pronte button { display: flex; align-items: center; }
+/* Le azioni dell'intestazione restano a sole icone finche' non c'e' posto
+   largo: il nome sta nel suggerimento. "Livelli" resta scritto. */
+@media (max-width: 1599px) {
+  html body #header-extra .header-button span, html body #bulletin-button span { display: none; }
+  html body #header-extra .header-button, html body #bulletin-button { padding: 9px; }
+}
+html body .model-context { display: none !important; }
+
+/* ---- I campi principali: una colonna di icone ------------------------- */
+html body #quick-layers {
+  top: calc(var(--testa) + 14px + var(--safe-top)); right: 12px; width: 52px; padding: 5px; gap: 2px;
+}
+html body #quick-layers::before { display: none; }
+html body #quick-layers .layer-card, html body #quick-layers .all-fields {
+  position: relative; justify-content: center; min-height: 42px; padding: 0; border-radius: 9px;
+}
+html body #quick-layers .all-fields { margin-top: 3px; border-top: 1px solid var(--stroke); border-radius: 0 0 9px 9px; }
+html body #quick-layers .layer-card b, html body #quick-layers .all-fields span {
+  position: absolute; right: calc(100% + 10px); top: 50%; transform: translate(6px, -50%);
+  padding: 6px 10px; border: 1px solid var(--stroke); border-radius: 8px; background: var(--surface-strong);
+  color: var(--text); font-size: 12px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow);
+  opacity: 0; pointer-events: none; transition: opacity .16s var(--ease), transform .16s var(--ease);
+}
+html body #quick-layers .layer-card:hover b, html body #quick-layers .layer-card:focus-visible b,
+html body #quick-layers .all-fields:hover span, html body #quick-layers .all-fields:focus-visible span { opacity: 1; transform: translate(0, -50%); }
+html body #quick-layers .layer-swatch { flex-basis: 22px; width: 22px; height: 22px; }
+
+/* ---- La barra del tempo: una riga ------------------------------------- */
+html body #timeline {
+  left: 12px; right: 12px; bottom: calc(10px + var(--safe-bottom)); min-height: 0; padding: 8px 14px 8px 10px; gap: 14px; align-items: center;
+}
+html body #play-button { flex: 0 0 40px; width: 40px; height: 40px; }
+html body .timeline-main { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 18px; align-items: center; }
+html body .timeline-heading { display: none; }
+html body #timeline-days { grid-column: 2; grid-row: 1; height: 15px; }
+html body #timeline-days button { min-height: 15px; font-size: 10px; }
+html body #timeline-buffer { grid-column: 2; grid-row: 2; }
+html body #time-slider { grid-column: 2; grid-row: 3; height: 18px; margin: 0; }
+html body .timeline-meta {
+  grid-column: 1; grid-row: 1 / span 3; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 5px;
+  width: 196px; margin: 0;
+}
+html body #time-label { flex: 1 0 100%; font-size: 13px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body #buffer-status { display: none; }
+html body #lead-label { margin-left: 0; }
+html body .time-navigation button, html body .speed-controls button { min-height: 34px; }
+html body .speed-controls button { min-width: 30px; }
+@media (max-width: 1279px) { html body #timeline .speed-controls { display: none; } }
+
+/* ---- Legenda compatta, appoggiata sopra la barra del tempo ------------ */
+html body #legend-card, html body #legend-card.expanded, html body #legend-card:not(.expanded) {
+  left: 12px; bottom: calc(var(--piede) + 8px + var(--safe-bottom)); width: 340px; padding: 8px 12px 6px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; align-items: center;
+  align-content: start; height: auto; min-height: 0; row-gap: 0;
+}
+html body #legend-card .legend-head, html body #legend-card:not(.expanded) .legend-head { grid-column: 1; grid-row: 1; margin: 0 0 6px; min-width: 0; gap: 8px; justify-content: flex-start; }
+html body #legend-card .legend-head > div { min-width: 0; }
+html body #legend-card .micro-label { display: none; }
+html body #legend-title, html body #legend-card:not(.expanded) #legend-title { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html body #legend-unit { padding: 1px 5px; font-size: 10px; }
+html body #legend-vista { grid-column: 2; grid-row: 1; margin: 0 0 6px; padding: 0; border: 0; font-size: 9.5px; color: var(--muted); white-space: nowrap; }
+html body #legend-bar, html body #legend-card:not(.expanded) #legend-bar { grid-column: 1 / -1; height: 8px; }
+html body #legend-ticks, html body #legend-card:not(.expanded) #legend-ticks { grid-column: 1 / -1; height: 13px; margin-top: 4px; font-size: 9.5px; }
+
+/* ---- La scheda del punto: piu' stretta e piu' bassa ------------------- */
+html body #readout-card { top: calc(var(--testa) + 14px + var(--safe-top)); left: 12px; width: 270px; padding: 14px 16px; max-height: calc(100dvh - var(--testa) - var(--piede) - 120px - var(--safe-top) - var(--safe-bottom)); }
+html body #point-value { font-size: 38px; }
+html body #point-location { font-size: 9px; }
+
+/* ---- Il resto segue le nuove misure ----------------------------------- */
+html body #drawer { top: calc(var(--testa) + 14px + var(--safe-top)); right: 12px; bottom: calc(var(--piede) + 8px + var(--safe-bottom)); }
+html body #bulletin-card { top: calc(var(--testa) + 14px + var(--safe-top)); bottom: calc(var(--piede) + 8px + var(--safe-bottom)); }
+html body #satellite-status { top: calc(var(--testa) + 14px + var(--safe-top)); left: 12px; }
+html body .maplibregl-ctrl-bottom-right { right: 12px !important; bottom: calc(var(--piede) + 8px + var(--safe-bottom)) !important; }
+html body #toast { bottom: calc(var(--piede) + 20px + var(--safe-bottom)); }
+
+/* ---- A comparsa: mentre la mappa si muove i pannelli si fanno da parte - */
+#quick-layers, #legend-card, #readout-card, .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group, #satellite-status {
+  transition: opacity .35s var(--ease);
+}
+body.mappa-in-moto #quick-layers, body.mappa-in-moto #legend-card, body.mappa-in-moto #readout-card,
+body.mappa-in-moto .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group {
+  opacity: .14; transition: opacity .18s ease;
+}
+/* Puntati col mouse tornano subito pieni, anche a mappa in moto. */
+body.mappa-in-moto #quick-layers:hover, body.mappa-in-moto #readout-card:hover { opacity: 1; }
+
+/* ---- Telefono e finestre strette -------------------------------------- */
+@media (max-width: 1099px) and (min-width: 960px) {
+  html body #place-search, html body #view-switch { top: calc(var(--testa) + 12px + var(--safe-top)); }
+  html body #readout-card, html body #quick-layers, html body #satellite-status { top: calc(var(--testa) + 66px + var(--safe-top)); }
+}
+@media (max-width: 959px) {
+  :root { --testa: 52px; --piede: 84px; }
+  html body #app-header { padding: calc(6px + var(--safe-top)) 10px 6px; gap: 8px; }
+  html body .brand-mark { display: none; }
+  html body .brand-panel h1 { font-size: 17px; }
+  html body .brand-meta { font-size: 9px; padding: 1px 7px 1px 6px; }
+  html body .header-button, html body .header-button.primary { min-width: 40px; min-height: 40px; padding: 8px; }
+  html body #header-extra { top: 46px; }
+  /* Ricerca: un'icona che si apre al tocco. Vista: una pastiglia piccola. */
+  html body #place-search {
+    top: calc(var(--testa) + 6px + var(--safe-top)); left: 10px; width: 42px; height: 40px; padding: 0 12px; gap: 0;
+    cursor: pointer; transition: width .24s var(--ease);
+  }
+  html body #place-search #place-query { width: 0; height: 38px; opacity: 0; padding: 0; pointer-events: none; }
+  html body #place-search.aperta, html body #place-search:focus-within { z-index: 45; width: calc(100vw - 20px); gap: 8px; cursor: auto; }
+  html body #place-search.aperta #place-query, html body #place-search:focus-within #place-query { width: 100%; opacity: 1; pointer-events: auto; }
+  html body #view-switch { top: calc(var(--testa) + 6px + var(--safe-top)); right: 10px; width: auto; padding: 3px; }
+  html body #view-switch button { min-height: 32px; padding: 0 12px; font-size: 11px; }
+  /* Barra del tempo: cursore sopra, ora e comandi sotto. */
+  html body #timeline { left: 8px; right: 8px; bottom: calc(8px + var(--safe-bottom)); padding: 8px 10px; gap: 10px; }
+  html body #play-button { flex-basis: 40px; width: 40px; height: 40px; }
+  html body .timeline-main { grid-template-columns: minmax(0, 1fr); }
+  html body #timeline-days, html body #timeline-buffer, html body #time-slider { grid-column: 1; }
+  html body .timeline-meta { grid-column: 1; grid-row: 4; width: auto; flex-wrap: nowrap; margin-top: 3px; }
+  html body #time-label { flex: 1 1 auto; font-size: 11px; }
+  html body .time-navigation { padding: 1px; }
+  html body .time-navigation button { min-width: 30px; min-height: 36px; }
+  /* Legenda a tutta larghezza, bassa. Lo zoom si fa con le dita. */
+  html body #legend-card, html body #legend-card.expanded, html body #legend-card:not(.expanded) {
+    left: 8px; right: 8px; width: auto; bottom: calc(var(--piede) + 6px + var(--safe-bottom)); padding: 7px 10px 5px;
+  }
+  html body #legend-title, html body #legend-card:not(.expanded) #legend-title { font-size: 11px; }
+  html body .maplibregl-ctrl-bottom-right .maplibregl-ctrl-group { display: none; }
+  /* Scheda del punto: in basso, dove arriva il pollice, al posto della
+     legenda (che torna quando la scheda si chiude). La parte alta della
+     carta resta libera. */
+  html body #readout-card {
+    top: auto; bottom: calc(var(--piede) + 6px + var(--safe-bottom)); left: 8px; right: 8px; width: auto;
+    padding: 10px 12px; max-height: calc(100dvh - var(--testa) - var(--piede) - 80px - var(--safe-top) - var(--safe-bottom));
+  }
+  html body #readout-card .readout-primary { display: inline-flex; align-items: baseline; }
+  html body #point-value { font-size: 30px; }
+  html body #point-location { display: none; }
+  html body .readout-kicker { font-size: 9px; }
+  html body #readout-card .readout-expand { min-height: 34px; padding: 4px 12px; }
+  body.readout-open #legend-card, body.readout-open #legend-card.expanded, body.readout-open #legend-card:not(.expanded) { display: none; }
+  html body #satellite-status { top: calc(var(--testa) + 54px + var(--safe-top)); left: 8px; }
+  html body #drawer, html body #bulletin-card { top: calc(var(--testa) + var(--safe-top)); right: 0; bottom: 0; }
+  html body #toast { bottom: calc(var(--piede) + 64px + var(--safe-bottom)); }
+}
+
+/* ---- Mappa piena (tasto M) -------------------------------------------
+   Restano la carta e, sbiadita, la barra del tempo: torna piena passandoci
+   sopra. Un solo bottone per uscire, sempre raggiungibile (prima
+   l'intestazione spariva insieme al bottone che la riportava). */
+#esci-mappa-piena { display: none; }
+body.clean-mode #esci-mappa-piena {
+  position: fixed; z-index: 50; top: calc(10px + var(--safe-top)); right: 12px;
+  display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px 0 12px;
+  border-radius: 999px; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer;
+  animation: appare .3s ease both;
+}
+#esci-mappa-piena .icon { width: 17px; height: 17px; }
+#esci-mappa-piena:hover { border-color: var(--accent-line); }
+body.clean-mode #timeline { transition: opacity .25s var(--ease); }
+body.clean-mode #timeline:hover, body.clean-mode #timeline:focus-within { opacity: 1; }
+@media (max-width: 959px) { #esci-mappa-piena span { display: none; } body.clean-mode #esci-mappa-piena { padding: 0 11px; } }
+.satellite-view #carte-apri, body.synoptic-chart #carte-apri { display: none; }

@@ -2300,14 +2300,14 @@
           </svg>
           <span>Radar</span>
         </a>
-        <button id="clean-button" class="header-button" type="button" aria-pressed="false" aria-label="Attiva schermo intero">
+        <button id="clean-button" class="header-button" type="button" aria-pressed="false" aria-label="Mappa piena" title="Mappa piena: nasconde i pannelli (M)">
           <svg class="icon" viewBox="0 0 24 24">
             <path d="M4 7V4h3"></path>
             <path d="M20 7V4h-3"></path>
             <path d="M4 17v3h3"></path>
             <path d="M20 17v3h-3"></path>
           </svg>
-          <span>Schermo intero</span>
+          <span>Mappa piena</span>
         </button>
         </div>
         <button id="bulletin-button" class="header-button primary" type="button" aria-expanded="false" aria-controls="bulletin-card" aria-label="Apri bollettino automatico">
@@ -2858,6 +2858,10 @@
     </section>
 
     <nav id="carte-pronte" class="surface" aria-label="Carte pronte"></nav>
+    <button id="esci-mappa-piena" class="surface" type="button" aria-label="Mostra i comandi" title="Mostra i comandi (M o Esc)">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5"></path><path d="M15 4h5v5"></path><path d="M9 20H4v-5"></path><path d="M20 15v5h-5"></path></svg>
+      <span>Mostra comandi</span>
+    </button>
 
     <section id="guida-tasti" class="surface" role="dialog" aria-modal="false" aria-labelledby="guida-tasti-titolo" hidden>
       <header>
@@ -2876,6 +2880,7 @@
         <div><dt><kbd>I</kbd> <kbd>F</kbd> <kbd>C</kbd></dt><dd>isobare, fronti, valori sulle città</dd></div>
         <div><dt><kbd>Z</kbd></dt><dd>ora italiana ↔ UTC</dd></div>
         <div><dt><kbd>L</kbd></dt><dd>apre o chiude i livelli</dd></div>
+        <div><dt><kbd>M</kbd></dt><dd>mappa piena: nasconde i pannelli (Esc per tornare)</dd></div>
         <div><dt><kbd>Alt</kbd> + frecce</dt><dd>sposta la mappa</dd></div>
         <div><dt><kbd>?</kbd></dt><dd>questa guida</dd></div>
       </dl>
@@ -5543,7 +5548,29 @@
           button.addEventListener("click",function(){setPlaying(false);requestSliderStep(i);});
           el.append(button);
         });
+        diradaGiorniTimeline();
       }
+
+      // Il primo giorno del run spesso ha poche ore (un run delle 12Z ne ha
+      // dodici del giorno prima): la sua etichetta finiva sopra quella del
+      // giorno dopo ("mar 10mer 11"). Un'etichetta senza almeno 46 px di
+      // spazio prima della successiva si nasconde; il giorno resta
+      // raggiungibile dal cursore.
+      function diradaGiorniTimeline() {
+        const el = document.getElementById("timeline-days");
+        if (!el) return;
+        const larghezza = el.clientWidth;
+        const bottoni = Array.from(el.children);
+        bottoni.forEach(function (b) { b.hidden = false; });
+        if (!larghezza) return;
+        for (let k = 0; k < bottoni.length - 1; k += 1) {
+          const qui = parseFloat(bottoni[k].style.left) / 100 * larghezza;
+          const dopo = parseFloat(bottoni[k + 1].style.left) / 100 * larghezza;
+          if (dopo - qui < 46) bottoni[k].hidden = true;
+        }
+      }
+      window.addEventListener("resize", function () { diradaGiorniTimeline(); });
+
 
       async function loadCatalog(silentFailure) {
         try {
@@ -16371,9 +16398,10 @@
       function toggleCleanMode() {
         const active = document.body.classList.toggle("clean-mode");
         ui.cleanButton.setAttribute("aria-pressed", active ? "true" : "false");
-        ui.cleanButton.setAttribute("aria-label", active ? "Mostra interfaccia" : "Attiva schermo intero");
-        ui.cleanButton.querySelector("span").textContent = active ? "Mostra UI" : "Schermo intero";
-        if (active) setBulletin(false);
+        ui.cleanButton.setAttribute("aria-label", active ? "Mostra interfaccia" : "Mappa piena");
+        ui.cleanButton.title = active ? "Mostra i comandi (M)" : "Mappa piena: nasconde i pannelli (M)";
+        ui.cleanButton.querySelector("span").textContent = active ? "Mostra UI" : "Mappa piena";
+        if (active) { setBulletin(false); setDrawer(false); }
         setMoreMenu(false);
         closeDrawerOnMobile();
       }
@@ -17971,6 +17999,7 @@
         ui.legendCard.classList.toggle("expanded");
       });
       ui.cleanButton.addEventListener("click", toggleCleanMode);
+      document.getElementById("esci-mappa-piena").addEventListener("click", toggleCleanMode);
       ui.moreButton.addEventListener("click", function (event) {
         event.stopPropagation();
         setMoreMenu(!document.body.classList.contains("more-open"));
@@ -18193,6 +18222,12 @@
           });
         }
         const attiva = cartaAttiva();
+        // Il bottone che apre il menu dice quale carta e' in vista.
+        const nomeAttiva = document.getElementById("carte-attiva");
+        if (nomeAttiva) {
+          const voce = CARTE_PRONTE.find(function (carta) { return carta.id === attiva; });
+          nomeAttiva.textContent = voce ? voce.nome : "";
+        }
         barra.querySelectorAll("[data-carta]").forEach(function (bottone) {
           const accesa = bottone.dataset.carta === attiva;
           bottone.classList.toggle("active", accesa);
@@ -18249,6 +18284,7 @@
         if (campoTesto) return;
         const guida = document.getElementById("guida-tasti");
         if (event.key === "Escape" && guida && !guida.hidden) { setGuidaTasti(false); return; }
+        if (event.key === "Escape" && document.body.classList.contains("clean-mode")) { toggleCleanMode(); return; }
         if (event.key === "?") { event.preventDefault(); setGuidaTasti(guida.hidden); return; }
         // Con un pannello aperto sopra la mappa i tasti restano al pannello.
         if (ui.bulletinCard.classList.contains("open")) return;
@@ -18308,6 +18344,8 @@
           toast(oraUtc ? "Ore in UTC" : "Ore in ora italiana");
         } else if (tasto === "l") {
           setDrawer(!ui.drawer.classList.contains("open"));
+        } else if (tasto === "m") {
+          toggleCleanMode();
         }
       }
 
@@ -18455,9 +18493,9 @@
         const decimali = Math.min(1, info.decimals || 0);
         const scrivi = function (valore) { return valore.toFixed(decimali).replace(".", ","); };
         const separatore = String(info.unit || "").startsWith("/") ? "" : " ";
-        riga.textContent = "In vista · min " + scrivi(estremi.minimo) + " · max "
+        riga.textContent = "min " + scrivi(estremi.minimo) + " · max "
           + scrivi(estremi.massimo) + separatore + (info.unit || "");
-        riga.title = "Estremi del campo nella porzione inquadrata, campionati su un reticolo di schermo";
+        riga.title = "Estremi del campo nella porzione di carta inquadrata, campionati su un reticolo di schermo";
         riga.hidden = false;
         const da = posizioneLegenda(estremi.minimo, info), a = posizioneLegenda(estremi.massimo, info);
         fascia.style.left = da.toFixed(2) + "%";

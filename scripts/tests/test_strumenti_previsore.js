@@ -281,5 +281,36 @@ prova('l\'ingresso animato e\' una volta sola e rispetta le animazioni ridotte',
   assert.match(meteo, /prefers-reduced-motion: reduce/, 'le animazioni dei meteogrammi ignorano le animazioni ridotte');
 });
 
+prova('piu\' mappa: un\'intestazione sola e pannelli a comparsa', () => {
+  const js = fs.readFileSync(path.join(root, 'modern-ui.js'), 'utf8');
+  // Sul computer ricerca, vista e carte entrano nell'intestazione.
+  assert.match(js, /matchMedia\('\(min-width: 1100px\)'\)/, 'manca la soglia dell\'intestazione unica');
+  assert.match(js, /centro\.append\(ricerca, vista, carteApri, carte\)/, 'ricerca, vista e carte non entrano nell\'intestazione');
+  // Sotto la soglia tornano al loro posto: niente si duplica.
+  assert.match(js, /segnaposto\.parentNode\.insertBefore\(ricerca, segnaposto\)/, 'la ricerca non torna al suo posto sotto i 1100 px');
+  assert.match(js, /querySelector\('\.drawer-content'\)\.prepend\(carte\)/, 'le carte non tornano nel menu dei livelli');
+  // Le carte si aprono a comparsa e si richiudono da sole.
+  assert.match(js, /e\.key === 'Escape' && document\.body\.classList\.contains\('carte-aperte'\)/, 'Esc non chiude il menu delle carte');
+  assert.match(stile, /body\.carte-aperte #testa-centro #carte-pronte \{ display: flex;/, 'il menu delle carte non compare');
+  // La scheda del modello ripeteva il marchio: via.
+  assert.match(stile, /html body \.model-context \{ display: none !important; \}/, 'la scheda del modello copre ancora la mappa');
+  // Mentre la mappa si muove i pannelli si sfumano.
+  assert.match(stile, /body\.mappa-in-moto #quick-layers, body\.mappa-in-moto #legend-card, body\.mappa-in-moto #readout-card/,
+    'i pannelli non si fanno da parte mentre si muove la mappa');
+  // Sul telefono la scheda del punto sta in basso e prende il posto della legenda.
+  assert.match(stile, /body\.readout-open #legend-card, body\.readout-open #legend-card\.expanded/, 'sul telefono legenda e scheda si sovrappongono');
+});
+
+prova('le etichette dei giorni non si accavallano', () => {
+  const giorni = [{ left: '0%' }, { left: '3%' }, { left: '36%' }, { left: '69%' }, { left: '100%' }];
+  const bottoni = giorni.map((g) => ({ style: g, hidden: false }));
+  const ctx = { parseFloat, Array, document: { getElementById: () => ({ clientWidth: 400, children: bottoni }) } };
+  vm.createContext(ctx);
+  vm.runInContext(implementazione('diradaGiorniTimeline'), ctx);
+  ctx.diradaGiorniTimeline();
+  // 3 % di 400 px sono 12 px: la prima etichetta si nasconde, le altre restano.
+  assert.deepEqual(bottoni.map((b) => b.hidden), [true, false, false, false, false]);
+});
+
 console.log(ok ? 'ESITO: SUPERATO' : 'ESITO: DA RIVEDERE');
 process.exitCode = ok ? 0 : 1;
