@@ -4774,7 +4774,7 @@
             if (!best || distance < best.distance) {
               // Lato del punto rispetto alla linea: il lato caldo è a sinistra.
               const cross = dx * (py - ay) - dy * (px - ax);
-              best = { distance: distance, feature: feature, warmSide: cross > 0 };
+              best = { distance: distance, feature: feature, warmSide: cross > 0, index: i, t: t };
             }
           }
         });
@@ -4782,8 +4782,15 @@
         if (!best || best.distance > 300) return "nessuno entro 300 km";
 
         const props = best.feature.properties;
-        const typeName = FRONT_TYPE_NAMES[props.frontType] || props.frontType;
-        const motion = Number(props.motionKmh) || 0;
+        // Un fronte lungo cambia carattere lungo la linea (freddo dietro
+        // l'onda, caldo davanti): tipo e velocita' sono quelli del tratto
+        // piu' vicino al punto, non la media di duemila chilometri.
+        const tratto = trattoDelFronte(best.feature, best.index, best.t);
+        const tipoVicino = tratto && FRONT_TYPE_NAMES[tratto.type] ? tratto.type : props.frontType;
+        const typeName = FRONT_TYPE_NAMES[tipoVicino] || tipoVicino;
+        const motion = tratto && Number.isFinite(Number(tratto.motionKmh)) && tratto.motionKmh !== null
+          ? Number(tratto.motionKmh)
+          : (Number(props.motionKmh) || 0);
         let movement = "quasi stazionario";
         if (Math.abs(motion) >= 5) {
           const approaching = (motion > 0 && best.warmSide) || (motion < 0 && !best.warmSide);
@@ -4819,7 +4826,30 @@
         if (props.publishedIdentityStart) {
           text += " · nuova identità temporale dopo discontinuità";
         }
+        if (props.source) text += " · " + props.source;
         return text;
+      }
+
+      // Il tratto (segmentTypes) che contiene il punto della linea indicato
+      // da vertice e frazione del segmento: le frazioni sono di lunghezza.
+      function trattoDelFronte(feature, indice, t) {
+        const tratti = feature.properties && feature.properties.segmentTypes;
+        const coords = feature.geometry && feature.geometry.coordinates;
+        if (!Array.isArray(tratti) || !tratti.length || !coords || coords.length < 2) return null;
+        let prima = 0, totale = 0;
+        for (let i = 0; i < coords.length - 1; i += 1) {
+          const kmLon = 111.32 * Math.cos((coords[i][1] + coords[i + 1][1]) * Math.PI / 360);
+          const passo = Math.hypot((coords[i + 1][0] - coords[i][0]) * kmLon,
+            (coords[i + 1][1] - coords[i][1]) * 111.32);
+          if (i < indice) prima += passo;
+          else if (i === indice) prima += passo * t;
+          totale += passo;
+        }
+        const frazione = totale > 0 ? prima / totale : 0;
+        for (let k = 0; k < tratti.length; k += 1) {
+          if (frazione >= Number(tratti[k].start) && frazione <= Number(tratti[k].end)) return tratti[k];
+        }
+        return null;
       }
 
       function windDirectionFrom(u, v) {
@@ -10541,11 +10571,15 @@
           const source = currentData && currentData.meta && currentData.meta.frontSource;
           const level = currentData && currentData.meta && currentData.meta.frontLevel;
           const method = currentData && currentData.meta && currentData.meta.frontMethod;
+          // I fronti sono di scala sinottica: vengono da ICON-EU, che
+          // contiene il fronte intero; ICON-2I e' il ripiego dichiarato.
           frontSourceLabel.textContent = source === "ICON-2I"
             ? (currentData.meta.frontFusion
               ? "ICON-2I · OFA θw 925/850/700 + conferma ML"
               : "ICON-2I · OFA θw 925/850/700 hPa")
-            : "modello " + (source || "sinottico") + " · " + (level || "850 hPa");
+            : source === "ICON-EU"
+              ? "ICON-EU · scala sinottica · θw 925/850/700 hPa"
+              : "modello " + (source || "sinottico") + " · " + (level || "850 hPa");
           if (method) {
             frontSourceLabel.title = "Metodo " + method
               + " · singolo run deterministico · analisi oggettiva, non osservata";

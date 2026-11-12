@@ -69,10 +69,9 @@ def _merge_segments(segments: list[dict]) -> list[dict]:
 def cohere_feature_type(properties: dict) -> dict:
     """Make ``frontType`` and ``segmentTypes`` mutually consistent.
 
-    A single tracked arc may contain its moving type plus stationary pieces,
-    but never simultaneous cold and warm pieces.  An occluded arc is wholly
-    occluded.  When trimming leaves only a stationary piece, the feature's
-    main label is changed too, so metadata and rendered symbols agree.
+    A single tracked arc may contain cold, warm and stationary pieces.  An
+    occluded arc is wholly occluded.  The feature's main label is the type
+    covering most of the arc, so metadata and rendered symbols agree.
     """
     segments = properties.get("segmentTypes")
     anchor = properties.get("frontType")
@@ -90,37 +89,23 @@ def cohere_feature_type(properties: dict) -> dict:
         properties.pop("segmentTypes", None)
         return properties
 
-    if anchor == "stationary":
-        for item in cleaned:
-            item["type"] = "stationary"
-    elif anchor in MOVING_TYPES:
-        opposite = "warm" if anchor == "cold" else "cold"
-        for item in cleaned:
-            if item["type"] == opposite:
-                item["type"] = "stationary"
-    else:
-        # Legacy/uncertain metadata: retain the moving type with the greatest
-        # arc-length support; the competing sign is demoted to stationary.
-        coverage = {
-            moving: sum(
-                float(item["end"]) - float(item["start"])
-                for item in cleaned if item["type"] == moving
-            )
-            for moving in MOVING_TYPES
-        }
-        chosen = max(coverage, key=coverage.get)
-        if coverage[chosen] > 0.0:
-            for item in cleaned:
-                if item["type"] in MOVING_TYPES and item["type"] != chosen:
-                    item["type"] = "stationary"
-            anchor = chosen
-
+    # Cold and warm stretches may coexist on one arc: a frontal wave is one
+    # air-mass boundary, warm ahead of the low and cold behind it.  The
+    # tracker only emits an opposite stretch when it is long and clearly
+    # moving, so it is kept here.  The feature's main label is the type
+    # covering most of the line.
     cleaned = _merge_segments(cleaned)
-    moving = {item["type"] for item in cleaned if item["type"] in MOVING_TYPES}
-    if len(moving) == 1:
-        properties["frontType"] = next(iter(moving))
-    elif not moving and any(item["type"] == "stationary" for item in cleaned):
-        properties["frontType"] = "stationary"
+    coverage: dict[str, float] = {}
+    for item in cleaned:
+        coverage[item["type"]] = coverage.get(item["type"], 0.0) + (
+            float(item["end"]) - float(item["start"])
+        )
+    known = {
+        kind: value for kind, value in coverage.items()
+        if kind in MOVING_TYPES or kind == "stationary"
+    }
+    if known:
+        properties["frontType"] = max(known, key=known.get)
     properties["segmentTypes"] = cleaned
     if properties.get("frontType") != original_anchor:
         properties["typeAdjustedAfterTopology"] = True

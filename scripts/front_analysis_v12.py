@@ -1507,6 +1507,11 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                 "convergenceFraction": convergence_fraction,
                 # Positive points from cold toward warm: cold-air advance.
                 "airmassMotionKmh": _finite_median(normal_airmass_flow) * 3.6,
+                # Per-point speed toward the warm air (km/h, positive = cold
+                # advance): a long boundary is cold on one stretch and warm
+                # on another, and a line median cannot say where.
+                "pointAirmassKmh": np.asarray(normal_airmass_flow, dtype=float) * 3.6,
+                "pointOfaKmh": -np.asarray(ofa_speed, dtype=float) * 3.6,
                 "lowerWindFraction": lower_wind_fraction,
                 "vorticity1e5": _finite_median(
                     self._sample(kinematics["vorticity1e5"], coordinates)
@@ -1592,9 +1597,11 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
                     ),
                     0.005,
                 )
-                metrics["tendencyMotionKmh"] = _finite_median(
+                point_tendency = (
                     -self._sample(theta_tendency, coordinates) / gradient_at_line
                 )
+                metrics["pointTendencyKmh"] = np.asarray(point_tendency, dtype=float)
+                metrics["tendencyMotionKmh"] = _finite_median(point_tendency)
             else:
                 metrics["tendencyMotionKmh"] = np.nan
 

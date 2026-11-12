@@ -26,3 +26,5 @@ __pycache__/
 training_data/
 outputs/
 models/candidates/
+icon_eu_fronts.json
+icon_eu_tmp/

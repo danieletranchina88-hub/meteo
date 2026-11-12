@@ -28,6 +28,7 @@ on:
       - 'scripts/front_topology.py'
       - 'scripts/front_occlusion.py'
       - 'scripts/front_tracking.py'
+      - 'scripts/icon_eu_fronts.py'
       - 'scripts/front_benchmark.py'
       - 'scripts/calibrate_thresholds.py'
       - 'scripts/climatology_thresholds.json'
@@ -73,6 +74,7 @@ on:
       - 'scripts/front_topology.py'
       - 'scripts/front_occlusion.py'
       - 'scripts/front_tracking.py'
+      - 'scripts/icon_eu_fronts.py'
       - 'scripts/front_benchmark.py'
       - 'scripts/calibrate_thresholds.py'
       - 'scripts/climatology_thresholds.json'
@@ -347,6 +349,7 @@ jobs:
           python scripts/tests/test_front_support.py
           python scripts/tests/test_front_topology.py
           python scripts/tests/test_front_occlusion.py
+          python scripts/tests/test_icon_eu_fronts.py
           python scripts/tests/test_thermodynamics.py
           python scripts/tests/test_climatology.py
           python scripts/tests/test_t850_anomaly.py
@@ -441,6 +444,7 @@ jobs:
           python scripts/tests/test_front_support.py
           python scripts/tests/test_front_topology.py
           python scripts/tests/test_front_occlusion.py
+          python scripts/tests/test_icon_eu_fronts.py
           python scripts/tests/test_thermodynamics.py
           python scripts/tests/test_climatology.py
           python scripts/tests/test_t850_anomaly.py
@@ -473,6 +477,17 @@ jobs:
           node scripts/tests/test_mappe_laboratorio.js
           node scripts/tests/test_strumenti_previsore.js
           node scripts/tests/test_workflow.js
+
+      # I fronti sono di scala sinottica: il dominio di ICON-2I ne contiene
+      # un pezzo e a 2,2 km il gradiente si frantuma. Li si prende da ICON-EU
+      # (DWD open data, nessuna chiave), stesso motore su dominio europeo.
+      # Facoltativo per costruzione: se il DWD non risponde o il run non e'
+      # completo il file non viene scritto e process_data.py usa i fronti di
+      # ICON-2I, dichiarandolo ora per ora in front_qc.json.
+      - name: Fronti sinottici da ICON-EU (DWD)
+        timeout-minutes: 25
+        continue-on-error: true
+        run: python scripts/icon_eu_fronts.py --hours 78 --output icon_eu_fronts.json
 
       - name: Run ICON-2I processor
         env:

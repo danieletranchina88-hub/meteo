@@ -586,13 +586,19 @@ def candidate_gate_report(metrics: dict, evidence: dict | None = None) -> dict:
 
     # Where 925 hPa is actually above ground over most of the line, the same
     # air-mass boundary must also be visible in the lower troposphere.
+    # "Visible" means the two air masses still differ at 925 hPa across the
+    # line.  A separately detected 925-hPa line within 130 km is a stronger
+    # confirmation but cannot be required: a frontal surface slopes, a warm
+    # front at 1:200 lies 150 km away from its 850-hPa trace, and the missing
+    # overlap used to brand a 5-K boundary as incoherent.  Without that line
+    # the contrast itself must be solid (1 K).
+    lower_line_missing = not np.isfinite(lower_support) or lower_support < 0.25
     lower_contradiction = (
         lower_valid >= 0.60
         and (
-            not np.isfinite(lower_support)
-            or not np.isfinite(lower_contrast)
-            or lower_support < 0.25
+            not np.isfinite(lower_contrast)
             or lower_contrast < 0.50
+            or (lower_line_missing and lower_contrast < 1.00)
         )
     )
     if lower_contradiction:
@@ -621,14 +627,13 @@ def candidate_gate_report(metrics: dict, evidence: dict | None = None) -> dict:
     strong_dynamic = wind_boundary and dynamic_core and (
         convergence >= -0.20 or convergence_fraction >= 0.44
     )
+    # A trough is support; a ridge is a contradiction; a few hundredths of a
+    # hectopascal either way are neither.  Warm and quasi-stationary fronts
+    # lying along the isobars have no measurable kink, and a "missing"
+    # 0.05 hPa must not cost them the strong grade.
     pressure_support = (
         not np.isfinite(pressure_trough)
-        or pressure_trough >= 0.0
-        or (
-            pressure_trough >= -0.10
-            and np.isfinite(pressure_fraction)
-            and pressure_fraction >= 0.48
-        )
+        or pressure_trough >= -0.15
     )
     strong_pass = bool(
         continuation_pass
