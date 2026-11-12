@@ -8,24 +8,18 @@ warm-side consistency. Births and deaths are represented explicitly; a
 split or merge is intentionally treated as the end of one identity and the
 birth of another, rather than being claimed as a continuously tracked front.
 
-Classification is decided by **consensus** of two independent signals,
-not a fixed blend:
+Classification is the **median** of three independent estimates of the
+boundary's speed toward the warm air (positive = cold front):
 
  1. geometric motion  - the real displacement of the line between hours,
-    measured locally along the line and projected on the warm-ward normal
-    (positive toward warm = cold front).  This is the primary signal and
-    needs no wind.
- 2. OFA frontal speed - Hewson's V . grad|grad theta_w| / |grad|grad|
-    (thermodynamic type), precomputed on each line. A wind sampler supplies
-    exactly this signal only for backward-compatible synthetic callers.
+    measured locally along the line and projected on the warm-ward normal;
+ 2. phase speed       - from the local theta-w tendency at the line;
+ 3. wind              - Hewson's OFA speed and the flow normal to the line.
 
-When the available signals agree -> confident cold/warm/stationary; when
-they conflict -> ``frontType = "uncertain"`` (better honest than wrong).
-
-Hewson's 850-hPa front speed is the thermodynamic classification signal;
-observed line displacement is an independent temporal check.  A cold/warm
-sign conflict is never averaged away: the track becomes ``uncertain`` and
-is not published by the operational analyzer.
+Two estimates always bracket the median, so one wrong family neither
+decides nor vetoes the type.  Disagreement lowers ``classificationCertainty``
+instead of hiding the front: a detected, persistent air-mass boundary is
+published with its best type and an honest confidence.
 """
 
 from __future__ import annotations
@@ -165,6 +159,68 @@ def _shorter_line_overlap_fraction(
     return float(np.mean(np.min(distances, axis=1) <= radius_km))
 
 
+def _dense_km(line: np.ndarray, mean_lat_rad: float,
+              spacing_km: float = 25.0, max_points: int = 240) -> np.ndarray:
+    """Project a line to km, sampled every ``spacing_km`` along itself.
+
+    The fixed 32-point resampling puts a vertex every 100 km on a 3000-km
+    front: nearest-vertex distances between two such lines are then wrong by
+    tens of kilometres, the same order as the hourly gates.
+    """
+    line = np.asarray(line, dtype=float)
+    count = int(np.clip(np.ceil(_length_km(line) / spacing_km) + 1, 16, max_points))
+    return _project_km(_resample(line, count), mean_lat_rad)
+
+
+def _overlap_metrics(line_a: np.ndarray, line_b: np.ndarray,
+                     radius_km: float) -> tuple[float, float]:
+    """Extent-tolerant closeness of two lines.
+
+    Returns the median distance from the shorter line to the longer one and
+    the fraction of the shorter line lying within ``radius_km`` of it.  A
+    synoptic front is detected over a different extent every hour (2900 km,
+    then 1850 km, then 2760 km of the same boundary): a symmetric distance
+    reads that as a 100-km jump and ends the identity, although every point
+    of the shorter line still sits on the longer one.
+    """
+    line_a = np.asarray(line_a, dtype=float)
+    line_b = np.asarray(line_b, dtype=float)
+    mean_lat = math_mean_lat(line_a, line_b)
+    a = _dense_km(line_a, mean_lat)
+    b = _dense_km(line_b, mean_lat)
+    shorter, longer = (
+        (a, b) if _length_km(line_a) <= _length_km(line_b) else (b, a)
+    )
+    near = np.min(np.hypot(shorter[:, None, 0] - longer[None, :, 0],
+                           shorter[:, None, 1] - longer[None, :, 1]), axis=1)
+    return float(np.median(near)), float(np.mean(near <= radius_km))
+
+
+def _normal_shift_deg(previous: np.ndarray, last: np.ndarray,
+                      hours: float) -> np.ndarray:
+    """Displacement (deg lon, deg lat) of a line between two detections.
+
+    Measured point-to-nearest-point where the two lines overlap, so it is the
+    motion ACROSS the line.  Matching points by index instead turns a change
+    of extent into a fictitious slide of hundreds of kilometres along the
+    front, and the prediction built on it misses the next detection.
+    """
+    previous = np.asarray(previous, dtype=float)
+    last = np.asarray(last, dtype=float)
+    mean_lat = math_mean_lat(previous, last)
+    a = _dense_km(previous, mean_lat)
+    b = _dense_km(last, mean_lat)
+    gaps = np.hypot(a[:, None, 0] - b[None, :, 0], a[:, None, 1] - b[None, :, 1])
+    nearest = np.argmin(gaps, axis=1)
+    near = gaps[np.arange(len(a)), nearest]
+    keep = near <= 120.0 * max(float(hours), 1.0)
+    if np.mean(keep) < 0.30:
+        return np.zeros(2)
+    shift_km = np.median(b[nearest[keep]] - a[keep], axis=0)
+    scale_lon = EARTH_KM_PER_DEG * max(np.cos(mean_lat), 0.25)
+    return np.array([shift_km[0] / scale_lon, shift_km[1] / EARTH_KM_PER_DEG])
+
+
 def math_mean_lat(*lines: np.ndarray) -> float:
     lats = np.concatenate([line[:, 1] for line in lines])
     return float(np.deg2rad(np.mean(lats)))
@@ -260,9 +316,10 @@ class Track:
         prev = self.lines[self.hours[-2]]["coordinates"]
         dt_hist = self.hours[-1] - self.hours[-2]
         dt_pred = hour - self.hours[-1]
-        # rigid translation by the median point displacement
-        a, b = _aligned_resample(prev, last)
-        shift = np.median(b - a, axis=0) * (dt_pred / max(dt_hist, 1))
+        # rigid translation by the median cross-line displacement
+        shift = _normal_shift_deg(prev, last, dt_hist) * (
+            dt_pred / max(dt_hist, 1)
+        )
         return last + shift
 
 
@@ -270,12 +327,15 @@ def _assignment_cost(track: Track, candidate: dict, hour: int,
                      gate_km: float) -> float:
     predicted = track.predicted_line(hour)
     line = candidate["coordinates"]
-    distance = _symmetric_distance_km(predicted, line)
     gap_hours = max(hour - track.last_hour(), 1)
     # An hourly front cannot jump 250 km. Keep a hard ceiling for sparse
     # 6-hour steps while using a physical gate for ICON's hourly sequence.
     physical_gate = min(gate_km, 45.0 + 35.0 * gap_hours)
-    if distance > physical_gate:
+    # Distance from the shorter line to the longer: the same boundary seen
+    # over a different extent is still the same boundary.  At least half of
+    # the shorter line must lie on the longer one.
+    distance, shared = _overlap_metrics(predicted, line, physical_gate)
+    if distance > physical_gate or shared < 0.50:
         return np.inf
     # Symmetric nearest-line distance is insufficient for long fronts: two
     # disjoint fragments can sit on the same axis and look deceptively close
@@ -359,12 +419,12 @@ def _stitch_cost(a: "Track", b: "Track", max_gap: int) -> float:
     Returns +inf when any condition fails.
     """
     gap = b.hours[0] - a.hours[-1]
-    # Only a single missing hour (an isolated detection dropout). A larger
-    # gap, or two tracks in adjacent/overlapping hours (gap 1 = no missing
-    # hour), are distinct identities and must not be fused.
-    if gap != 2 or gap > max_gap:
+    # Up to ``max_gap`` missing hours. The same-boundary test is the extent-
+    # tolerant one: most of the shorter line must lie within physical front
+    # travel of the longer, and the cross-line shift is speed-capped.
+    if gap < 1 or gap > max_gap + 1:
         return np.inf
-    return _continuity_cost(
+    return _recovery_cost(
         a.lines[a.hours[-1]]["coordinates"], a.lines[a.hours[-1]]["warmNormal"],
         b.lines[b.hours[0]]["coordinates"], b.lines[b.hours[0]]["warmNormal"],
         gap,
@@ -434,7 +494,9 @@ def _recovery_cost(a_line, a_normal, b_line, b_normal, gap: int) -> float:
     mean_lat = math_mean_lat(a_line, b_line)
     a_km = _project_km(_resample(a_line), mean_lat)
     b_km = _project_km(_resample(b_line), mean_lat)
-    short, long_ = (a_km, b_km) if length_a <= length_b else (b_km, a_km)
+    dense_a = _dense_km(a_line, mean_lat)
+    dense_b = _dense_km(b_line, mean_lat)
+    short, long_ = (dense_a, dense_b) if length_a <= length_b else (dense_b, dense_a)
     gaps = np.hypot(short[:, None, 0] - long_[None, :, 0],
                     short[:, None, 1] - long_[None, :, 1])
     near = np.min(gaps, axis=1)
@@ -595,13 +657,20 @@ def classify_track(track: Track, window_hours: int, wind_sampler=None) -> dict:
             )
     geo_motion = float(np.median(geo_speeds)) if geo_speeds else 0.0
     geo_mad = _finite_median(np.abs(np.asarray(geo_speeds) - geo_motion), 0.0) if geo_speeds else 0.0
-    # A kilometre-scale line jitters by a few kilometres an hour. That jitter
-    # is not a front type: trust the geometric vote only when the median
-    # displacement exceeds both the cold/warm threshold and its own scatter.
-    if geo_speeds and (abs(geo_motion) < max(COLD_WARM_THRESHOLD_KMH, geo_mad)):
-        geo_type = "stationary" if abs(geo_motion) < COLD_WARM_THRESHOLD_KMH else "uncertain"
-    else:
-        geo_type = _type_from_speed(geo_motion)
+    # The net displacement over the whole window divides the line's hourly
+    # jitter (some 10 km) by the elapsed hours instead of keeping it in every
+    # hourly speed: it is the better estimate whenever first and last line
+    # still overlap.
+    if len(hours) >= 3:
+        first_line = track.lines[hours[0]]["coordinates"]
+        last_line = track.lines[hours[-1]]["coordinates"]
+        elapsed = hours[-1] - hours[0]
+        _, shared = _overlap_metrics(first_line, last_line, 60.0 * elapsed)
+        if shared >= 0.5:
+            geo_motion = geometric_motion_kmh(
+                first_line, last_line, track.lines[hours[0]]["warmNormal"], elapsed
+            )
+    geo_type = _type_from_speed(geo_motion) if geo_speeds else None
     if motion_bearings:
         bearing_sine = float(np.mean(np.sin(motion_bearings)))
         bearing_cosine = float(np.mean(np.cos(motion_bearings)))
@@ -662,41 +731,55 @@ def classify_track(track: Track, window_hours: int, wind_sampler=None) -> dict:
         "phase": phase_type,
         "wind": wind_type,
     }
-    available_votes = [
-        value for value in family_votes.values() if value is not None
+    # Three independent estimates of the same quantity -- the speed of the
+    # boundary toward the warm air -- in km/h.  The decision is their MEDIAN:
+    # with three estimates it is the value two of them bracket, so one
+    # family that is wrong (a jittering line, a wind that blows along the
+    # front) cannot decide the type, and cannot veto it either.  The former
+    # rule asked for unanimity and answered "uncertain" at the first
+    # disagreement, which left real fronts without a type.
+    wind_values = [
+        value for value in (ofa_motion, airmass_motion) if np.isfinite(value)
     ]
-    moving = {
-        value for value in available_votes
-        if value not in ("stationary", "uncertain")
+    estimates = {
+        "geometry": geo_motion if geo_speeds else np.nan,
+        "phase": tendency_motion,
+        "wind": float(np.mean(wind_values)) if wind_values else np.nan,
     }
-    has_uncertain = "uncertain" in available_votes
-    counts = {
-        kind: sum(value == kind for value in available_votes)
-        for kind in ("cold", "warm", "stationary")
-    }
-
-    if has_uncertain or len(moving) > 1:
-        front_type, certainty = "uncertain", 0.10
-    elif moving:
-        moving_type = next(iter(moving))
-        opposite = "warm" if moving_type == "cold" else "cold"
-        support = counts[moving_type]
-        # A moving front needs two independent families. A third stationary
-        # family is allowed; an opposite vote is not.
-        if support >= 2 and counts[opposite] == 0:
-            front_type = moving_type
-            certainty = 0.72 + 0.12 * min(support - 2, 1)
-        else:
-            front_type, certainty = "uncertain", 0.24
+    available = [value for value in estimates.values() if np.isfinite(value)]
+    if not available:
+        front_type, certainty, consensus_speed = "uncertain", 0.0, np.nan
     else:
-        if counts["stationary"] >= 2:
-            front_type = "stationary"
-            certainty = 0.76 + 0.08 * min(counts["stationary"] - 2, 1)
+        consensus_speed = float(np.median(available))
+        front_type = _type_from_speed(consensus_speed)
+        types = [_type_from_speed(value) for value in available]
+        agree = sum(value == front_type for value in types)
+        opposite = {"cold": "warm", "warm": "cold"}.get(front_type)
+        against = sum(value == opposite for value in types)
+        moving_types = {value for value in types if value != "stationary"}
+        if len(available) == 2 and len(moving_types) == 2:
+            # Two estimates only, and they say opposite things: there is no
+            # third to bracket a median, and their mean would call a clearly
+            # moving boundary "stationary".  This is the one honest
+            # "uncertain".
+            front_type, certainty = "uncertain", 0.10
+        elif len(available) == 1:
+            certainty = 0.45
+        elif agree == len(available):
+            certainty = 0.84 if len(available) >= 3 else 0.74
+        elif agree >= 2:
+            certainty = 0.56 if against else 0.72
         else:
-            front_type, certainty = "uncertain", 0.24
+            # every family reads something different: the median is still
+            # the best estimate, but it is said to be weak
+            certainty = 0.36
+        # A speed sitting on the cold/warm threshold is a weaker statement
+        # than one well clear of it.
+        margin = abs(abs(consensus_speed) - COLD_WARM_THRESHOLD_KMH)
+        certainty *= 0.80 + 0.20 * float(np.clip(margin / 4.0, 0.0, 1.0))
 
-    # Penalise an unstable OFA sign over the track without allowing a weak
-    # single hour to flip the median classification.
+    # An unstable wind sign over the track lowers the confidence; it does
+    # not erase the type.
     hourly_motion_types = []
     for h in hours:
         ofa_value = track.lines[h].get("ofaSpeedMps", np.nan)
@@ -706,18 +789,11 @@ def classify_track(track: Track, window_hours: int, wind_sampler=None) -> dict:
         if np.isfinite(air_value):
             hourly_motion_types.append(_type_from_speed(float(air_value)))
     if hourly_motion_types and front_type != "uncertain":
-        agreement = float(np.mean([
-            value == front_type or value == "stationary"
-            for value in hourly_motion_types
-        ]))
         contradiction = float(np.mean([
             value not in (front_type, "stationary")
             for value in hourly_motion_types
-        ]))
-        certainty *= 0.55 + 0.45 * agreement
-        if contradiction > 0.20:
-            front_type = "uncertain"
-            certainty = min(certainty, 0.18)
+        ])) if front_type != "stationary" else 0.0
+        certainty *= 1.0 - 0.35 * contradiction
 
     motion_mad = _finite_median(np.abs(np.asarray(geo_speeds) - geo_motion), 0.0)
     return {
@@ -731,6 +807,10 @@ def classify_track(track: Track, window_hours: int, wind_sampler=None) -> dict:
         "tendencyMotionKmh": None if not np.isfinite(tendency_motion) else round(tendency_motion, 1),
         "airmassMotionKmh": None if not np.isfinite(airmass_motion) else round(airmass_motion, 1),
         "motionVotes": family_votes,
+        "consensusMotionKmh": (
+            None if not np.isfinite(consensus_speed)
+            else round(consensus_speed, 1)
+        ),
         "windMotionConflict": bool(wind_conflict),
         "motionMadKmh": round(float(motion_mad), 1),
         "classificationCertainty": round(float(certainty), 2),
@@ -941,76 +1021,262 @@ def _merge_short_runs(labels: list[str], min_run: int) -> list[list]:
     return segments
 
 
+SEGMENT_WINDOW_HOURS = 3
+SEGMENT_MIN_KM = 250.0
+OPPOSITE_SEGMENT_KMH = 8.0
+
+
+def _along_line(values, coordinates: np.ndarray, count: int) -> np.ndarray | None:
+    """Resample a per-vertex quantity to ``count`` points equally spaced
+    along the line (the same points ``_resample`` returns)."""
+    if values is None:
+        return None
+    values = np.asarray(values, dtype=float)
+    coordinates = np.asarray(coordinates, dtype=float)
+    if values.ndim != 1 or len(values) != len(coordinates) or len(values) < 2:
+        return None
+    steps = np.hypot(*np.diff(coordinates, axis=0).T)
+    arc = np.concatenate(([0.0], np.cumsum(steps)))
+    finite = np.isfinite(values)
+    if arc[-1] <= 0.0 or int(np.count_nonzero(finite)) < 2:
+        return None
+    targets = np.linspace(0.0, arc[-1], count)
+    out = np.interp(targets, arc[finite], values[finite])
+    # do not invent values far from any finite vertex
+    gap = np.abs(targets[:, None] - arc[finite][None, :]).min(axis=1)
+    out[gap > 0.08 * arc[-1] + 1.0e-9] = np.nan
+    return out
+
+
+def _point_window_motion_kmh(track: Track, hour: int, count: int) -> np.ndarray | None:
+    """Per-point speed toward the warm air from the track's own displacement.
+
+    Each point of the line at ``hour`` is located on the same track up to
+    ``SEGMENT_WINDOW_HOURS`` earlier and later; the net displacement between
+    those two detections, along the local warm-ward normal, is its speed.
+    Six hours of travel dwarf the hourly jitter of the line that makes a
+    single-hour displacement useless point by point.
+    """
+    inside = [h for h in track.hours if abs(h - hour) <= SEGMENT_WINDOW_HOURS]
+    if len(inside) < 2 or inside[-1] == inside[0]:
+        return None
+    h_from, h_to = inside[0], inside[-1]
+    line = np.asarray(track.lines[hour]["coordinates"], dtype=float)
+    line_from = np.asarray(track.lines[h_from]["coordinates"], dtype=float)
+    line_to = np.asarray(track.lines[h_to]["coordinates"], dtype=float)
+    mean_lat = math_mean_lat(line, line_from, line_to)
+    here = _project_km(_resample(line, count), mean_lat)
+    before = _dense_km(line_from, mean_lat)
+    after = _dense_km(line_to, mean_lat)
+    normal = _resample_vectors(
+        np.asarray(track.lines[hour]["warmNormal"], dtype=float), count
+    )
+    scale_lon = EARTH_KM_PER_DEG * np.cos(mean_lat)
+    normal_km = np.column_stack((normal[:, 0] * scale_lon,
+                                 normal[:, 1] * EARTH_KM_PER_DEG))
+    normal_km /= np.maximum(np.hypot(*normal_km.T)[:, None], 1.0e-9)
+    gap_before = np.hypot(here[:, None, 0] - before[None, :, 0],
+                          here[:, None, 1] - before[None, :, 1])
+    gap_after = np.hypot(here[:, None, 0] - after[None, :, 0],
+                         here[:, None, 1] - after[None, :, 1])
+    i_before = np.argmin(gap_before, axis=1)
+    i_after = np.argmin(gap_after, axis=1)
+    rows = np.arange(count)
+    reach_before = 60.0 + 60.0 * abs(hour - h_from)
+    reach_after = 60.0 + 60.0 * abs(h_to - hour)
+    valid = (
+        (gap_before[rows, i_before] <= reach_before)
+        & (gap_after[rows, i_after] <= reach_after)
+    )
+    travel = np.sum((after[i_after] - before[i_before]) * normal_km, axis=1)
+    speed = travel / float(h_to - h_from)
+    speed[~valid] = np.nan
+    return speed
+
+
+def _point_consensus_kmh(
+    track: Track, hour: int, count: int
+) -> tuple[np.ndarray | None, int]:
+    """Per-point median of the geometric, phase and wind speed estimates.
+
+    Also returns how many independent families contributed.
+    """
+    candidate = track.lines[hour]
+    coordinates = candidate["coordinates"]
+    families = []
+    geometric = _point_window_motion_kmh(track, hour, count)
+    if geometric is not None:
+        families.append(geometric)
+    phase = _along_line(candidate.get("pointTendencyKmh"), coordinates, count)
+    if phase is not None:
+        families.append(phase)
+    wind_parts = [
+        part for part in (
+            _along_line(candidate.get("pointAirmassKmh"), coordinates, count),
+            _along_line(candidate.get("pointOfaKmh"), coordinates, count),
+        ) if part is not None
+    ]
+    if wind_parts:
+        with np.errstate(invalid="ignore"):
+            families.append(np.nanmean(np.stack(wind_parts), axis=0))
+    if not families:
+        return None, 0
+    stack = np.stack(families)
+    finite = np.isfinite(stack)
+    if not np.any(finite):
+        return None, 0
+    speed = np.full(stack.shape[1], np.nan)
+    some = np.any(finite, axis=0)
+    speed[some] = np.nanmedian(stack[:, some], axis=0)
+    # running mean along the line (about an eighth of its length): the type
+    # of a stretch, not of a point
+    radius = max(1, int(round(count * 0.06)))
+    smoothed = np.full(count, np.nan)
+    for index in range(count):
+        window = speed[max(0, index - radius):index + radius + 1]
+        if np.any(np.isfinite(window)):
+            smoothed[index] = float(np.nanmean(window))
+    return smoothed, len(families)
+
+
 def segment_types_for_track(
     track: Track, local: dict[int, dict],
-    *, count: int = 40, min_segment_fraction: float = 0.22,
+    *, count: int = 40, min_segment_fraction: float = 0.12,
 ) -> dict[int, list[dict]]:
     """Classify each hour's line into contiguous cold/warm/stationary segments.
 
-    A long boundary can be cold on one end and quasi-stationary on the other
-    at the SAME hour. This returns, per hour, segments as normalised
-    arc-length ranges [start, end] with a type and certainty, so the geometry
-    stays one continuous line while the character varies along it. Falls back
-    to a single segment (the hour's temporal type) where per-point motion is
-    unavailable.
+    One air-mass boundary is routinely a warm front ahead of a wave and a
+    cold front behind it, or cold on one end and quasi-stationary on the
+    other, at the SAME hour.  A single label for 2500 km of line is then
+    wrong for most of it.  This returns, per hour, segments as normalised
+    arc-length ranges [start, end] with a type and a certainty, so the
+    geometry stays one continuous line while its character varies along it.
 
-    The per-point motion of a single hour is noisier than the whole-line
-    consensus, so a segment is **anchored** to the hour's consensus type: a
-    point may become *stationary* (a slowing stretch, physical and common),
-    but it may not flip to the *opposite* moving type (warm on a cold front)
-    unless its local motion is strong and sustained. This removes spurious
-    "warm patch on a cold front" artefacts while keeping real cold->stationary
-    variation.
+    The speed of each point toward the warm air is the median of three
+    estimates (displacement of the track over +-3 h, theta-w phase speed,
+    wind normal to the line), smoothed along the line.  Four guards keep a
+    noisy point from becoming a symbol: a 3-hour majority vote on each
+    point's label, a minimum segment length (250 km and an eighth of the
+    line), a higher speed (8 km/h) for a stretch whose type is OPPOSITE to
+    the line's own -- a warm stretch on a cold front must earn it -- and
+    the requirement of a second, physical family: the displacement of the
+    line alone, whose two ends change length every hour, may slow a stretch
+    to stationary but never turns it into the opposite front.
+    Where no per-point estimate exists the hour's whole-line type is used.
     """
-    min_run = max(2, int(round(min_segment_fraction * count)))
-    # Track-level dominant type: the anchor for hours whose own local
-    # classification is "uncertain" (which the viewer already displays with
-    # the dominant type). Without this, an uncertain hour would not anchor the
-    # segments and a spurious opposite-type patch could survive.
-    local_types = [
+    dominant_types = [
         value.get("frontType") for value in local.values()
         if value.get("frontType") in ("cold", "warm", "stationary")
     ]
     dominant_type = (
-        max(set(local_types), key=local_types.count) if local_types else "uncertain"
+        max(set(dominant_types), key=dominant_types.count)
+        if dominant_types else "uncertain"
     )
-    result: dict[int, list[dict]] = {}
+    speeds: dict[int, np.ndarray | None] = {}
+    confirmed: dict[int, bool] = {}
+    labels: dict[int, list[str] | None] = {}
+    points: dict[int, np.ndarray] = {}
+    anchors: dict[int, str] = {}
     for hour in track.hours:
         anchor = local.get(hour, {}).get("frontType", "uncertain")
         if anchor not in ("cold", "warm", "stationary"):
             anchor = dominant_type
-        speeds = _point_motion_kmh(track, hour, count)
-        if speeds is None or not np.all(np.isfinite(speeds)):
+        anchors[hour] = anchor
+        line = np.asarray(track.lines[hour]["coordinates"], dtype=float)
+        points[hour] = _resample(line, count)
+        speed, families = _point_consensus_kmh(track, hour, count)
+        speeds[hour] = speed
+        confirmed[hour] = families >= 2
+        if speed is None:
+            labels[hour] = None
+            continue
+        raw = [
+            _type_from_speed(float(value)) if np.isfinite(value) else anchor
+            for value in speed
+        ]
+        if not confirmed[hour]:
+            if anchor == "stationary":
+                raw = ["stationary"] * count
+            else:
+                opposite = "warm" if anchor == "cold" else "cold"
+                raw = ["stationary" if label == opposite else label for label in raw]
+        labels[hour] = raw
+
+    def neighbour_labels(hour: int, other: int) -> list[str] | None:
+        if labels.get(other) is None or abs(other - hour) > 2:
+            return None
+        mean_lat = math_mean_lat(points[hour], points[other])
+        here = _project_km(points[hour], mean_lat)
+        there = _project_km(points[other], mean_lat)
+        gaps = np.hypot(here[:, None, 0] - there[None, :, 0],
+                        here[:, None, 1] - there[None, :, 1])
+        nearest = np.argmin(gaps, axis=1)
+        reach = 120.0 * abs(other - hour)
+        return [
+            labels[other][j] if gaps[i, j] <= reach else None
+            for i, j in enumerate(nearest)
+        ]
+
+    result: dict[int, list[dict]] = {}
+    ordered = list(track.hours)
+    for position, hour in enumerate(ordered):
+        anchor = anchors[hour]
+        raw = labels[hour]
+        if raw is None:
             result[hour] = [{"start": 0.0, "end": 1.0,
                              "type": anchor, "certainty": 0.3}]
             continue
-        raw = [_type_from_speed(float(s)) for s in speeds]
+        voted = list(raw)
+        around = []
+        if position > 0:
+            around.append(neighbour_labels(hour, ordered[position - 1]))
+        if position + 1 < len(ordered):
+            around.append(neighbour_labels(hour, ordered[position + 1]))
+        around = [item for item in around if item is not None]
+        if around:
+            for index in range(count):
+                ballot = [raw[index]] + [
+                    item[index] for item in around if item[index] is not None
+                ]
+                if len(ballot) >= 3:
+                    voted[index] = max(set(ballot), key=ballot.count)
+        length_km = max(_length_km(track.lines[hour]["coordinates"]), 1.0)
+        min_run = max(2, int(np.ceil(count * max(
+            min_segment_fraction, SEGMENT_MIN_KM / length_km
+        ))))
+        smoothed = _mode_filter(voted, radius=1)
+        segments = _merge_short_runs(smoothed, min(min_run, count))
+        speed = speeds[hour]
         if anchor in ("cold", "warm"):
-            # A single frontal identity does not flip to the OPPOSITE moving
-            # type along its length: that would be another front (or an
-            # occlusion, handled separately). Its character may only weaken to
-            # stationary. So the opposite reading -- noise of one hour's
-            # geometry -- is demoted to stationary; the dominant moving type
-            # and stationary stretches survive.
             opposite = "warm" if anchor == "cold" else "cold"
-            raw = ["stationary" if label == opposite else label for label in raw]
-        elif anchor == "stationary":
-            # A stationary boundary is one exclusive frontal arc.  Local
-            # nearest-point displacement on a changing line extent is too
-            # noisy to turn its opposite ends into simultaneous cold and
-            # warm fronts; such a transition requires a separate tracked
-            # identity or the dedicated occlusion topology.
-            raw = ["stationary"] * len(raw)
-        smoothed = _mode_filter(raw, radius=2)
-        segments = _merge_short_runs(smoothed, min_run)
+            changed = False
+            for start, stop, label in segments:
+                if label != opposite:
+                    continue
+                stretch = speed[start:stop]
+                mean_speed = (
+                    float(np.nanmean(np.abs(stretch)))
+                    if np.any(np.isfinite(stretch)) else 0.0
+                )
+                if mean_speed < OPPOSITE_SEGMENT_KMH:
+                    for index in range(start, stop):
+                        smoothed[index] = "stationary"
+                    changed = True
+            if changed:
+                segments = _merge_short_runs(smoothed, min(min_run, count))
         pieces = []
         for start, stop, label in segments:
             agree = float(np.mean([raw[i] == label for i in range(start, stop)]))
+            stretch = speed[start:stop]
             pieces.append({
                 "start": round(start / count, 3),
                 "end": round(stop / count, 3),
                 "type": label,
                 "certainty": round(agree, 2),
+                "motionKmh": (
+                    round(float(np.nanmean(stretch)), 1)
+                    if np.any(np.isfinite(stretch)) else None
+                ),
             })
         result[hour] = pieces
     return result
@@ -1209,6 +1475,35 @@ def _quality_score(track: Track, classification: dict, window_hours: int) -> dic
 # --------------------------------------------------------------------------
 # public API
 # --------------------------------------------------------------------------
+PERSISTENT_ANCHOR_HOURS = 6
+PERSISTENT_ANCHOR_LENGTH_KM = 500.0
+
+
+def _persistent_anchor(track: "Track") -> bool:
+    """A long, long-lived, thermally sharp boundary anchors itself.
+
+    The "strong" grade asks for wind shift, pressure trough and low-level
+    agreement all at once.  A slow warm or quasi-stationary front lying along
+    the flow has little of the first two for its whole life, yet it separates
+    two air masses by several kelvin over a thousand kilometres for a day.
+    Persistence, length and the air-mass contrast itself are the evidence a
+    forecaster uses for such a front; noise does not hold all three for six
+    hours.
+    """
+    hours = track.hours
+    if len(hours) < PERSISTENT_ANCHOR_HOURS:
+        return False
+    def median(key):
+        return _finite_median([track.lines[h].get(key, np.nan) for h in hours])
+    return bool(
+        median("lengthKm") >= PERSISTENT_ANCHOR_LENGTH_KM
+        and median("deltaThetaW") >= 1.55
+        and median("deltaTemperature") >= 0.80
+        and median("dryThermalGradient") >= 0.95
+        and median("thermalAlignment") >= 0.50
+    )
+
+
 def track_fronts(
     hourly_candidates: dict[int, list],
     *,
@@ -1291,7 +1586,10 @@ def track_fronts(
             h for h in track.hours
             if track.lines[h].get("gateStatus", "strong") == "strong"
         ]
-        if len(strong_hours) < max(1, int(min_strong_detections)):
+        if (
+            len(strong_hours) < max(1, int(min_strong_detections))
+            and not _persistent_anchor(track)
+        ):
             continue
         expected = [h for h in available if track.hours[0] <= h <= track.hours[-1]]
         if len(track.hours) / max(len(expected), 1) < min_coverage:

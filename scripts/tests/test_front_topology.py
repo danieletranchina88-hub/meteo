@@ -21,7 +21,8 @@ def line(lon0, lon1, lat=42.0, count=30):
 
 ok = True
 
-# A) A cold arc may weaken to stationary, never become warm on one end.
+# A) A frontal wave is one boundary: its cold and warm stretches both stay,
+# and the main label is the type that covers most of the arc.
 cold = {
     "frontType": "cold",
     "segmentTypes": [
@@ -31,9 +32,9 @@ cold = {
 }
 top.cohere_feature_type(cold)
 cold_labels = {item["type"] for item in cold["segmentTypes"]}
-print(f"A) tipo esclusivo cold: {cold_labels}")
-if cold_labels != {"cold", "stationary"} or cold["frontType"] != "cold":
-    print("  FAIL: il segno opposto deve diventare stazionario")
+print(f"A) onda frontale, tratti: {cold_labels}, tipo principale {cold['frontType']}")
+if cold_labels != {"cold", "warm"} or cold["frontType"] != "warm":
+    print("  FAIL: i due tratti devono restare e il tipo seguire il tratto piu' lungo")
     ok = False
 
 # B) If trimming retained only a stationary stretch, metadata follows it.

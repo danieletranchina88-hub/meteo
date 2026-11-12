@@ -387,6 +387,73 @@ def record_source_asset(
     inventory.append(record)
 
 
+ICON_EU_FRONTS_FILE = os.environ.get("ICON_EU_FRONTS", "icon_eu_fronts.json")
+# Un run di ICON-EU piu' vecchio di cosi' rispetto a ICON-2I non descrive piu'
+# la stessa atmosfera: meglio i fronti di ICON-2I che fronti di ieri.
+ICON_EU_MAX_RUN_LAG_HOURS = 18
+
+
+def load_icon_eu_fronts(run_dt, path=None):
+    """Fronti sinottici di ICON-EU prodotti da ``icon_eu_fronts.py``.
+
+    Restituisce ``(per_ora_di_validita, informazioni)`` oppure ``({}, None)``
+    quando il file manca, e' illeggibile o appartiene a un run troppo vecchio
+    o successivo a quello di ICON-2I: in tutti questi casi la pipeline usa i
+    fronti di ICON-2I, come prima.  L'abbinamento e' per ora di validita',
+    quindi funziona anche quando i due modelli non hanno lo stesso run.
+    """
+    path = path or ICON_EU_FRONTS_FILE
+    if not os.path.exists(path):
+        print("2a-bis. Fronti ICON-EU non disponibili: uso ICON-2I.", flush=True)
+        return {}, None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+        eu_run = datetime.strptime(
+            payload["runTime"], "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=timezone.utc)
+        hours = payload["hours"]
+        if payload.get("schemaVersion") != 1 or not isinstance(hours, dict):
+            raise ValueError("schema non riconosciuto")
+    except Exception as error:
+        print(f"2a-bis. Fronti ICON-EU illeggibili ({error}): uso ICON-2I.", flush=True)
+        return {}, None
+    reference = run_dt if run_dt.tzinfo else run_dt.replace(tzinfo=timezone.utc)
+    lag_hours = (reference - eu_run).total_seconds() / 3600.0
+    if lag_hours < 0 or lag_hours > ICON_EU_MAX_RUN_LAG_HOURS:
+        print(
+            f"2a-bis. Fronti ICON-EU del run {payload['runTime']} non "
+            f"abbinabili a ICON-2I ({lag_hours:+.0f} h): uso ICON-2I.",
+            flush=True,
+        )
+        return {}, None
+    usable = {
+        valid_time: collection
+        for valid_time, collection in hours.items()
+        if isinstance(collection, dict)
+        and isinstance(collection.get("features"), list)
+        and (collection.get("properties") or {}).get("analysisStatus")
+        not in (None, "unavailable")
+    }
+    info = {
+        "model": payload.get("model", "ICON-EU"),
+        "runTime": payload["runTime"],
+        "method": payload.get("method"),
+        "runLagHours": round(lag_hours, 1),
+        "analysisGridKm": payload.get("analysisGridKm"),
+        "analysisBounds": payload.get("analysisBounds"),
+        "publishBox": payload.get("publishBox"),
+        "analysisSummary": payload.get("analysisSummary", {}),
+        "pipelineByHour": payload.get("pipelineByHour", {}),
+    }
+    print(
+        f"2a-bis. Fronti ICON-EU: run {payload['runTime']}, "
+        f"{len(usable)} ore utilizzabili.",
+        flush=True,
+    )
+    return usable, info
+
+
 def prepare_icon_front_analyzer(run_dt, source_inventory=None, raw_archive=None):
     """Build the ICON-2I-only, hourly, multilayer frontal analysis.
 
@@ -1803,6 +1870,10 @@ def process_data():
             "analisi frontale ICON-2I obbligatoria non disponibile; "
             "mantengo l'ultima pubblicazione valida"
         )
+    # I fronti sono di scala sinottica: quando c'e', li si prende da ICON-EU,
+    # che contiene il fronte intero.  ICON-2I resta il ripiego ora per ora.
+    icon_eu_fronts, icon_eu_front_info = load_icon_eu_fronts(run_dt)
+    front_source_hours = {"ICON-EU": 0, "ICON-2I": 0}
     icon_hazard_fields = prepare_icon_hazard_fields(
         run_dt, source_inventory=source_inventory, raw_archive=raw_archive
     )
@@ -2069,13 +2140,24 @@ def process_data():
                 front_level = None
                 front_valid_time = None
 
-                if icon_front_analyzer is not None:
+                eu_collection = icon_eu_fronts.get(iso_date)
+                if eu_collection is not None:
+                    fronts = eu_collection
+                    front_method = (
+                        icon_eu_front_info.get("method") or ICON_FRONT_METHOD
+                    )
+                    front_source = "ICON-EU"
+                    front_level = "850 hPa"
+                    front_valid_time = iso_date
+                    front_source_hours["ICON-EU"] += 1
+                elif icon_front_analyzer is not None:
                     try:
                         fronts = icon_front_analyzer.analyze(step_hours)
                         front_method = ICON_FRONT_METHOD
                         front_source = "ICON-2I"
                         front_level = "850 hPa"
                         front_valid_time = iso_date
+                        front_source_hours["ICON-2I"] += 1
                     except Exception as front_error:
                         print(
                             f" front-{step_hours}h:{front_error}",
@@ -2849,6 +2931,7 @@ def process_data():
                     front_qc_hours.append({
                         "leadHours": step_hours,
                         "validTime": iso_date,
+                        "frontSource": front_source,
                         "analysisStatus": front_analysis_status,
                         "analysisMessage": front_analysis_message,
                         "frontCount": len(fronts.get("features", [])),
@@ -2992,6 +3075,10 @@ def process_data():
                 "method": ICON_FRONT_METHOD,
                 "analysisSummary": front_analysis_summary,
                 "pipelineByHour": front_pipeline_diagnostics,
+                # Da quale modello vengono i fronti pubblicati, ora per ora:
+                # ICON-EU quando disponibile, altrimenti ICON-2I.
+                "frontSourceHours": front_source_hours,
+                "iconEu": icon_eu_front_info,
                 "hours": front_qc_hours,
             },
         )

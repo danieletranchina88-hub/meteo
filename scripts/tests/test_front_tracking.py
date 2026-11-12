@@ -142,17 +142,45 @@ if len(tr_gapped) != 2:
     print("  FAIL: una traccia non deve sopravvivere oltre la finestra di 3 ore")
     ok = False
 
-# G) Strongly opposing wind must invalidate a cold/warm classification ------
+# G) Two families against one: the line moves toward the warm air and the
+# theta-w tendency says the same, the wind says the opposite. The type is the
+# one two independent estimates agree on, with a confidence that shows the
+# disagreement -- not a front left without a type.
 conflict = moving_front_candidates(lambda h: 45.0 - (h - 6) * 0.30)
 for candidates in conflict.values():
     for candidate in candidates:
         candidate["airmassMotionKmh"] = -25.0
         candidate["ofaSpeedMps"] = 25.0 / 3.6
 tr_conflict = ft.track_fronts(conflict, window_hours=1, min_lifetime_hours=6)
-print(f"G) moto geometrico freddo ma vento caldo: "
-      f"{tr_conflict[0]['frontType'] if tr_conflict else 'nessuna traccia'}")
-if not tr_conflict or tr_conflict[0]["frontType"] != "uncertain":
-    print("  FAIL: una classificazione contraddetta dal vento non va pubblicata")
+agreeing = ft.track_fronts(
+    moving_front_candidates(lambda h: 45.0 - (h - 6) * 0.30),
+    window_hours=1, min_lifetime_hours=6,
+)
+print(f"G) linea e tendenza fredde, vento caldo: "
+      f"{tr_conflict[0]['frontType'] if tr_conflict else 'nessuna traccia'} "
+      f"certezza {tr_conflict[0]['classificationCertainty'] if tr_conflict else '-'} "
+      f"(concordi: {agreeing[0]['classificationCertainty'] if agreeing else '-'})")
+if not tr_conflict or tr_conflict[0]["frontType"] != "cold":
+    print("  FAIL: due stime indipendenti concordi devono decidere il tipo")
+    ok = False
+elif not (tr_conflict[0]["classificationCertainty"] < 0.5
+          < agreeing[0]["classificationCertainty"]):
+    print("  FAIL: il disaccordo del vento deve abbassare la certezza")
+    ok = False
+
+# G2) Only two estimates, flatly opposed: no median exists, the type is
+# honestly unknown.
+opposed = moving_front_candidates(lambda h: 45.0 - (h - 6) * 0.30)
+for candidates in opposed.values():
+    for candidate in candidates:
+        candidate["airmassMotionKmh"] = -25.0
+        candidate["ofaSpeedMps"] = 25.0 / 3.6
+        candidate["tendencyMotionKmh"] = float("nan")
+tr_opposed = ft.track_fronts(opposed, window_hours=1, min_lifetime_hours=6)
+print(f"G2) solo linea contro vento: "
+      f"{tr_opposed[0]['frontType'] if tr_opposed else 'nessuna traccia'}")
+if not tr_opposed or tr_opposed[0]["frontType"] != "uncertain":
+    print("  FAIL: due sole stime opposte non possono dare un tipo")
     ok = False
 
 # H) One marginal hour may continue a strong identity without deleting it --
