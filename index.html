@@ -2719,7 +2719,7 @@
                                     <tr><th>Nubi</th><td>cirri → strati → nembostrati</td><td>strati bassi</td><td>schiarite con strati</td></tr>
                                       <tr><th>Fenomeni</th><td>pioggia debole e diffusa</td><td>pioggia fine e fitta</td><td>in esaurimento</td></tr>
                                       </table>
-                                      <p class="front-guide-note">Direzione del vento, nubi e precipitazioni dipendono dall'assetto sinottico e dall'orografia: le tabelle non sono regole deterministiche. Le linee sono analisi oggettive del singolo run ICON-2I, non fronti osservati né un'analisi ufficiale.</p>
+                                      <p class="front-guide-note">Direzione del vento, nubi e precipitazioni dipendono dall'assetto sinottico e dall'orografia: le tabelle non sono regole deterministiche. Le linee sono diagnostiche del modello indicato sulla mappa. Il tratteggio segnala un fronte probabile o un tratto ricostruito, i cerchi indicano un tipo indeterminato.</p>
                                     </details>
           </section>
 
@@ -4788,11 +4788,12 @@
         const tratto = trattoDelFronte(best.feature, best.index, best.t);
         const tipoVicino = tratto && FRONT_TYPE_NAMES[tratto.type] ? tratto.type : props.frontType;
         const typeName = FRONT_TYPE_NAMES[tipoVicino] || tipoVicino;
-        const motion = tratto && Number.isFinite(Number(tratto.motionKmh)) && tratto.motionKmh !== null
-          ? Number(tratto.motionKmh)
-          : (Number(props.motionKmh) || 0);
-        let movement = "quasi stazionario";
-        if (Math.abs(motion) >= 5) {
+        const velocita = (tratto && tratto.motionKmh) ?? props.consensusMotionKmh ?? props.motionKmh;
+        const motion = velocita == null ? NaN : Number(velocita);
+        let movement = "moto indeterminato";
+        if (tipoVicino !== "uncertain" && Number.isFinite(motion) && Math.abs(motion) < 5) {
+          movement = "quasi stazionario";
+        } else if (tipoVicino !== "uncertain" && Number.isFinite(motion)) {
           const approaching = (motion > 0 && best.warmSide) || (motion < 0 && !best.warmSide);
           movement = (approaching ? "in avvicinamento" : "in allontanamento") +
             " (" + Math.abs(Math.round(motion)) + " km/h)";
@@ -4802,14 +4803,17 @@
         let text = typeName + (character ? " " + character : "") + " a " + Math.round(best.distance) + " km · " + movement;
         if (props.lifetimeH) text += " · vita " + props.lifetimeH + " h";
         const existence = Number(props.existenceConfidence);
-        const typeConfidence = Number(props.typeConfidence);
+        const typeConfidence = props.typeConfidence == null ? NaN : Number(props.typeConfidence);
         const positionSpread = Number(props.positionUncertaintyKm);
         if (Number.isFinite(existence)) {
           text += " · supporto esistenza " + Math.round(existence * 100) + "/100";
         }
-        if (Number.isFinite(typeConfidence)) {
+        if (tratto && Number.isFinite(tratto.certainty)) {
+          text += " · accordo sul tratto " + Math.round(tratto.certainty * 100) + "/100";
+        } else if (Number.isFinite(typeConfidence)) {
           text += " · certezza tipo " + Math.round(typeConfidence * 100) + "/100";
         }
+        if (fronteProbabile(props, tipoVicino, tratto)) text += " · probabile";
         if (Number.isFinite(positionSpread)) {
           text += " · disaccordo localizzatori " + Math.round(positionSpread) + " km";
         }
@@ -4838,9 +4842,8 @@
         if (!Array.isArray(tratti) || !tratti.length || !coords || coords.length < 2) return null;
         let prima = 0, totale = 0;
         for (let i = 0; i < coords.length - 1; i += 1) {
-          const kmLon = 111.32 * Math.cos((coords[i][1] + coords[i + 1][1]) * Math.PI / 360);
-          const passo = Math.hypot((coords[i + 1][0] - coords[i][0]) * kmLon,
-            (coords[i + 1][1] - coords[i][1]) * 111.32);
+          const passo = Math.hypot(coords[i + 1][0] - coords[i][0],
+            coords[i + 1][1] - coords[i][1]);
           if (i < indice) prima += passo;
           else if (i === indice) prima += passo * t;
           totale += passo;
@@ -14505,14 +14508,12 @@
         // is a drawing parameter, so refusing a bad one here is cheaper than
         // trusting every caller.
         if (!Number.isFinite(spacing) || spacing < 1) return;
-        let remaining = Number.isFinite(offset) ? offset : 0;
-        let symbolIndex = 0;
-        // Zoomed far in, one front spans millions of screen pixels and the
-        // walk would place tens of thousands of symbols, almost all of them
-        // off screen. The visible line can hold only so many.
-        const symbolBudget = Math.ceil(
-          (window.innerWidth + window.innerHeight) / spacing
-        ) * 8 + 64;
+        const first = Number.isFinite(offset) ? offset : 0;
+        let distance = 0;
+        const viewport = [[-18, window.innerWidth + 18], [70, window.innerHeight + 18]];
+        let midpoint = null;
+        let visibleLength = 0;
+        let drawn = 0;
         for (let index = 1; index < points.length; index += 1) {
           const start = points[index - 1];
           const end = points[index];
@@ -14521,20 +14522,42 @@
           const length = Math.hypot(dx, dy);
           if (!Number.isFinite(length) || length < 1) continue;
 
-          while (remaining <= length) {
-            if (symbolIndex >= symbolBudget) return;
-            const fraction = remaining / length;
-            callback(
-              start.x + dx * fraction,
-              start.y + dy * fraction,
-              Math.atan2(dy, dx),
-              symbolIndex
-            );
-            symbolIndex += 1;
-            remaining += spacing;
+          // Calcola quali posizioni cadono in vista prima di emettere i simboli.
+          // Il passo e la parità restano quelli dell'intero tratto a ogni zoom.
+          let low = 0;
+          let high = 1;
+          [dx, dy].forEach(function (delta, axis) {
+            const origin = axis === 0 ? start.x : start.y;
+            const [min, max] = viewport[axis];
+            if (delta === 0) {
+              if (origin < min || origin > max) high = -1;
+              return;
+            }
+            const a = (min - origin) / delta;
+            const b = (max - origin) / delta;
+            low = Math.max(low, Math.min(a, b));
+            high = Math.min(high, Math.max(a, b));
+          });
+          if (high > low) {
+            const angle = Math.atan2(dy, dx);
+            const begin = Math.max(0, Math.ceil((distance + low * length - first) / spacing));
+            const endIndex = Math.ceil((distance + high * length - first) / spacing);
+            for (let n = begin; n < endIndex; n += 1) {
+              const t = (first + n * spacing - distance) / length;
+              callback(start.x + dx * t, start.y + dy * t, angle, n);
+              drawn += 1;
+            }
+            const span = (high - low) * length;
+            if (span > visibleLength) {
+              const t = (low + high) / 2;
+              midpoint = [start.x + dx * t, start.y + dy * t, angle, 0];
+              visibleLength = span;
+            }
           }
-          remaining -= length;
+          distance += length;
         }
+        // Anche un tratto più corto del passo ha un simbolo.
+        if (!drawn && midpoint) callback(...midpoint);
       }
 
       // Front cartography scales with the map, the way a hand-drawn chart
@@ -14625,84 +14648,55 @@
         vectorContext.restore();
       }
 
-      function strokeFrontLine(points, frontType, alpha, scale) {
+      function strokeFrontLine(points, frontType, alpha, scale, probable) {
         const s = scale || 1;
+        vectorContext.save();
         vectorContext.beginPath();
         points.forEach(function (point, index) {
           if (index === 0) vectorContext.moveTo(point.x, point.y);
           else vectorContext.lineTo(point.x, point.y);
         });
         vectorContext.globalAlpha = alpha;
-        vectorContext.strokeStyle = frontHaloColour();
-        vectorContext.lineWidth = 5.4 * s;
-        vectorContext.stroke();
 
-        if (frontType === "uncertain") {
-          vectorContext.save();
-          vectorContext.setLineDash([8 * s, 7 * s]);
-          vectorContext.strokeStyle = frontInk("uncertain");
-          vectorContext.lineWidth = 2.7 * s;
+        if (frontType === "stationary") {
+          // Le bande di colore hanno la stessa fase anche col tratteggio.
+          const band = Math.max(28 * s, 1);
+          const painted = probable ? 20 * s : band;
+          vectorContext.lineCap = "butt";
+          vectorContext.setLineDash([painted, 2 * band - painted]);
+          vectorContext.lineDashOffset = 0;
+          vectorContext.strokeStyle = frontHaloColour();
+          vectorContext.lineWidth = 5.4 * s;
           vectorContext.stroke();
-          vectorContext.restore();
-          vectorContext.globalAlpha = 1;
-          return;
-        }
-
-        if (frontType === "occluded") {
-          vectorContext.strokeStyle = frontInk("occluded");
+          vectorContext.lineDashOffset = band;
+          vectorContext.stroke();
+          vectorContext.lineWidth = 2.9 * s;
+          vectorContext.strokeStyle = frontInk("warm");
+          vectorContext.stroke();
+          vectorContext.lineDashOffset = 0;
+          vectorContext.strokeStyle = frontInk("cold");
+          vectorContext.stroke();
+        } else {
+          vectorContext.setLineDash(probable || frontType === "uncertain" ? [16 * s, 8 * s] : []);
+          vectorContext.strokeStyle = frontHaloColour();
+          vectorContext.lineWidth = 5.4 * s;
+          vectorContext.stroke();
+          vectorContext.strokeStyle = frontInk(frontType);
           vectorContext.lineWidth = 2.9 * s;
           vectorContext.stroke();
-          vectorContext.globalAlpha = 1;
-          return;
         }
-
-        if (frontType !== "stationary") {
-          vectorContext.strokeStyle = frontInk(frontType === "cold" ? "cold" : "warm");
-          vectorContext.lineWidth = 2.9 * s;
-          vectorContext.stroke();
-          vectorContext.globalAlpha = 1;
-          return;
-        }
-
-        // Stationary front: alternating blue and red bands along the line.
-        // Drawn with the canvas dash pattern rather than by walking the line
-        // band by band. The walk used to accumulate a distance and take its
-        // modulo against the band length, and that is not safe in floating
-        // point: with a band of 21.84 px the accumulated distance reached
-        // 65.52, the remainder came out as 21.84 minus 3.6e-15, and the next
-        // step was 3.6e-15 -- too small to change a number of magnitude 65.
-        // The loop then advanced by nothing, for ever, and the page froze the
-        // moment a stationary front was on screen.
-        //
-        // The dash pattern has no accumulator to lose precision in, and it
-        // costs two strokes instead of one per band, so the work no longer
-        // grows with how far the line is zoomed in.
-        const bandLength = Math.max(28 * s, 1);
-        vectorContext.save();
-        // Butt caps keep the colour change exactly on the band boundary;
-        // round caps would let each band bleed over its neighbour.
-        vectorContext.lineCap = "butt";
-        vectorContext.setLineDash([bandLength, bandLength]);
-        vectorContext.lineWidth = 2.9 * s;
-        vectorContext.strokeStyle = frontInk("cold");
-        vectorContext.lineDashOffset = 0;
-        vectorContext.stroke();
-        vectorContext.strokeStyle = frontInk("warm");
-        vectorContext.lineDashOffset = bandLength;
-        vectorContext.stroke();
         vectorContext.restore();
-        vectorContext.globalAlpha = 1;
       }
 
-      // Extract the sub-polyline between two arc-length fractions [t0, t1] of
-      // a projected front line, interpolating the boundary vertices so a
-      // segment starts and ends exactly where its fraction says.
-      function frontSlice(points, t0, t1) {
+      // Le frazioni dei tratti sono misurate nella geometria di origine,
+      // anche quando la proiezione o il rilievo ne cambia la lunghezza a video.
+      function frontSlice(points, t0, t1, coordinates) {
         if (points.length < 2) return points.slice();
         const cumulative = [0];
         for (let i = 1; i < points.length; i += 1) {
           cumulative.push(cumulative[i - 1] +
-            Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y));
+            Math.hypot(coordinates[i][0] - coordinates[i - 1][0],
+              coordinates[i][1] - coordinates[i - 1][1]));
         }
         const total = cumulative[cumulative.length - 1] || 1;
         const d0 = t0 * total;
@@ -14736,16 +14730,15 @@
       // cold front advances), warm bumps into the cold air, an occluded
       // front carries both on the same side, and a stationary front carries
       // them on opposite sides -- exactly as they are drawn by hand.
-      function drawFrontStyled(points, frontType, alpha, scale) {
+      function drawFrontStyled(points, frontType, alpha, scale, probable = false) {
         if (points.length < 2) return;
         const s = scale || frontDrawScale();
-        strokeFrontLine(points, frontType, alpha, s);
+        strokeFrontLine(points, frontType, alpha, s, probable);
         // Spacing scales with the symbols so the rhythm of the line stays
         // constant: symbols that grow without their spacing growing end up
         // overlapping into a solid band.
         const spacing = (isMobile() ? 48 : 54) * s;
         walkFront(points, spacing, 25 * s, function (x, y, angle, index) {
-          if (x < -18 || x > window.innerWidth + 18 || y < 70 || y > window.innerHeight + 18) return;
           if (frontType === "cold") {
             drawFrontTriangle(x, y, angle, frontInk("cold"), alpha, s);
           } else if (frontType === "warm") {
@@ -14760,8 +14753,29 @@
             drawFrontTriangle(x, y, angle, frontInk("cold"), alpha, s);
           } else if (frontType === "stationary") {
             drawFrontSemicircle(x, y, angle, frontInk("warm"), alpha, s);
+          } else {
+            // Il cerchio indica tipo indeterminato, senza suggerire un verso.
+            vectorContext.save();
+            vectorContext.globalAlpha = alpha;
+            vectorContext.beginPath();
+            vectorContext.arc(x, y, 4 * s, 0, 2 * Math.PI);
+            vectorContext.fillStyle = frontHaloColour();
+            vectorContext.fill();
+            vectorContext.strokeStyle = frontInk("uncertain");
+            vectorContext.lineWidth = 2.4 * s;
+            vectorContext.stroke();
+            vectorContext.restore();
           }
         });
+      }
+
+      function fronteProbabile(properties, frontType, segment) {
+        // 0,36 è il confine già usato nella scheda per l'incertezza bassa.
+        // Sul tratto il voto deve avere almeno la maggioranza dei punti.
+        return frontType === "uncertain" || Boolean(properties.interpolated)
+          || Boolean(properties.typeInferredFromTrack)
+          || (Number(properties.uncertaintyIndex) > 0.36)
+          || (segment != null && Number.isFinite(segment.certainty) && segment.certainty <= 0.5);
       }
 
       function drawFrontsCanvas() {
@@ -14815,12 +14829,13 @@
               const t0 = Number(seg.start) || 0;
               const t1 = Number(seg.end);
               if (!(t1 > t0)) return;
-              const segType = ["cold", "warm", "stationary", "occluded"].includes(seg.type)
-                ? seg.type : frontType;
-              drawFrontStyled(frontSlice(points, t0, t1), segType, alpha, drawScale);
+              const segType = FRONT_TYPE_NAMES[seg.type] ? seg.type : frontType;
+              drawFrontStyled(frontSlice(points, t0, t1, coordinates), segType, alpha, drawScale,
+                fronteProbabile(properties, segType, seg));
             });
           } else {
-            drawFrontStyled(points, frontType, alpha, drawScale);
+            drawFrontStyled(points, frontType, alpha, drawScale,
+              fronteProbabile(properties, frontType, null));
           }
         });
 
@@ -15111,6 +15126,8 @@
           { type: "warm", label: "fronte caldo" },
           { type: "occluded", label: "occluso" },
           { type: "stationary", label: "stazionario" },
+          { type: "cold", label: "tratteggio · probabile", probable: true },
+          { type: "uncertain", label: "tipo indeterminato" },
         ];
         const caption = "isobare ogni " + ISOBAR_INTERVAL_HPA
           + " hPa · marcate ogni " + ISOBAR_MAJOR_EVERY;
@@ -15198,7 +15215,7 @@
           const centre = cursor + rowHeight / 2;
           drawFrontStyled(
             [{ x: x + pad, y: centre }, { x: x + pad + sample, y: centre }],
-            entry.type, 1, 0.6
+            entry.type, 1, 0.6, entry.probable
           );
           vectorContext.setLineDash([]);
           vectorContext.textBaseline = "middle";

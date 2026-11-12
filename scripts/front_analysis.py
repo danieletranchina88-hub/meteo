@@ -344,6 +344,9 @@ class SynopticFrontAnalyzer:
             return xr.open_dataset(
                 path,
                 engine="cfgrib",
+                # Le verifiche iniziali leggono anche interi campi ICON-EU.
+                # Poi serve una scadenza per volta, senza trattenere i cubi.
+                cache=False,
                 backend_kwargs=backend_kwargs,
             )
 

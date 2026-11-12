@@ -160,7 +160,8 @@ def _download(session, url: str, destination: str, attempts: int = 4) -> None:
     raise RuntimeError(f"{url}: {last_error}")
 
 
-def download_run(run: str, hours: int, raw_dir: str, workers: int = 12) -> dict:
+def download_run(run: str, hours: int, raw_dir: str, workers: int = 12,
+                 *, reuse: bool = False) -> dict:
     """Scarica e decomprime.  Restituisce {chiave: {scadenza: percorso}}."""
     os.makedirs(raw_dir, exist_ok=True)
     wanted = wanted_files(run, hours)
@@ -171,7 +172,10 @@ def download_run(run: str, hours: int, raw_dir: str, workers: int = 12) -> dict:
     def fetch(item):
         (key, step), url = item
         destination = os.path.join(raw_dir, f"{key}_{step:03d}.grib2")
-        _download(session, url, destination)
+        # I file già scaricati appartengono a questo run e sono stati
+        # rinominati solo a scrittura conclusa. I .part si riscaricano.
+        if not reuse or not os.path.isfile(destination):
+            _download(session, url, destination)
         return key, step, destination
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -389,9 +393,13 @@ def analyse(paths: dict[str, str], run_dt: datetime, hours: int) -> dict:
         ml_guidance=None,
     )
     by_valid_time = {}
+    grid_km = round(analyzer.dy_km, 1)
     try:
+        if analyzer.available_hours != list(range(hours + 1)):
+            raise ValueError("scadenze ICON-EU diverse da quelle orarie richieste")
         for hour in analyzer.available_hours:
             collection = clip_collection(analyzer.analyze(hour))
+            collection["properties"]["analysisGridKm"] = grid_km
             collection["leadHours"] = int(hour)
             by_valid_time[iso_hour(run_dt + timedelta(hours=int(hour)))] = collection
         summary = dict(analyzer.analysis_summary or {})
@@ -407,7 +415,7 @@ def analyse(paths: dict[str, str], run_dt: datetime, hours: int) -> dict:
         "runTime": iso_hour(run_dt),
         "method": FRONT_METHOD,
         "analysisBounds": list(ANALYSIS_BOUNDS),
-        "analysisGridKm": round(0.0625 * 111.32 * ANALYSIS_DOWNSAMPLE, 1),
+        "analysisGridKm": grid_km,
         "publishBox": list(PUBLISH_BOX),
         "analysisSummary": summary,
         "pipelineByHour": pipeline,
@@ -422,12 +430,13 @@ def main(argv=None) -> int:
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
     parser.add_argument("--workdir", default="icon_eu_tmp")
     parser.add_argument("--keep", action="store_true",
-                        help="non cancellare i GRIB scaricati")
+                        help="conserva e riusa i GRIB dello stesso run")
     args = parser.parse_args(argv)
     hours = int(np.clip(args.hours, 6, MAX_LEAD_HOURS))
 
     if os.path.exists(args.output):
         os.remove(args.output)  # mai lasciare i fronti di un run precedente
+    run_dir = None
     try:
         session = _session()
         run = args.run
@@ -442,9 +451,12 @@ def main(argv=None) -> int:
         run_dt = datetime.strptime(run, "%Y%m%d%H").replace(tzinfo=timezone.utc)
         print(f"ICON-EU: run {run}, {hours + 1} scadenze orarie.", flush=True)
         started = time.time()
-        raw_dir = os.path.join(args.workdir, "raw")
-        got = download_run(run, hours, raw_dir)
-        paths = assemble(got, os.path.join(args.workdir, "grib"), hours)
+        run_dir = os.path.join(args.workdir, run)
+        raw_dir = os.path.join(run_dir, "raw")
+        got = download_run(run, hours, raw_dir, reuse=args.keep)
+        print(f"ICON-EU: {sum(len(steps) for steps in got.values())} GRIB disponibili "
+              f"in {time.time() - started:.0f} s.", flush=True)
+        paths = assemble(got, os.path.join(run_dir, "grib"), hours)
         if not args.keep:
             shutil.rmtree(raw_dir, ignore_errors=True)
         missing = sorted(
@@ -458,7 +470,7 @@ def main(argv=None) -> int:
               f"{time.time() - started:.0f} s.", flush=True)
         result = analyse(paths, run_dt, hours)
         with open(args.output + ".part", "w", encoding="utf-8") as handle:
-            json.dump(result, handle, separators=(",", ":"))
+            json.dump(result, handle, allow_nan=False, separators=(",", ":"))
         os.replace(args.output + ".part", args.output)
         counts = [len(item["features"]) for item in result["hours"].values()]
         print(f"ICON-EU: fronti in {sum(bool(c) for c in counts)}/{len(counts)} "
@@ -468,8 +480,8 @@ def main(argv=None) -> int:
         if os.path.exists(args.output):
             os.remove(args.output)
     finally:
-        if not args.keep:
-            shutil.rmtree(args.workdir, ignore_errors=True)
+        if run_dir and not args.keep:
+            shutil.rmtree(run_dir, ignore_errors=True)
     return 0
 
 

@@ -11,6 +11,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -43,6 +44,15 @@ prova("nome DWD dei campi al suolo",
           "/00/u_10m/icon-eu_europe_regular-lat-lon_single-level_2026111200_072_U_10M.grib2.bz2"))
 prova("l'umidita' arriva come RELHUM",
       ("relhum850", 0) in files and not any(k[0].startswith("q") for k in files))
+
+# Un riavvio sullo stesso run rilegge i GRIB già completati.
+with tempfile.TemporaryDirectory() as cartella:
+    cache = Path(cartella) / "t850_000.grib2"
+    cache.write_bytes(b"GRIB")
+    with patch.object(eu, "_download") as scarica:
+        salvati = eu.download_run("2026111200", 0, cartella, reuse=True)
+    prova("il GRIB già presente non viene riscaricato",
+          salvati["t850"][0] == str(cache) and scarica.call_count == 20)
 
 # 3) q da RH: aria satura a 10 gradi e 850 hPa ha circa 9 g/kg.
 q = float(eu.specific_humidity(100.0, 283.15, 85000.0))

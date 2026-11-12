@@ -1802,25 +1802,25 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             min_coverage=TRACK_MIN_COVERAGE,
             weak_candidates=getattr(self, "_weak", None),
         )
-        # Publication is judged on the CORE hours (strong detections): the
-        # weak-phase hours recovered by the tracker extend where the boundary
-        # is drawn but must not dilute -- nor artificially satisfy -- the
-        # confidence requirements.
-        tracks = [
-            track for track in raw_tracks
-            if track.get("qualityScore", 0.0) >= MIN_PUBLISH_QUALITY
-            and track.get("uncertaintyIndex", 1.0) <= MAX_PUBLISH_UNCERTAINTY
-            and sum(
-                track.get("localClassifications", {}).get(h, {}).get("frontType")
-                != "uncertain"
-                for h in track.get("coreHours", track.get("hours", []))
-            ) >= max(
-                TRACK_MIN_DETECTIONS,
-                int(np.ceil(0.55 * len(
-                    track.get("coreHours", track.get("hours", []))
-                ))),
+        # Le ore recuperate prolungano la linea. Il voto sul tipo usa
+        # soltanto le ore con cui la traccia ha superato il tracciamento.
+        tracks = []
+        rejected_by_type = 0
+        for track in raw_tracks:
+            if (track.get("qualityScore", 0.0) < MIN_PUBLISH_QUALITY
+                    or track.get("uncertaintyIndex", 1.0) > MAX_PUBLISH_UNCERTAINTY):
+                continue
+            core_hours = track.get("coreHours", track.get("hours", []))
+            local = track.get("localClassifications", {})
+            decided = sum(
+                local.get(hour, {}).get("frontType") in
+                ("cold", "warm", "stationary", "occluded")
+                for hour in core_hours
             )
-        ]
+            if decided < max(TRACK_MIN_DETECTIONS, int(np.ceil(0.55 * len(core_hours)))):
+                rejected_by_type += 1
+                continue
+            tracks.append(track)
         run_status = (
             "partially-unavailable"
             if detection_errors
@@ -1842,6 +1842,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             "candidateLines": total_candidates,
             "trackingTracks": len(raw_tracks),
             "publishedTracks": len(tracks),
+            "tracksRejectedByType": rejected_by_type,
             "detectionErrors": len(detection_errors),
             "lowerLevel925": self.has_lower_level,
             "lowerWind925": self.has_lower_wind,
@@ -2216,6 +2217,7 @@ class IconSynopticFrontAnalyzer(SynopticFrontAnalyzer):
             "trackDiagnostics": _json_mapping(track.get("diagnostics", {}), 4),
             "motionKmh": round(float(classification.get("geoMotionKmh", 0.0)), 1),
             "geoMotionKmh": _json_number(classification.get("geoMotionKmh"), 1),
+            "consensusMotionKmh": _json_number(classification.get("consensusMotionKmh"), 1),
             "motionBearingDeg": _json_number(
                 classification.get("motionBearingDeg"), 1
             ),

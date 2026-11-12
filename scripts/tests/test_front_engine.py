@@ -395,5 +395,25 @@ report(loss < 0.02,
        "un fronte che attraversa il rilievo viene penalizzato come un artefatto",
        "perdita di probabilita' attraversando la barriera: %.4f" % loss)
 
+# Una pressione sinusoidale in longitudine è liscia fra paralleli.
+# Il Laplaciano dopo la gaussiana deve variare in modo regolare: il vecchio
+# arrotondamento di sigma produceva qui salti superiori a 6 hPa/(100 km)^2.
+lat_bands = np.arange(36.0, 58.001, 0.125)
+lon_bands = np.arange(-10.0, 35.001, 0.125)
+pressure_bands = np.broadcast_to(
+    1000.0 + 14.0 * np.cos(2 * np.pi * lon_bands / 10.0),
+    (len(lat_bands), len(lon_bands)),
+)
+band_metrics = fl.grid_metrics(lon_bands, lat_bands)
+pressure_curvature = fl.laplacian(
+    fl.smooth_km(pressure_bands, 150.0, band_metrics), band_metrics
+) * 1.0e4
+row_variation = np.max(np.abs(np.diff(
+    pressure_curvature[35:-35, 100:-100], n=2, axis=0
+)))
+report(row_variation < 1.0e-3,
+       "la gaussiana zonale introduce bande nel Laplaciano della pressione",
+       f"variazione fra paralleli: {row_variation:.6f} hPa/(100 km)^2")
+
 print("\nESITO:", "SUPERATO" if ok else "DA RIVEDERE")
 raise SystemExit(0 if ok else 1)

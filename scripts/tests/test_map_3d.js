@@ -862,7 +862,7 @@ assert.match(html, /function frontDrawScale\(\)/,
   "manca la scala cartografica dei fronti");
 assert.match(styled[0], /const spacing = \(isMobile\(\) \? 48 : 54\) \* s;/,
   "il passo fra i simboli non segue la loro dimensione");
-assert.match(styled[0], /strokeFrontLine\(points, frontType, alpha, s\)/,
+assert.match(styled[0], /strokeFrontLine\(points, frontType, alpha, s, probable\)/,
   "lo spessore della linea non segue la scala");
 
 // --- Il disegno dei fronti deve terminare, a ogni zoom -----------------------
@@ -894,7 +894,7 @@ function frontDrawingApi(viewportWidth, viewportHeight, zoom, budget) {
     return found[0];
   }).join("\n");
 
-  const calls = { stroke: 0, fill: 0 };
+  const calls = { stroke: 0, fill: 0, arcs: [], dashes: [] };
   const ctx = new Proxy({}, {
     get(_target, property) {
       if (property === "stroke" || property === "fill") {
@@ -907,9 +907,11 @@ function frontDrawingApi(viewportWidth, viewportHeight, zoom, budget) {
           }
         };
       }
-      if (property === "setLineDash" || property === "save" || property === "restore"
+      if (property === "setLineDash") return (dash) => calls.dashes.push(dash);
+      if (property === "arc") return (...args) => calls.arcs.push(args);
+      if (property === "save" || property === "restore"
           || property === "beginPath" || property === "moveTo" || property === "lineTo"
-          || property === "arc" || property === "translate" || property === "rotate"
+          || property === "translate" || property === "rotate"
           || property === "closePath") {
         return function () {};
       }
@@ -920,7 +922,7 @@ function frontDrawingApi(viewportWidth, viewportHeight, zoom, budget) {
 
   const factory = new Function(
     "vectorContext", "map", "clamp", "window", "synopticChart",
-    source + "\nreturn { drawFrontStyled: drawFrontStyled, frontDrawScale: frontDrawScale };"
+    source + "\nreturn { drawFrontStyled: drawFrontStyled, frontDrawScale: frontDrawScale, frontSlice: frontSlice };"
   );
   const api = factory(
     ctx,
@@ -962,6 +964,26 @@ for (let i = 0; i < 12; i += 1) {
     previous = total;
   });
 });
+
+// Una porzione visibile dopo molti chilometri fuori schermo conserva i simboli.
+const frontiVisibili = frontDrawingApi(390, 844, 16, 5000);
+frontiVisibili.api.drawFrontStyled(
+  [{ x: -1e7, y: 220 }, { x: 175, y: 220 }], "warm", 1, 1, true
+);
+assert.ok(frontiVisibili.calls.arcs.length > 0, "il tratto caldo visibile perde i semicerchi");
+assert.ok(frontiVisibili.calls.dashes.some((dash) => dash.length === 2),
+  "un fronte probabile perde il tratteggio");
+const incertoBreve = frontDrawingApi(390, 844, 4, 5000);
+incertoBreve.api.drawFrontStyled(
+  [{ x: 180, y: 300 }, { x: 195, y: 300 }], "uncertain", 1, 1
+);
+assert.equal(incertoBreve.calls.arcs.length, 1, "il fronte incerto breve perde il simbolo");
+
+const trattoRitagliato = incertoBreve.api.frontSlice(
+  [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 100, y: 0 }], 0.5, 1,
+  [[0, 40], [1, 40], [2, 40]]
+);
+assert.equal(trattoRitagliato[0].x, 20, "il cambio di tipo si sposta nella proiezione");
 
 // Un passo non valido non deve mai diventare un ciclo che non avanza.
 [0, -5, NaN, Infinity].forEach((spacing) => {

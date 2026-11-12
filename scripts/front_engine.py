@@ -1359,6 +1359,7 @@ def detect_fronts(
     decides which parts of that ridge may be published and supplies the
     per-candidate scores.  Length and persistence play no part in either.
     """
+    from scipy.ndimage import gaussian_filter1d
     import front_detection as fd
 
     metrics = metrics or fl.grid_metrics(longitudes, latitudes)
@@ -1430,6 +1431,7 @@ def detect_fronts(
         "droppedTooShort": 0,
         "droppedShape": 0,
         "droppedTooRough": 0,
+        "regularizedRough": 0,
     }
 
     candidates: list[dict] = []
@@ -1450,6 +1452,26 @@ def detect_fronts(
             if length < min_length_km or len(line) < 4:
                 funnel["droppedTooShort"] += 1
                 continue
+            turn_limit = float(max_turn_deg_per_20km)
+            if mean_turn_deg_per_km(line) > turn_limit:
+                # Nel run ICON-EU 12/11 00Z, il fronte di oltre 3.400 km
+                # oscillava fra vertici della cresta dopo la proiezione.
+                # Una gaussiana di due passi lungo l'arco ha tolto i
+                # piccoli zigzag lasciando il fronte nella stessa fascia.
+                regular = gaussian_filter1d(line, 2.0, axis=0, mode="nearest")
+                regular[[0, -1]] = line[[0, -1]]
+                delta = regular - line
+                shift_km = _EARTH_KM_PER_DEG * np.hypot(
+                    delta[:, 0] * np.cos(np.deg2rad(line[:, 1])), delta[:, 1]
+                )
+                if (np.max(shift_km) <= 2.0 * vertex_spacing_km
+                        and np.all(sample(evidence["probability"], regular) >= min_probability)
+                        and mean_turn_deg_per_km(regular) <= turn_limit):
+                    line = regular
+                    funnel["regularizedRough"] += 1
+                else:
+                    funnel["droppedTooRough"] += 1
+                    continue
             sinuosity, net_turn, closure, total_turn = fd._shape_metrics(line)
             # A closed or hairpin thermal anomaly is a pool of air, not an
             # interface between two extended air masses.
@@ -1457,17 +1479,6 @@ def detect_fronts(
                     or net_turn > max_net_turn_deg):
                 funnel["droppedShape"] += 1
                 continue
-            # Last line of defence on the promise this engine exists to keep.
-            # Every geometric rule upstream is a rule about how a line is
-            # *built*; this one is about what it *is*, and it cannot be
-            # defeated by a rule interacting badly with another.  It was
-            # added after a merge welded elbows into 500 km lines and put 27
-            # degrees per 20 km on the map -- twice as rough as the product
-            # this work set out to replace.
-            if mean_turn_deg_per_km(line) > float(max_turn_deg_per_20km):
-                funnel["droppedTooRough"] += 1
-                continue
-
             built = _build_candidate(
                 line, evidence, abz_gradient, longitudes, latitudes, metrics,
                 min_probability=min_probability, source=LOCATOR_NAME,

@@ -30,7 +30,7 @@ import math
 
 import contourpy
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import correlate1d, gaussian_filter1d
 
 EARTH_KM_PER_DEG = 111.32
 LOCATOR_LAPLACIAN = "laplacian_gradient"   # default (Sansom-Catto)
@@ -79,22 +79,19 @@ def _conv_axis(data: np.ndarray, sigma_points: float, axis: int) -> np.ndarray:
 
 
 def _conv_x_perrow(data: np.ndarray, sigma_points_per_row: np.ndarray) -> np.ndarray:
-    """1-D Gaussian along x with a sigma that varies per latitude row."""
+    """Gaussiana zonale continua al variare della latitudine."""
     out = np.empty_like(data, dtype=float)
-    # Group rows with near-equal sigma so scipy executes the long convolution
-    # in compiled code. At ICON-2I resolution this is orders of magnitude
-    # cheaper than a Python loop over a 100-km kernel.
-    rounded = np.round(sigma_points_per_row / 0.05) * 0.05
-    for sigma in np.unique(rounded):
-        rows = np.where(rounded == sigma)[0]
-        out[rows, :] = gaussian_filter1d(
-            data[rows, :],
-            sigma=max(float(sigma), 1.0e-3),
-            axis=1,
-            mode="constant",
-            cval=0.0,
-            truncate=3.0,
-        )
+    for row, sigma_points in enumerate(sigma_points_per_row):
+        sigma = max(float(sigma_points), 1.0e-3)
+        radius = min(int(np.ceil(4.0 * sigma)), data.shape[1] - 1)
+        x = np.arange(-radius, radius + 1) / sigma
+        # Su ICON-EU, arrotondare sigma o troncare di colpo il kernel
+        # introduceva salti fra paralleli, amplificati dalle derivate.
+        # Il raccordo da 3,5 a 4 sigma annulla peso e prime due derivate
+        # al bordo, anche quando entra o esce una coppia di punti.
+        t = np.clip((4.0 - np.abs(x)) / 0.5, 0.0, 1.0)
+        weights = np.exp(-0.5 * x * x) * (t**3 * (10.0 + t * (6.0 * t - 15.0)))
+        out[row] = correlate1d(data[row], weights / weights.sum(), mode="constant")
     return out
 
 
