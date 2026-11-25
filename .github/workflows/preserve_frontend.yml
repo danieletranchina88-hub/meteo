@@ -44,7 +44,7 @@ jobs:
           script: |
             const fs = require('fs');
             const percorsi = [
-              'index.html', 'meteograms.html', 'radar.html',
+              'index.html', 'mappe.html', 'meteograms.html', 'radar.html',
               'point_bulletin.js', 'local_downscaling.js',
               'forecast-cache.js', 'modern-ui.js', 'modern-ui.css',
               'meteograms-ui.css'

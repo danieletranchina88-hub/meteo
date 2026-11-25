@@ -15,7 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '../..');
-const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'mappe.html'), 'utf8');
 const fixture = JSON.parse(
   fs.readFileSync(path.join(__dirname, 'fixtures_blitzortung.json'), 'utf8')
 );

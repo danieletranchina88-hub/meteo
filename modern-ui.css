@@ -1099,3 +1099,62 @@ body.clean-mode #timeline { transition: opacity .25s var(--ease); }
 body.clean-mode #timeline:hover, body.clean-mode #timeline:focus-within { opacity: 1; }
 @media (max-width: 959px) { #esci-mappa-piena span { display: none; } body.clean-mode #esci-mappa-piena { padding: 0 11px; } }
 .satellite-view #carte-apri, body.synoptic-chart #carte-apri { display: none; }
+
+.field-filter {
+  display:grid;
+  gap:6px;
+  font-size:.76rem;
+  font-weight:650;
+  margin:8px 0 12px;
+  color:#b8d1da;
+}
+.field-filter input {
+  font:inherit;
+  font-size:1rem;
+  background:#102631;
+  color:white;
+  border:1px solid #547581;
+  border-radius:10px;
+  padding:10px 12px;
+  width:100%;
+}
+.field-filtered {
+  display:none!important;
+}
+#field-count {
+  font-size:.8rem;
+  color:#a9d9dd;
+}
+#drawer .layer-card.active {
+  box-shadow:inset 3px 0 #73ddc1;
+}
+#app-header .brand-mark {
+  background:#153a3e;
+  color:#92f0ce;
+}
+#drawer .section-title h3 {
+  letter-spacing:-.025em;
+}
+
+.atlas-index {
+  display:flex;
+  gap:5px;
+  flex-wrap:wrap;
+  margin-bottom:14px;
+}
+.atlas-index a {
+  padding:8px 10px;
+  color:#b7ecda;
+  background:#18332f;
+  border:1px solid #34554b;
+  border-radius:20px;
+  text-decoration:none;
+  font-size:12px;
+  font-weight:650;
+}
+.atlas-index a:hover,.atlas-index a:focus-visible {
+  background:#295149;
+}
+.drawer-section[id^="atlas-"] {
+  scroll-margin:10px;
+}

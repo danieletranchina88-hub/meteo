@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const html = fs.readFileSync(path.resolve(__dirname, '../../index.html'), 'utf8');
+const html = fs.readFileSync(path.resolve(__dirname, '../../mappe.html'), 'utf8');
 
 function implementazione(nome) {
   const inizio = html.indexOf('      function ' + nome + '(');
