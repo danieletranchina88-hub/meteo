@@ -14,8 +14,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '../..');
-const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const meteogrammi = fs.readFileSync(path.join(root, 'meteograms.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'mappe.html'), 'utf8');
+const meteogrammi = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
 const stile = fs.readFileSync(path.join(root, 'modern-ui.css'), 'utf8');
 
 function implementazione(nome, sorgente) {

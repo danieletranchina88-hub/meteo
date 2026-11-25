@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const zlib = require("node:zlib");
 const path = require("node:path");
 const root = path.resolve(__dirname, "../..");
-const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+const html = fs.readFileSync(path.join(root, "mappe.html"), "utf8");
 
 function grab(name) {
   const m = html.match(new RegExp("function " + name + "\\([\\s\\S]*?\\n {6}\\}"));

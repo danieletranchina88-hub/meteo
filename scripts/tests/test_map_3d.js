@@ -8,7 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const root = path.resolve(__dirname, "../..");
-const html = fs.readFileSync(path.join(root, "index.html"), "utf8").replace(/\r\n/g, "\n");
+const html = fs.readFileSync(path.join(root, "mappe.html"), "utf8").replace(/\r\n/g, "\n");
 const modernUi = fs.readFileSync(path.join(root, "modern-ui.js"), "utf8").replace(/\r\n/g, "\n");
 function implementazione(nome) {
   const i = html.search(new RegExp("      function " + nome + "\\("));
@@ -16,7 +16,7 @@ function implementazione(nome) {
   return html.slice(i, html.indexOf("\n      }", i) + 8);
 }
 const radarHtml = fs.readFileSync(path.join(root, "radar.html"), "utf8").replace(/\r\n/g, "\n");
-const meteogramHtml = fs.readFileSync(path.join(root, "meteograms.html"), "utf8").replace(/\r\n/g, "\n");
+const meteogramHtml = fs.readFileSync(path.join(root, "index.html"), "utf8").replace(/\r\n/g, "\n");
 
 const inlineScripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
   .map((match) => match[1])

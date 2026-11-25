@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const {ResourceCache, FrameCache} = require('../../forecast-cache.js');
-const html = fs.readFileSync(path.join(__dirname,'../../index.html'),'utf8');
+const html = fs.readFileSync(path.join(__dirname,'../../mappe.html'),'utf8');
 function implementation(name) {
   const re = new RegExp('      (?:async )?function '+name+'\\(');
   const start = html.search(re); assert(start >= 0, name);
@@ -250,7 +250,7 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
  });
 
  await test('i comandi osservati stanno nel pannello del satellite e sono sovrapponibili',()=>{
-  const html=fs.readFileSync(path.join(__dirname,'../../index.html'),'utf8');
+  const html=fs.readFileSync(path.join(__dirname,'../../mappe.html'),'utf8');
   const markup=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g,'');
   const pannello=markup.slice(markup.indexOf('id="satellite-status"'),
     markup.indexOf('</section>',markup.indexOf('id="satellite-status"')));
@@ -396,7 +396,7 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
  });
 
  await test('page IDs are unique and new runtime assets are deployed',()=>{
-  for(const file of ['index.html','meteograms.html']) {
+  for(const file of ['index.html','mappe.html','meteograms.html']) {
     const source=fs.readFileSync(path.join(__dirname,'../..',file),'utf8');
     const markup=source.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g,'');
     const ids=[...markup.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);assert.equal(ids.length,new Set(ids).size,file);
