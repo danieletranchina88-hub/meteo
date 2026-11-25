@@ -455,3 +455,33 @@ main {
 .day-tile b::first-letter {
   text-transform:uppercase;
 }
+
+/* Keep the weather symbol clear against the illustrated horizon. */
+.hero-copy {
+  --horizon: #447f83;
+  background: radial-gradient(ellipse at 87% 16%, #ffffff18, transparent 48%),
+              linear-gradient(115deg, #103434, var(--horizon));
+}
+.hero-copy[data-sky="clear"] { --horizon: #647c58; }
+.hero-copy[data-sky="night"] { --horizon: #454e78; }
+.hero-copy[data-sky="rain"], .hero-copy[data-sky="storm"] { --horizon: #495e81; }
+.hero-copy .hero-kicker { color: #d4f4db; }
+.hero-copy .sky-symbol { position: absolute; right: 8%; top: 22%; }
+.hero-copy .sky-symbol svg {
+  width: clamp(65px, 8vw, 110px);
+  height: auto;
+  stroke-width: 1.2;
+  filter: drop-shadow(0 5px 7px #072c3840);
+}
+.sky-reading { padding-right: 90px; }
+.hero-copy #place-heading { max-width: 76%; overflow-wrap: anywhere; }
+.day-tile .temp-trace { width: 100%; height: 23px; }
+.temp-trace path { fill: none; stroke: #edba77; stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+.day-tile { transition: border-color .14s, background-color .14s; }
+.day-tile:hover { border-color: #87b4b3; }
+#day-hours { scroll-snap-type: x proximity; }
+#day-hours article { scroll-snap-align: start; }
+@media (max-width: 750px) {
+  .hero-copy .sky-symbol { right: 6%; top: 27%; }
+  .hero-copy #place-heading { max-width: 73%; }
+}

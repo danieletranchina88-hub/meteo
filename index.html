@@ -593,12 +593,12 @@
           "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
         }[character]));
       }
+      const timeFormats = [
+        new Intl.DateTimeFormat("it-IT", { day:"2-digit", hour:"2-digit" }),
+        new Intl.DateTimeFormat("it-IT", { weekday:"short", day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" })
+      ];
       function dateLabel(value, long) {
-        const date = new Date(value);
-        return new Intl.DateTimeFormat("it-IT", long
-          ? { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }
-          : { day: "2-digit", hour: "2-digit" }
-        ).format(date);
+        return timeFormats[long ? 1 : 0].format(new Date(value));
       }
       function runLabel(value) {
         return new Intl.DateTimeFormat("it-IT", {
@@ -768,6 +768,7 @@
       function renderChart(id, seriesList, options) {
         options = options || {};
         const container = document.getElementById(id);
+        if (container.closest("[hidden]")) return;
         const legend = document.getElementById("legend-" + id.replace("chart-", ""));
         if (legend) legend.innerHTML = legendHtml(seriesList);
         const extent = seriesExtent(seriesList, options.domain);
@@ -906,12 +907,15 @@
         }
         // One shared hour across all charts; SVG margins are excluded from the hit test.
         container.showForecastHour = showHour;
+        let previousHour = -1;
         function point(event) {
           const rectangle = svgNode.getBoundingClientRect();
           const chartX = (event.clientX - rectangle.left) / rectangle.width * width;
           const ratio = clamp((chartX - left) / plotWidth, 0, 1);
           const index = Math.round(ratio * (count - 1));
-          document.querySelectorAll(".chart-wrap").forEach(chart => chart.showForecastHour?.(index));
+          if (index === previousHour) return;
+          previousHour = index;
+          document.querySelectorAll(".chart-card:not([hidden]) .chart-wrap").forEach(chart => chart.showForecastHour?.(index));
         }
         svgNode.setAttribute("tabindex","0");
         svgNode.setAttribute("aria-label", (options.aria || "Grafico meteo") + ". Frecce per scorrere le ore.");
@@ -925,6 +929,7 @@
         svgNode.addEventListener("pointermove", point);
         svgNode.addEventListener("pointerdown", point);
         svgNode.addEventListener("pointerleave", () => {
+          previousHour = -1;
           document.querySelectorAll(".chart-wrap").forEach(chart => chart.showForecastHour?.(null));
         });
       }
@@ -1106,10 +1111,24 @@
           "<thead><tr><th>Validità</th><th>T 2m</th><th>Percepita</th><th>Rugiada</th><th>Pioggia mm</th><th>Vento km/h</th><th>Raffica km/h</th><th>UR</th><th>Nubi</th><th>Pressione</th><th>Indice temp.</th><th>Coer.</th><th>CAPE</th><th>CIN</th><th>Vis. km</th></tr></thead><tbody>" + rows + "</tbody>";
       }
 
-const localDate = new Intl.DateTimeFormat("sv-SE", {timeZone:"Europe/Rome", year:"numeric", month:"2-digit", day:"2-digit"});
+      const localDate = new Intl.DateTimeFormat("sv-SE", {timeZone:"Europe/Rome", year:"numeric", month:"2-digit", day:"2-digit"});
       const dayTitle = new Intl.DateTimeFormat("it-IT", {timeZone:"Europe/Rome", weekday:"long", day:"numeric", month:"short"});
       const clock = new Intl.DateTimeFormat("it-IT", {timeZone:"Europe/Rome", hour:"2-digit", minute:"2-digit"});
       let selectedDay = null, hourStep = 1;
+
+      function temperatureTrace(series, indices, low, high) {
+        if (indices.length < 3 || !Number.isFinite(low) || !Number.isFinite(high)) return "";
+        let path = "", connected = false;
+        indices.forEach((index, position) => {
+          const value = series.temperature2m?.[index];
+          if (!finite(value)) { connected = false; return; }
+          const x = (100 * position / (indices.length - 1)).toFixed(1);
+          const y = (22 - 18 * (Number(value) - low) / Math.max(1, high - low)).toFixed(1);
+          path += (connected ? "L" : "M") + x + " " + y;
+          connected = true;
+        });
+        return '<svg class="temp-trace" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true"><path d="' + path + '"/></svg>';
+      }
 
       function renderOverview(series) {
         const dates = series.times.map(t => new Date(t.validTime));
@@ -1126,17 +1145,20 @@ const localDate = new Intl.DateTimeFormat("sv-SE", {timeZone:"Europe/Rome", year
         if(!groups.has(selectedDay)) selectedDay=localDate.format(dates[closest]);
         const at=(key,i,digits,unit)=>format(series[key]?.[i],digits,unit);
         const current=weatherSymbol(series,closest);
+        document.querySelector('.hero-copy').dataset.sky = current.className || 'cloud';
         document.querySelector("#headline-weather").innerHTML =
           '<div class="sky-reading"><span class="sky-symbol '+current.className+'">'+current.symbol+'</span><div><strong>'+at("temperature2m",closest,0,"°")+'</strong><div>'+current.label+'</div></div></div>'+
           '<div class="valid-at">Previsione di '+dayTitle.format(dates[closest])+' · '+clock.format(dates[closest])+'</div>'+
           '<div class="hero-stats"><span>Percepita <b>'+at("feelsLike",closest,0,"°")+'</b></span><span>Vento <b>'+at("wind10",closest,0," km/h")+'</b></span><span>Umidità <b>'+at("relativeHumidity2m",closest,0,"%")+'</b></span></div>';
+        const runTemps = (series.temperature2m || []).filter(finite).map(Number);
+        const low = Math.min(...runTemps), high = Math.max(...runTemps);
         document.querySelector("#days").innerHTML=Array.from(groups,([key,indices])=>{
           const temps=indices.map(i=>series.temperature2m?.[i]).filter(finite).map(Number);
           const rain=indices.map(i=>series.rainStep?.[i]);
           const midday=indices.reduce((a,b)=>Math.abs(parseInt(clock.format(dates[a]))-12)<=Math.abs(parseInt(clock.format(dates[b]))-12)?a:b);
           const weather=weatherSymbol(series,midday);
           const sum=rain.every(finite)?rain.reduce((a,b)=>a+Number(b),0):null;
-          return '<button class="day-tile" type="button" data-day="'+key+'" aria-pressed="'+(key===selectedDay)+'"><b>'+dayTitle.format(dates[midday])+'</b><span class="day-sky '+weather.className+'">'+weather.symbol+'</span><span>'+weather.label+' · '+clock.format(dates[midday])+'</span><strong>'+format(temps.length?Math.max(...temps):null,0,"°")+' <small>/ '+format(temps.length?Math.min(...temps):null,0,"°")+'</small></strong><span>Pioggia '+format(sum,1," mm")+' · '+indices.length+' h</span></button>';
+          return '<button class="day-tile" type="button" data-day="'+key+'" aria-pressed="'+(key===selectedDay)+'"><b>'+dayTitle.format(dates[midday])+'</b><span class="day-sky '+weather.className+'">'+weather.symbol+'</span><span>'+weather.label+' · '+clock.format(dates[midday])+'</span><strong>'+format(temps.length?Math.max(...temps):null,0,"°")+' <small>/ '+format(temps.length?Math.min(...temps):null,0,"°")+'</small></strong>'+temperatureTrace(series,indices,low,high)+'<span>Pioggia '+format(sum,1," mm")+' · '+indices.length+' h</span></button>';
         }).join("");
         const indices=groups.get(selectedDay);
         document.querySelector("#hours-title").textContent="Ora per ora · "+dayTitle.format(dates[indices[0]]);
@@ -1173,6 +1195,13 @@ const localDate = new Intl.DateTimeFormat("sv-SE", {timeZone:"Europe/Rome", year
         renderSummary(s);
         renderPointBulletin(s);
         renderWeatherStrip(s);
+        renderRisks(s);
+        renderTable(s);
+        scheduleCharts();
+      }
+
+      function drawCharts() {
+        const s = state.series;
         renderChart("chart-temperature", [
           { label:"Temperatura", values:s.temperature2m || [], color:"#ff6b7a", unit:" °C", decimals:1 },
           { label:"Percepita", values:s.feelsLike || [], color:"#ffad4d", unit:" °C", decimals:1 },
@@ -1212,8 +1241,6 @@ const localDate = new Intl.DateTimeFormat("sv-SE", {timeZone:"Europe/Rome", year
         renderChart("chart-front-distance", [
           { label:"Distanza", values:s.frontDistanceKm || [], color:"#46b7ea", unit:" km", decimals:0 }
         ], { domain:[0, Math.max(100, ...((s.frontDistanceKm || []).filter(finite).map(Number)))], axisDecimals:0 });
-        renderRisks(s);
-        renderTable(s);
       }
 
       let locationRequest = 0;
@@ -1288,20 +1315,38 @@ const localDate = new Intl.DateTimeFormat("sv-SE", {timeZone:"Europe/Rome", year
           document.querySelectorAll("[data-chart-group]").forEach(card => {
             card.hidden = group !== "all" && card.dataset.chartGroup !== group;
           });
-          if (state.series) renderAll();
+          scheduleCharts();
         });
       });
 
       document.querySelectorAll("[data-chart-group]").forEach(card => { card.hidden = card.dataset.chartGroup !== "surface"; });
 
       // Only a width change redraws the charts; scrolling and pointer moves do not.
-      let chartLayoutWidth = 0;
+      const chartGrid = document.querySelector(".charts-grid");
+      let chartLayoutWidth = 0, chartFrame = 0, chartDirty = true;
+      let chartsNearby = !("IntersectionObserver" in window);
+      function scheduleCharts() {
+        chartDirty = true;
+        if (!chartsNearby || chartFrame || !state.series || contentNode.hidden) return;
+        chartFrame = requestAnimationFrame(() => {
+          chartFrame = 0;
+          if (!chartsNearby || contentNode.hidden) return;
+          drawCharts();
+          chartDirty = false;
+        });
+      }
+      if (!chartsNearby) {
+        new IntersectionObserver(([entry]) => {
+          chartsNearby = entry.isIntersecting;
+          if (chartsNearby && chartDirty) scheduleCharts();
+        }, {rootMargin:"650px 0px"}).observe(chartGrid);
+      }
       new ResizeObserver(entries => {
         const width = Math.round(entries[0].contentRect.width);
         if (width === chartLayoutWidth) return;
         chartLayoutWidth = width;
-        if (state.series && !contentNode.hidden) renderAll();
-      }).observe(document.querySelector('.charts-grid'));
+        scheduleCharts();
+      }).observe(chartGrid);
 
       async function initialize() {
         initializeCities();
