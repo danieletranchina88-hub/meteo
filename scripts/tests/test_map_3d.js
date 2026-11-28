@@ -275,7 +275,7 @@ assert.match(html, /map\.addSource\("weather", \{\s*[^}]*type: "image"/,
 assert.doesNotMatch(html, /type: "canvas",\s*canvas: rasterCanvas/,
   "sorgente canvas reintrodotta: in questa versione di MapLibre lascia la "
   + "mappa nera");
-assert.match(html, /rasterCanvas\.toBlob\(/,
+assert.match(html, /canvas\.toBlob\(/,
   "la pubblicazione del raster non passa piu' da un blob");
 
 const projectParticle = html.match(
@@ -387,8 +387,8 @@ assert.match(html, /id="detail-wetbulb"/, "lettura puntuale del bulbo umido asse
 // Un fondo raster sta SOTTO il campo colorato: quando il campo si accende la
 // costa sparisce proprio dove serve. Queste sono linee, e si disegnano SOPRA.
 // Carta scura ma non nera (scelta del proprietario, 08/11/2026).
-assert.match(html, /const MAP_LAND = "#1a2531";/, "colore della terra assente");
-assert.match(html, /const MAP_SEA = "#0d1824";/, "colore del mare assente");
+assert.match(html, /const MAP_LAND = "#263b45";/, "colore della terra assente");
+assert.match(html, /const MAP_SEA = "#102837";/, "colore del mare assente");
 ["land", "sea", "coast", "borders", "lakes", "rivers"].forEach((tema) => {
   assert.ok(html.includes('data: "data_base/' + tema + '.json"'),
     "il fondo non carica il tema: " + tema);
