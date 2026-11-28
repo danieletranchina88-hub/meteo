@@ -38,7 +38,7 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
  await test('fast scrubbing commits only the newest response and matching hour',async()=>{
   const first=deferred(),second=deferred(),commits=[];
   const context={catalog:[{},{}],loadingToken:0,currentData:{},currentIndex:0,weatherView:'forecast',
-    explicitLoadInFlight:false,rasterRenderToken:0,pendingRasterCallback:null,lastRasterSignature:"",console,document:{getElementById:()=>({})},
+    explicitLoadInFlight:false,rasterPublishToken:0,stepReady:()=>false,rasterRenderToken:0,pendingRasterCallback:null,lastRasterSignature:"",console,document:{getElementById:()=>({})},
     activeExtraKind:()=>null,fetchStep:i=>i===0?first.promise:second.promise,
     ui:{slider:{}},showParticles:false,renderWeather:(_,done)=>done(),
     updateTimeUi:()=>commits.push(context.currentIndex),toast:()=>{},showLoading:()=>{},hideLoading:()=>{}};
@@ -50,7 +50,7 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
  await test('changing field while an hour downloads discards the obsolete request',async()=>{
   const gate=deferred();let kind=null,commits=0;
   const ctx={catalog:[{}],loadingToken:0,currentData:{temp:1},currentIndex:0,weatherView:'forecast',console,
-    rasterRenderToken:0,pendingRasterCallback:null,lastRasterSignature:'',document:{getElementById:()=>({})},activeExtraKind:()=>kind,fetchStep:()=>gate.promise,
+    rasterPublishToken:0,stepReady:()=>false,rasterRenderToken:0,pendingRasterCallback:null,lastRasterSignature:'',document:{getElementById:()=>({})},activeExtraKind:()=>kind,fetchStep:()=>gate.promise,
     hideLoading:()=>{},toast:()=>{},renderWeather:()=>commits++};
   vm.createContext(ctx);vm.runInContext(implementation('loadStep'),ctx);
   const a=ctx.loadStep(0);kind='upper';gate.resolve({temp:99});await a;
@@ -119,19 +119,14 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
  await test('il raster si pubblica come immagine e la pubblicazione vecchia viene annullata',async()=>{
   const aggiornamenti=[],revocati=[];
   const source={updateImage:o=>aggiornamenti.push(o.url)};
-  let daChiamare=null;
   const ctx={map:{getSource:()=>source},console,setTimeout:fn=>fn(),
-   URL:{createObjectURL:b=>'blob:'+b.tag,revokeObjectURL:u=>revocati.push(u)},
-   rasterCanvas:{toBlob:(fn)=>{daChiamare=fn;},toDataURL:()=>'data:,x'},
-   rasterPublishToken:0,rasterObjectUrl:'',lastRasterSignature:'firma',
+   URL:{revokeObjectURL:u=>revocati.push(u)},
+   rasterPublishToken:2,rasterObjectUrl:'',lastRasterSignature:'firma',
    preparaDissolvenza:()=>null,ricordaRaster:()=>{},avviaDissolvenza:()=>{}};
   vm.createContext(ctx);vm.runInContext(implementation('publishWeatherRaster'),ctx);
-  ctx.publishWeatherRaster([[0,1],[1,1],[1,0],[0,0]]);
-  const primaCodifica=daChiamare;
-  ctx.publishWeatherRaster([[0,1],[1,1],[1,0],[0,0]]);
-  const secondaCodifica=daChiamare;
-  // La prima codifica termina per ultima: non deve arrivare sulla mappa.
-  secondaCodifica({tag:'nuovo'});primaCodifica({tag:'vecchio'});
+  const coords=[[0,1],[1,1],[1,0],[0,0]];
+  ctx.publishWeatherRaster(coords,2,'blob:nuovo',true);
+  ctx.publishWeatherRaster(coords,1,'blob:vecchio',true);
   assert.deepEqual(aggiornamenti,['blob:nuovo']);
   assert.deepEqual(revocati,['blob:vecchio']);
  });
@@ -149,13 +144,16 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
   vm.createContext(worker);vm.runInContext(blobs[0],worker);
   const value=vm.runInContext('wetBulbCelsius(20,100,1013.25)',worker);assert(Math.abs(value-20)<.001);
  });
- await test('warm frames reuse the exact raster pixels without computing or publishing during prewarm',()=>{
-  let computes=0,publishes=0,paints=0;
+ await test('warm frames encode once and reuse the same PNG without publishing during prewarm',()=>{
+  let computes=0,publishes=0,encodes=0;
+  const png=new Blob(['raster']);
   const ctx={console,currentIndex:0,catalog:Array(3).fill({}),activeLayer:'temp',selectedLevel:'surface',activeModel:'icon2i',
     weatherView:'forecast',mapLoaded:true,showFusion:false,show3D:false,useNearestCell:false,
     currentData:{meta:{nx:2,ny:2,lo1:10,la1:40,dx:1,dy:1,validTime:'test'},temp:new Float32Array([10,20,30,40])},
     window:{devicePixelRatio:1},weatherFrameEpoch:0,lastRasterSignature:'',terrainCoverageStamp:0,rasterRenderToken:0,pendingRasterCallback:null,pendingRenderReady:null,
-    weatherFrames:new FrameCache(1000000),rasterCanvas:{},rasterContext:{putImageData:()=>paints++},
+    weatherFrames:new FrameCache(1000000),stepResources:{generation:1},rasterPublishToken:0,
+    encodeWeatherFrame:(pixels,w,h,prewarm,done)=>{assert(prewarm);assert.equal(pixels[0],17);encodes++;done(png);},
+    URL:{createObjectURL:blob=>{assert.equal(blob,png);return 'blob:pronto';}},
     ImageData:class {constructor(p,w,h){this.data=p;}},isMobile:()=>false,
     RASTER_CONFIG:{padding:.2,maxDensityDesktop:1,pixelLimitDesktop:100},SNOW_STOPS:[],SNOW_WETBULB_SNOW:.5,SNOW_WETBULB_RAIN:1.5,
     activeLayerInfo:()=>({stops:[]}),usesUpperData:()=>false,usesStormData:()=>false,usesProbData:()=>false,usesProfileData:()=>false,
@@ -165,9 +163,9 @@ async function test(name,fn) {await fn();console.log('PASS '+name);}
   vm.createContext(ctx);
   vm.runInContext(implementation('commitRenderReady'),ctx);
   vm.runInContext(implementation('renderWeather'),ctx);
-  ctx.renderWeather(true);assert.equal(computes,1);assert.equal(publishes,0);assert.equal(paints,0);
+  ctx.renderWeather(true);assert.equal(computes,1);assert.equal(publishes,0);assert.equal(encodes,1);
   let commits=0;
-  ctx.renderWeather(false,()=>commits++);assert.equal(computes,1);assert.equal(publishes,1);assert.equal(paints,1);
+  ctx.renderWeather(false,()=>commits++);assert.equal(computes,1);assert.equal(publishes,1);assert.equal(encodes,1);
   assert.equal(commits,1,'il disegno dalla cache non commette il passo');
  });
  await test('satellite view clears overlays and restores the chosen field and forecast hour',()=>{
