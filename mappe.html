@@ -2898,7 +2898,7 @@
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
 
-    <script src="forecast-cache.js"></script>
+    <script src="forecast-cache.js?v=2"></script>
     <script src="point_bulletin.js"></script>
     <script src="local_downscaling.js"></script>
     <script>
@@ -3992,7 +3992,7 @@
 
       const rasterCanvas = document.createElement("canvas");
       rasterCanvas.width = 2; rasterCanvas.height = 2;
-      const rasterContext = rasterCanvas.getContext("2d");
+      
       const particleCanvas = document.getElementById("particle-canvas");
       const particleContext = particleCanvas.getContext("2d", { alpha: true });
       // Pioggia, neve e lampi animati sopra il campo delle precipitazioni.
@@ -4083,8 +4083,8 @@
       // fra terra e mare resta netta -- e' quella che dice dove finisce la
       // costa -- e sul fondo scuro i colori dei campi e le scie del vento
       // si accendono invece di sbiadire.
-      const MAP_LAND = "#1a2531";
-      const MAP_SEA = "#0d1824";
+      const MAP_LAND = "#263b45";
+      const MAP_SEA = "#102837";
       // L'inchiostro sopra la carta scura: coste, confini, regioni, fiumi.
       const MAP_COAST = "rgba(214,228,240,0.55)";
       const MAP_BORDER = "rgba(214,228,240,0.3)";
@@ -5588,6 +5588,7 @@
         try {
           await fetchStep(index);
           const kind = activeExtraKind(); if (kind) await fetchExtra(index,kind);
+          trimMobileSteps(currentIndex);
           updateBufferUi(); scheduleFrameWarmup();
         } catch (_) { prefetchFailures.set(index,Date.now()); updateBufferUi(); }
       }
@@ -5599,11 +5600,26 @@
         if (typeof requestIdleCallback === "function") requestIdleCallback(fn,{timeout:500});
         else setTimeout(fn,30);
       }
+      // Una scadenza decodificata contiene più griglie Float32. Sul telefono
+      // manteniamo in RAM l’ora visibile e le due adiacenti per lato.
+      function trimMobileSteps(center) {
+        if (!isMobile()) return;
+        for (const index of stepCache.keys()) {
+          if (Math.abs(index - center) <= 2 || explicitLoadInFlight) continue;
+          stepCache.delete(index);
+          if (catalog[index]) {
+            extraResources.values.delete(extraKey(index, "upper"));
+            extraResources.values.delete(extraKey(index, "storm"));
+          }
+        }
+      }
       function prefetchWholeRun(fromIndex) {
-        if (document.hidden) return;
-        const limit = navigator.connection && navigator.connection.saveData ? 1 : 3;
+        if (document.hidden || explicitLoadInFlight || deferredSliderIndex !== null) return;
+        trimMobileSteps(fromIndex);
+        const mobile = isMobile();
+        const limit = mobile || navigator.connection?.saveData ? 1 : 3;
         const kind = activeExtraKind();
-        const order = catalog.map((_,i)=>i).filter(i => !prefetchPending.has(i) && (!prefetchFailures.has(i) || Date.now()-prefetchFailures.get(i)>30000) &&
+        const order = catalog.map((_,i)=>i).filter(i => (!mobile || Math.abs(i - fromIndex) <= 2) && !prefetchPending.has(i) && (!prefetchFailures.has(i) || Date.now()-prefetchFailures.get(i)>30000) &&
           (!stepCache.has(i) || (kind && !extraResources.has(extraKey(i,kind)) && !(kind === "storm" && catalog[i].storm === false))))
           .sort((a,b)=>Math.abs(a-fromIndex)-Math.abs(b-fromIndex));
         while (prefetchActive < limit && order.length) {
@@ -5613,17 +5629,24 @@
       }
       // Fixed pump: scrubbing reprioritises the next free slot without duplicating requests.
       setInterval(function() { if (!document.hidden && catalog.length) prefetchWholeRun(currentIndex); },600);
+      function stepReady(index, kind) {
+        return stepCache.has(index) && (!kind || extraResources.has(extraKey(index, kind))
+          || (kind === "storm" && catalog[index].storm === false));
+      }
       function updateBufferUi() {
         const el = document.getElementById("timeline-buffer");
         const status = document.getElementById("buffer-status");
         if (!el || !catalog.length) return;
         const kind = activeExtraKind();
         let ready = 0;
-        el.replaceChildren(...catalog.map(function(_,i) {
-          const mark = document.createElement("i");
-          const cached = stepCache.has(i) && (!kind || extraResources.has(extraKey(i,kind)) || (kind === "storm" && catalog[i].storm === false));
-          mark.className = cached ? "ready" : ""; if(cached) ready++; return mark;
-        }));
+        if (el.childElementCount !== catalog.length) {
+          el.replaceChildren(...catalog.map(() => document.createElement("i")));
+        }
+        for (let i = 0; i < catalog.length; i++) {
+          const cached = stepReady(i, kind);
+          el.children[i].classList.toggle("ready", cached);
+          if (cached) ready++;
+        }
         status.textContent = ready === catalog.length ? "Sequenza scaricata" : "Sequenza " + ready + "/" + catalog.length;
       }
       function buildTimelineDays() {
@@ -5776,8 +5799,10 @@
       // fotogramma, sempre quello piu' recente.
       let pendingSliderIndex = null;
       let sliderFrameScheduled = false;
+      let deferredSliderIndex = null;
 
       function requestSliderStep(index) {
+        deferredSliderIndex = null;
         pendingSliderIndex = index;
         if (sliderFrameScheduled) return;
         sliderFrameScheduled = true;
@@ -5785,7 +5810,7 @@
           sliderFrameScheduled = false;
           const nextIndex = pendingSliderIndex;
           pendingSliderIndex = null;
-          loadStep(nextIndex);
+          if (nextIndex !== null) loadStep(nextIndex);
         });
       }
 
@@ -5793,9 +5818,9 @@
         if (!catalog[index]) return;
 
         const token = ++loadingToken;
-        ++rasterRenderToken; pendingRasterCallback = null; lastRasterSignature = "";
+        ++rasterPublishToken; ++rasterRenderToken; pendingRasterCallback = null; lastRasterSignature = "";
         if (!currentData) showLoading("Caricamento della previsione…");
-        else document.getElementById("buffer-status").textContent = "Preparazione ora selezionata…";
+        else if (!stepReady(index, activeExtraKind())) document.getElementById("buffer-status").textContent = "Preparazione ora selezionata…";
         explicitLoadInFlight = true;
 
         try {
@@ -11283,49 +11308,37 @@
         chiudiDissolvenza();
       }
 
-      function publishWeatherRaster(coordinates) {
-        const token = ++rasterPublishToken;
+      function publishWeatherRaster(coordinates, token, url, objectUrl) {
         const source = map.getSource("weather");
-        if (!source) return;
-
-        const update = function (url, objectUrl) {
-          if (token !== rasterPublishToken) {
-            if (objectUrl) URL.revokeObjectURL(url);
-            return;
-          }
-          try {
-            const dissolvenza = preparaDissolvenza();
-            source.updateImage({ url: url, coordinates: coordinates });
-            ricordaRaster(url, coordinates);
-            if (dissolvenza) avviaDissolvenza(dissolvenza);
-            if (rasterObjectUrl) {
-              const previousUrl = rasterObjectUrl;
-              setTimeout(function () { URL.revokeObjectURL(previousUrl); }, 1600);
-            }
-            rasterObjectUrl = objectUrl ? url : "";
-          } catch (error) {
-            if (objectUrl) URL.revokeObjectURL(url);
-            lastRasterSignature = "";
-            console.error("Aggiornamento raster non riuscito", error);
-          }
-        };
-
-        // toDataURL codifica milioni di pixel in base64 sul thread principale
-        // e causava blocchi visibili soprattutto su iPhone. toBlob è asincrono
-        // e l'URL binario evita anche la copia base64; il fallback copre i
-        // browser più vecchi.
-        if (typeof rasterCanvas.toBlob === "function" && typeof URL.createObjectURL === "function") {
-          rasterCanvas.toBlob(function (blob) {
-            if (!blob) {
-              lastRasterSignature = "";
-              return;
-            }
-            const url = URL.createObjectURL(blob);
-            update(url, true);
-          }, "image/png");
-        } else {
-          update(rasterCanvas.toDataURL("image/png"), false);
+        if (!source || token !== rasterPublishToken) {
+          if (objectUrl) URL.revokeObjectURL(url);
+          return;
         }
+        try {
+          const dissolvenza = preparaDissolvenza();
+          source.updateImage({ url: url, coordinates: coordinates });
+          ricordaRaster(url, coordinates);
+          if (dissolvenza) avviaDissolvenza(dissolvenza);
+          if (rasterObjectUrl) {
+            const previousUrl = rasterObjectUrl;
+            setTimeout(function () { URL.revokeObjectURL(previousUrl); }, 1600);
+          }
+          rasterObjectUrl = objectUrl ? url : "";
+        } catch (error) {
+          if (objectUrl) URL.revokeObjectURL(url);
+          lastRasterSignature = "";
+          console.error("Aggiornamento raster non riuscito", error);
+        }
+      }
+
+      const warmEncodingCanvas = document.createElement("canvas");
+      function encodeWeatherFrame(pixels, width, height, prewarm, done) {
+        const canvas = prewarm ? warmEncodingCanvas : rasterCanvas;
+        if (canvas.width !== width) canvas.width = width;
+        if (canvas.height !== height) canvas.height = height;
+        canvas.getContext("2d").putImageData(new ImageData(pixels, width, height), 0, 0);
+        if (canvas.toBlob) canvas.toBlob(done, "image/png");
+        else done(null);
       }
 
       // ---- QUOTA VERA DEL TERRENO: lettura diretta delle tessere DEM -------
@@ -12146,13 +12159,13 @@
         const cachedFrame = !showFusion && weatherFrames.get(renderSignature);
         if (cachedFrame && !prewarm) {
           ++rasterRenderToken; pendingRasterCallback = null;
-          rasterCanvas.width = cachedFrame.width; rasterCanvas.height = cachedFrame.height;
-          rasterContext.putImageData(new ImageData(cachedFrame.pixels,cachedFrame.width,cachedFrame.height),0,0);
-          publishWeatherRaster(cachedFrame.coordinates); lastRasterSignature = renderSignature;
+          lastRasterSignature = renderSignature;
+          publishWeatherRaster(cachedFrame.coordinates, ++rasterPublishToken,
+            URL.createObjectURL(cachedFrame.blob), true);
           commitRenderReady();
           return;
         }
-        if (!prewarm) lastRasterSignature = renderSignature;
+
 
         const rasterSamplerKind = useNearestCell || info.categorical
           ? "nearest"
@@ -12219,17 +12232,23 @@
           : null;
 
         const frameCoordinates = [[leftLongitude,topLatitude],[rightLongitude,topLatitude],[rightLongitude,bottomLatitude],[leftLongitude,bottomLatitude]];
+        const generation = stepResources.generation;
+        const cacheable = !showFusion;
         function finishRaster(pixels, elevationStat) {
-          if (epoch !== weatherFrameEpoch) return;
-          if (!showFusion) weatherFrames.set(renderSignature,{pixels:pixels,width:width,height:height,coordinates:frameCoordinates});
-          if (prewarm || weatherView !== "forecast") return;
-          rasterCanvas.width = width; rasterCanvas.height = height;
-          rasterContext.putImageData(new ImageData(pixels,width,height),0,0);
-          lastElevationStat = elevationStat || null;
-          updateDownscalingStatus();
-          publishWeatherRaster(frameCoordinates);
-          commitRenderReady();
-          scheduleFrameWarmup();
+          if (epoch !== weatherFrameEpoch || generation !== stepResources.generation) return;
+          const token = prewarm ? 0 : ++rasterPublishToken;
+          encodeWeatherFrame(pixels, width, height, prewarm, function(blob) {
+            if (generation !== stepResources.generation || epoch !== weatherFrameEpoch) return;
+            if (blob && cacheable) weatherFrames.set(renderSignature, {blob, coordinates: frameCoordinates});
+            if (prewarm || token !== rasterPublishToken || weatherView !== "forecast") return;
+            const url = blob ? URL.createObjectURL(blob) : rasterCanvas.toDataURL("image/png");
+            lastRasterSignature = renderSignature;
+            publishWeatherRaster(frameCoordinates, token, url, Boolean(blob));
+            lastElevationStat = elevationStat || null;
+            updateDownscalingStatus();
+            commitRenderReady();
+            scheduleFrameWarmup();
+          });
         }
 
         (prewarm ? dispatchWarmRaster : dispatchRasterFill)({
@@ -15301,6 +15320,10 @@
         const colore = colorFor(valore, info);
         return {
           testo: testo,
+          inchiostro: colore.slice(0, 3).map(function(channel) {
+            const value = channel / 255;
+            return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+          }).reduce((sum, value, i) => sum + value * [0.2126, 0.7152, 0.0722][i], 0) > 0.179 ? "#000" : "#fff",
           bordo: "rgb(" + Math.round(colore[0]) + "," + Math.round(colore[1]) + "," + Math.round(colore[2]) + ")"
         };
       }
@@ -15387,14 +15410,14 @@
           const point = map.project([place.lon, place.lat]);
           if (point.x < -40 || point.x > width + 40) continue;
           if (point.y < 92 || point.y > height - 96) continue;
-          const size = place.rank <= 1 ? 12.5 : place.rank <= 3 ? 11 : 10;
+          const size = place.rank <= 1 ? 14 : place.rank <= 3 ? 12.5 : 11.5;
           vectorContext.font = "700 " + size +
             "px system-ui, -apple-system, Segoe UI, sans-serif";
           const textWidth = vectorContext.measureText(place.name).width;
           const bollino = valoreBollino(place.lon, place.lat);
           let larghezzaBollino = 0;
           if (bollino) {
-            vectorContext.font = "700 11px system-ui, -apple-system, Segoe UI, sans-serif";
+            vectorContext.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
             larghezzaBollino = vectorContext.measureText(bollino.testo).width + 12;
             vectorContext.font = "700 " + size +
               "px system-ui, -apple-system, Segoe UI, sans-serif";
@@ -15432,13 +15455,13 @@
             vectorContext.beginPath();
             if (vectorContext.roundRect) vectorContext.roundRect(bx, by, larghezzaBollino, 18, 9);
             else vectorContext.rect(bx, by, larghezzaBollino, 18);
-            vectorContext.fillStyle = "rgba(12,20,30,0.86)";
+            vectorContext.fillStyle = bollino.bordo;
             vectorContext.fill();
             vectorContext.lineWidth = 1.6;
-            vectorContext.strokeStyle = bollino.bordo;
+            vectorContext.strokeStyle = "rgba(17,32,48,0.75)";
             vectorContext.stroke();
-            vectorContext.font = "700 11px system-ui, -apple-system, Segoe UI, sans-serif";
-            vectorContext.fillStyle = "#ffffff";
+            vectorContext.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
+            vectorContext.fillStyle = bollino.inchiostro;
             vectorContext.textAlign = "center";
             vectorContext.fillText(bollino.testo, bx + larghezzaBollino / 2, point.y + 0.5);
             vectorContext.textAlign = "left";
@@ -18151,7 +18174,25 @@
           return;
         }
         aggiornaTrattoPercorso();
-        requestSliderStep(Number(ui.slider.value));
+        if (isPlaying) setPlaying(false);
+        const index = Number(ui.slider.value);
+        if (!catalog[index]) return;
+        if (stepReady(index, activeExtraKind())) {
+          requestSliderStep(index);
+        } else {
+          // Il dito può attraversare molte ore fredde prima del rilascio.
+          pendingSliderIndex = null;
+          deferredSliderIndex = index;
+          ++loadingToken;
+          explicitLoadInFlight = false;
+          ui.slider.setAttribute("aria-valuetext", formatDateTime(parseCatalogDate(catalog[index])));
+        }
+      });
+
+      ui.slider.addEventListener("change", function () {
+        if (deferredSliderIndex !== null && !showSatelliteClouds && weatherView === "forecast") {
+          requestSliderStep(Number(ui.slider.value));
+        }
       });
 
       ui.playButton.addEventListener("click", function () {
