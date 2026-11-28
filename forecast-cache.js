@@ -18,6 +18,7 @@
       return request;
     }
   }
+  function frameBytes(frame) { return frame.blob ? frame.blob.size : frame.pixels.byteLength; }
   class FrameCache {
     constructor(budget) { this.budget = budget; this.bytes = 0; this.entries = new Map(); }
     get(key) {
@@ -27,13 +28,13 @@
     }
     has(key) { return this.entries.has(key); }
     set(key, frame) {
-      if (this.entries.has(key)) this.bytes -= this.entries.get(key).pixels.byteLength;
+      if (this.entries.has(key)) this.bytes -= frameBytes(this.entries.get(key));
       this.entries.delete(key);
-      if (frame.pixels.byteLength > this.budget) return;
-      this.entries.set(key, frame); this.bytes += frame.pixels.byteLength;
+      if (frameBytes(frame) > this.budget) return;
+      this.entries.set(key, frame); this.bytes += frameBytes(frame);
       while (this.bytes > this.budget) {
         const oldest = this.entries.keys().next().value;
-        this.bytes -= this.entries.get(oldest).pixels.byteLength;
+        this.bytes -= frameBytes(this.entries.get(oldest));
         this.entries.delete(oldest);
       }
     }
