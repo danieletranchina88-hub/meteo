@@ -445,7 +445,8 @@ prova('la pagina usa solo script pubblicati e non carica comandi con dati fittiz
     if (!src) continue;
     assert.equal(script[2].trim(), '', 'codice ignorato dentro uno script con src');
     if (/^https?:\/\//.test(src[1])) continue;
-    assert.ok(workflow.includes(src[1]), src[1] + ' assente dalla pubblicazione');
+    const file = src[1].split(/[?#]/, 1)[0];
+    assert.ok(file && workflow.includes(file), src[1] + ' assente dalla pubblicazione');
   }
   assert.doesNotMatch(html, /src="scientific-ui\.js"/,
     'la pagina carica una seconda timeline scollegata e tooltip casuali');
